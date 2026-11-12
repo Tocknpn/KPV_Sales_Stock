@@ -46,6 +46,9 @@ describe('foundation migration', () => {
     await ledger('MM-D01', 'opening_qty, retail_sale', [0, 2]);
     await db.exec(`alter table daily_stock_ledger enable trigger trg_ledger_guard_negative`);
     await db.query(`update daily_stock_ledger set counted_qty = 0 where desk_id = 'MM-D01'`);
+    await db.query(`update daily_stock_ledger set retail_sale = 1 where desk_id = 'MM-D01'`);
+    const r = await db.query<{ c: number }>(`select closing_qty as c from daily_stock_ledger where desk_id = 'MM-D01'`);
+    expect(r.rows[0].c).toBe(-1);
     await expectPgError(
       db.query(`update daily_stock_ledger set retail_sale = 3 where desk_id = 'MM-D01'`),
       'NEGATIVE_CLOSING',
@@ -74,6 +77,17 @@ describe('foundation migration', () => {
     );
     const r = await db.query<{ is_seed: boolean }>(`select is_seed from staff_accounts`);
     expect(r.rows[0].is_seed).toBe(true);
+  });
+
+  it('does not mark a ledger row seed because a seed staff member performed it', async () => {
+    await db.exec(`insert into staff_accounts (display_name, pin_hash, role, is_seed) values ('Test Admin','x','admin',true)`);
+    await desk('MM-D01');
+    await db.exec(
+      `insert into daily_stock_ledger (ledger_date, desk_id, branch_id, sku_id, opening_qty, performed_by)
+       select '${D}','MM-D01','B-MM','S1',1,id from staff_accounts where is_seed`,
+    );
+    const r = await db.query<{ is_seed: boolean }>(`select is_seed from daily_stock_ledger where desk_id='MM-D01'`);
+    expect(r.rows[0].is_seed).toBe(false);
   });
 
   it('Done lock allows deleting seed rows only while purging', async () => {

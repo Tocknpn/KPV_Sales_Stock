@@ -34,6 +34,12 @@ alter table audit_log           add column if not exists is_seed boolean not nul
 -- ---------------------------------------------------------------------------
 -- Seed inheritance: a new row is seed when any parent it references is seed.
 -- ---------------------------------------------------------------------------
+-- RULING: seed status flows only through branch, desk, sku, type, weight,
+-- document and staff_id (desk assignments) references. Do NOT add actor
+-- columns (performed_by, sent_by, received_by, created_by, decided_by,
+-- actor_id): a seed admin acting on a real branch would otherwise mark real
+-- rows as seed and a purge would delete them. audit_log.is_seed is set from
+-- the audited row (Task 3), not here.
 create or replace function kpv_inherit_seed() returns trigger
 language plpgsql as $$
 declare
@@ -47,8 +53,7 @@ declare
     ['type_id',      'sku_type',       'type_id'],
     ['weight_id',    'sku_weight',     'weight_id'],
     ['document_id',  'documents',      'id'],
-    ['staff_id',     'staff_accounts', 'id'],
-    ['actor_id',     'staff_accounts', 'id']
+    ['staff_id',     'staff_accounts', 'id']
   ];
   v text;
   hit boolean;
