@@ -2,7 +2,7 @@
 // Crypto (available natively in Workers) so no new dependency is needed
 // beyond hono.
 import type { Context, Next } from "hono";
-import type { Env, SessionUser, StaffAccount } from "./types";
+import type { Env, SessionUser, StaffAccount, StaffRole } from "./types";
 import { getStore } from "./store";
 import { isLive } from "./time";
 
@@ -78,7 +78,7 @@ function b64urlDecode(str: string) {
 
 interface TokenPayload {
   sub: string;
-  role: "staff" | "admin";
+  role: StaffRole;
   branchId: string | null;
   displayName: string;
   tokenVersion: number;
@@ -155,6 +155,19 @@ export async function requireAdmin(c: Context<{ Bindings: Env; Variables: { user
   const user = c.get("user");
   if (!user || user.role !== "admin") return c.json({ error: "Admin role required" }, 403);
   await next();
+}
+
+// Admin or branch manager. Managers are still limited to their own branch by
+// assertBranchAccess / requireDesk in the route.
+export async function requireManager(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, next: Next) {
+  const user = c.get("user");
+  if (!user || (user.role !== "admin" && user.role !== "manager")) return c.json({ error: "Manager or admin role required", code: "ROLE_DENIED" }, 403);
+  await next();
+}
+
+// True for a branch manager of exactly that branch.
+export function isManagerOf(user: SessionUser, branchId: string): boolean {
+  return user.role === "manager" && user.branchId !== null && user.branchId === branchId;
 }
 
 // Helper for routes that let staff act on their own branch (or any branch

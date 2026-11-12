@@ -40,6 +40,8 @@ export const DEMO_STAFF = {
   "B-IT": "11111111-0000-0000-0000-000000000004",
   "B-VT": "11111111-0000-0000-0000-000000000005",
 } as const;
+// One branch manager (Morning Market), PIN 5678.
+export const DEMO_MANAGER = { "B-MM": "11111111-0000-0000-0000-000000000006" } as const;
 
 function shiftDate(dateStr: string, days: number) {
   const d = new Date(`${dateStr}T00:00:00Z`);
@@ -83,15 +85,23 @@ function sku(
   };
 }
 
-// Demo PINs: Admin "9999" (all branches), each branch staff account "1234".
+// Demo PINs: Admin "9999" (all branches), each branch staff account "1234",
+// the Morning Market manager "5678".
 // Hashes precomputed with the pbkdf2 routine in src/auth.ts.
-function account(id: string, branch_id: string | null, display_name: string, pin_hash: string, created_at: string): StaffAccount {
+function account(
+  id: string,
+  branch_id: string | null,
+  display_name: string,
+  pin_hash: string,
+  created_at: string,
+  role: StaffAccount["role"] = branch_id ? "staff" : "admin"
+): StaffAccount {
   return {
     id,
     branch_id,
     display_name,
     pin_hash,
-    role: branch_id ? "staff" : "admin",
+    role,
     active: true,
     token_version: 0,
     failed_attempts: 0,
@@ -137,6 +147,7 @@ export function buildDemoData(today: string): DemoData {
     account(DEMO_STAFF["B-TS"], "B-TS", "Bounmy K.", "pbkdf2$100000$c7dbf04fcf343d0e37d4ed5eae7686a5$32d08f9b51e411c2888ca090837a53774162389bf23143e3d4e964d14d21ace5", startedAt),
     account(DEMO_STAFF["B-IT"], "B-IT", "Vilayphone N.", "pbkdf2$100000$25cc26e71c8f12edb467d813fabcb081$91c5af05b41c76bcd563d587af00a4ce04b4fdf87c468333b1f812c7a391984a", startedAt),
     account(DEMO_STAFF["B-VT"], "B-VT", "Khamla P.", "pbkdf2$100000$fc5f0bc2c09393ef3814d8fbff21b477$7246099325f4a7e9d7003bbb43f2a351b4d6908e9f04fef2ced496dc309aee88", startedAt),
+    account(DEMO_MANAGER["B-MM"], "B-MM", "Manivone M.", "pbkdf2$100000$a1b2c3d4e5f60718293a4b5c6d7e8f90$2efde50c6cbd8c79669882d0346318c69b15af97db7c12a05f6909d105efdfb6", startedAt, "manager"),
   ];
 
   const T = {

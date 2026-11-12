@@ -6,7 +6,7 @@
 //   VT-D01  in final count today
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEMO_STAFF } from "../src/demoData";
-import { TODAY, YESTERDAY, TOMORROW, freshApp, call, login, asAdmin, asStaff, on, closeDay, countEverything } from "./helpers";
+import { TODAY, YESTERDAY, TOMORROW, freshApp, call, login, asAdmin, asStaff, asManager, on, closeDay, countEverything } from "./helpers";
 
 beforeEach(freshApp);
 
@@ -249,7 +249,8 @@ describe("admin reopen", () => {
     const openingBefore = rowOf(await detailOf(staff, desk, TODAY), "BR-020").opening_qty;
 
     expect((await call(admin, "POST", `/stock/desk/${desk}/reopen`, { date: YESTERDAY, reason: "wrong count" })).status).toBe(200);
-    expect((await detailOf(admin, desk, YESTERDAY)).status).toBe("final_stock");
+    expect((await detailOf(admin, desk, YESTERDAY)).status).toBe("check_in");
+    expect((await call(admin, "POST", `/stock/desk/${desk}/transition`, { date: YESTERDAY, toStatus: "final_stock" })).status).toBe(200);
     await call(admin, "POST", `/stock/desk/${desk}/entries`, {
       date: YESTERDAY,
       rows: [{ sku_id: "BR-020", counted_qty: openingBefore - 2, counted_note: "recount" }],
@@ -441,5 +442,78 @@ describe("SKU master data", () => {
     await call(admin, "PATCH", "/sku-types/GOLD_BARS", { name_en: "Bars" });
     const bar = (await call(admin, "GET", "/skus")).json.skus.find((s: any) => s.sku_id === "GB-001");
     expect(bar.category).toBe("Bars");
+  });
+});
+
+describe("branch manager", () => {
+  it("sees only own branch", async () => {
+    const manager = await asManager("B-MM");
+    const cards = (await call(manager, "GET", "/stock/desks?branchId=B-TS")).json.desks;
+    expect(new Set(cards.map((d: any) => d.branch_id))).toEqual(new Set(["B-MM"]));
+    expect((await call(manager, "GET", `/stock/desk/TS-D01?date=${TODAY}`)).status).toBe(403);
+    const meta = (await call(manager, "GET", "/meta")).json;
+    expect(new Set(meta.desks.map((d: any) => d.branch_id))).toEqual(new Set(["B-MM"]));
+    expect(meta.user.role).toBe("manager");
+  });
+
+  it("reopens the latest Done day within 3 days with a reason", async () => {
+    const manager = await asManager("B-MM");
+    const desk = "MM-D02";
+    expect((await call(manager, "POST", `/stock/desk/${desk}/reopen`, { date: YESTERDAY })).json.code).toBe("REASON_REQUIRED");
+    expect((await call(manager, "POST", `/stock/desk/${desk}/reopen`, { date: YESTERDAY, reason: "wrong count" })).status).toBe(200);
+    expect((await detailOf(manager, desk, YESTERDAY)).status).toBe("check_in");
+    const log = (await call(await asAdmin(), "GET", "/audit")).json.entries;
+    expect(log.find((e: any) => e.action === "desk_day.reopen")).toMatchObject({ actor_name: "Manivone M." });
+  });
+
+  it("cannot reopen a day older than 3 days, or another branch", async () => {
+    // Ten days later, yesterday's Done day is far too old.
+    const late = await asManager("B-MM", "2026-11-22");
+    const old = await call(late, "POST", "/stock/desk/MM-D02/reopen", { date: YESTERDAY, reason: "too late" });
+    expect(old.status).toBe(403);
+    expect(old.json.code).toBe("REOPEN_TOO_OLD");
+    const manager = await asManager("B-MM");
+    expect((await call(manager, "POST", "/stock/desk/TS-D01/reopen", { date: YESTERDAY, reason: "other branch" })).status).toBe(403);
+  });
+
+  it("staff still cannot reopen; admin can reopen any age", async () => {
+    const staff = await asStaff("B-MM");
+    expect((await call(staff, "POST", "/stock/desk/MM-D02/reopen", { date: YESTERDAY, reason: "nope" })).status).toBe(403);
+    const admin = await asAdmin("2026-11-22");
+    expect((await call(admin, "POST", "/stock/desk/MM-D02/reopen", { date: YESTERDAY, reason: "old fix" })).status).toBe(200);
+  });
+
+  it("cannot create users or change master data", async () => {
+    const manager = await asManager("B-MM");
+    expect((await call(manager, "POST", "/users", { displayName: "X", branchId: "B-MM", pin: "1111" })).status).toBe(403);
+    expect((await call(manager, "PATCH", `/users/${DEMO_STAFF["B-MM"]}`, { pin: "1111" })).status).toBe(403);
+    expect((await call(manager, "PATCH", "/skus/GB-001", { active: false })).status).toBe(403);
+    expect((await call(manager, "GET", "/audit")).status).toBe(403);
+  });
+
+  it("can unlock own-branch staff but nothing else about them", async () => {
+    const manager = await asManager("B-MM");
+    const id = DEMO_STAFF["B-MM"];
+    for (let i = 0; i < 5; i++) await call(null, "POST", "/auth/login", { accountId: id, pin: "0000" });
+    expect((await call(null, "POST", "/auth/login", { accountId: id, pin: "1234" })).status).toBe(423);
+    expect((await call(manager, "PATCH", `/users/${id}`, { pin: "1111" })).status).toBe(403);
+    expect((await call(manager, "PATCH", `/users/${id}`, { unlock: true, active: false })).status).toBe(403);
+    expect((await call(manager, "PATCH", `/users/${id}`, { unlock: true })).status).toBe(200);
+    expect((await call(null, "POST", "/auth/login", { accountId: id, pin: "1234" })).status).toBe(200);
+    // another branch's staff are out of reach
+    expect((await call(manager, "PATCH", `/users/${DEMO_STAFF["B-TS"]}`, { unlock: true })).status).toBe(403);
+  });
+
+  it("admin can create a manager; a manager without a branch is refused", async () => {
+    const admin = await asAdmin();
+    const bad = await call(admin, "POST", "/users", { displayName: "Boss", role: "manager", pin: "2222" });
+    expect(bad.status).toBe(400);
+    expect(bad.json.code).toBe("BAD_BRANCH");
+    const ok = await call(admin, "POST", "/users", { displayName: "Boss", role: "manager", branchId: "B-TS", pin: "2222" });
+    expect(ok.status).toBe(200);
+    const session = await login(ok.json.id, "2222");
+    expect((await call(session, "GET", "/auth/me")).json.user.role).toBe("manager");
+    const summary = (await call(admin, "GET", "/settings/summary")).json.staff;
+    expect(summary.roleCounts.manager).toBe(2);
   });
 });

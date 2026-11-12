@@ -1,7 +1,7 @@
 // Drives the real Hono app against a fresh in-memory demo store.
 import app from "../src/index";
 import { resetDemoStore } from "../src/store";
-import { DEMO_ADMIN_ID, DEMO_STAFF } from "../src/demoData";
+import { DEMO_ADMIN_ID, DEMO_MANAGER, DEMO_STAFF } from "../src/demoData";
 
 export const TODAY = "2026-11-12";
 export const YESTERDAY = "2026-11-11";
@@ -43,6 +43,7 @@ export async function login(accountId: string, pin: string, date = TODAY): Promi
 
 export const asAdmin = (date = TODAY) => login(DEMO_ADMIN_ID, "9999", date);
 export const asStaff = (branch: keyof typeof DEMO_STAFF, date = TODAY) => login(DEMO_STAFF[branch], "1234", date);
+export const asManager = (branch: keyof typeof DEMO_MANAGER = "B-MM", date = TODAY) => login(DEMO_MANAGER[branch], "5678", date);
 export const on = (session: Session, date: string): Session => ({ ...session, date });
 
 // Fills in every count (= calculated closing) so a desk day can be closed.

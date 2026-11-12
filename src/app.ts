@@ -33,10 +33,10 @@ export async function readBody(c: Ctx): Promise<Record<string, any>> {
   return body && typeof body === "object" && !Array.isArray(body) ? body : {};
 }
 
-// Staff logins only ever see their own branch; admins see whatever branchId
+// Staff and branch managers only ever see their own branch; admins see whatever branchId
 // (or none, for "all branches") they ask for.
 export function scopeBranch(user: SessionUser, requestedBranchId: string | undefined) {
-  return user.role === "staff" ? user.branchId ?? undefined : requestedBranchId;
+  return user.role !== "admin" ? user.branchId ?? undefined : requestedBranchId;
 }
 
 // Loads a desk and enforces that the user may act on its branch.

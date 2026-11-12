@@ -4,7 +4,7 @@
 // Mounted behind requireAuth in src/index.ts.
 import { storeFor, newRouter, readBody, HttpError, audit } from "../app";
 import type { NewSku, Store } from "../store";
-import { requireAdmin, hashPin, isValidPin } from "../auth";
+import { requireAdmin, requireManager, hashPin, isValidPin, isManagerOf } from "../auth";
 import { isLive } from "../time";
 import { skuSummary, staffAccountSummary } from "../logic";
 import type { MasterSku, SkuType, SkuWeight } from "../types";
@@ -264,7 +264,7 @@ r.get("/settings/summary", async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
   const [skus, staffAccounts, branches, config] = await Promise.all([store.skus(), store.staffAccounts(), store.branches(), store.config()]);
-  const scoped = user.role === "staff" ? staffAccounts.filter((a) => a.branch_id === user.branchId) : staffAccounts;
+  const scoped = user.role !== "admin" ? staffAccounts.filter((a) => a.branch_id === user.branchId) : staffAccounts;
   return c.json({
     sku: skuSummary(skus),
     staff: staffAccountSummary(scoped, branches, new Date().toISOString()),
@@ -339,23 +339,30 @@ r.post("/users", requireAdmin, async (c) => {
   const store = storeFor(c);
   const body = await readBody(c);
   const display_name = String(body.displayName ?? "").trim();
-  const role = body.role === "admin" ? "admin" : "staff";
+  const role = body.role === "admin" ? "admin" : body.role === "manager" ? "manager" : "staff";
   const branch_id = role === "admin" ? null : String(body.branchId ?? "");
   if (!display_name) throw new HttpError(400, "Name is required", "BAD_USER");
   if (!isValidPin(body.pin)) throw new HttpError(400, "PIN must be exactly 4 digits", "BAD_PIN");
-  if (role === "staff" && !(await store.branches()).some((b) => b.branch_id === branch_id)) throw new HttpError(400, "Choose a branch", "BAD_BRANCH");
+  if (role !== "admin" && !(await store.branches()).some((b) => b.branch_id === branch_id)) throw new HttpError(400, "Choose a branch", "BAD_BRANCH");
   const account = await store.createStaffAccount({ display_name: display_name.slice(0, 60), role, branch_id, pin_hash: await hashPin(body.pin) });
   await audit(store, c.get("user"), "user.create", account.display_name, { id: account.id, role, branch_id });
   return c.json({ id: account.id });
 });
 
-r.patch("/users/:id", requireAdmin, async (c) => {
+r.patch("/users/:id", requireManager, async (c) => {
   const store = storeFor(c);
   const me = c.get("user");
   const body = await readBody(c);
   const accounts = await store.staffAccounts();
   const account = accounts.find((a) => a.id === (c.req.param("id") ?? ""));
   if (!account) throw new HttpError(404, "User not found", "NOT_FOUND");
+  // A manager may only unlock staff of their own branch; nothing else.
+  if (me.role === "manager") {
+    const onlyUnlock = Object.keys(body).every((k) => k === "unlock") && body.unlock === true;
+    if (account.role !== "staff" || !isManagerOf(me, account.branch_id ?? "") || !onlyUnlock) {
+      throw new HttpError(403, "A manager can only unlock staff of their own branch", "ROLE_DENIED");
+    }
+  }
 
   const patch: Record<string, unknown> = {};
   const changes: string[] = [];
@@ -365,7 +372,7 @@ r.patch("/users/:id", requireAdmin, async (c) => {
     patch.display_name = name.slice(0, 60);
     changes.push("name");
   }
-  if (body.branchId !== undefined && account.role === "staff") {
+  if (body.branchId !== undefined && account.role !== "admin") {
     if (!(await store.branches()).some((b) => b.branch_id === body.branchId)) throw new HttpError(400, "Unknown branch", "BAD_BRANCH");
     patch.branch_id = body.branchId;
     changes.push("branch");

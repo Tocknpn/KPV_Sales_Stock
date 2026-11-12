@@ -109,7 +109,7 @@ export type LedgerEntryPatch = Partial<
   Pick<LedgerRow, "stock_in" | "retail_sale" | "wholesale" | "destock" | "destock_note" | "counted_qty" | "counted_note" | "performed_by" | "excluded" | "opening_qty">
 >;
 
-export type StaffRole = "staff" | "admin";
+export type StaffRole = "staff" | "manager" | "admin";
 
 // Server/store-side shape — includes pin_hash. Never sent to the client.
 export interface StaffAccount {

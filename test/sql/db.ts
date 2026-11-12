@@ -41,7 +41,10 @@ export async function freshDb(opts: FreshDbOptions = {}): Promise<PGlite> {
     }
   }
 
-  if (opts.withRoles && existsSync(join(SUPABASE_DIR, 'users_roles.sql'))) {
+  if (opts.withRoles) {
+    if (!existsSync(join(SUPABASE_DIR, 'users_roles.sql'))) {
+      throw new Error('withRoles: supabase/users_roles.sql is missing');
+    }
     await db.exec(readSql('users_roles.sql'));
   }
   if (opts.withBase) await db.exec(readSql('base.sql'));

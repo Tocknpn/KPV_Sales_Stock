@@ -3,13 +3,22 @@
 import { storeFor, newRouter, readBody, HttpError, scopeBranch, requireDesk, requireDate, assertDateWritable, getDay, requireOpenDay, audit } from "../app";
 import type { Ctx } from "../app";
 import type { Store, LedgerRowPatch, NewLedgerRow } from "../store";
-import { requireAdmin, assertBranchAccess } from "../auth";
-import { businessDate, datesInMonth, isValidMonth } from "../time";
+import { requireManager, assertBranchAccess, isManagerOf } from "../auth";
+import { addDays, businessDate, datesInMonth, isValidMonth } from "../time";
 import { buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, parseQty, validateDeskDay } from "../logic";
 import type { DeskDay, LedgerRow, SessionUser } from "../types";
 
 // Mounted behind requireAuth in src/index.ts.
 const r = newRouter();
+
+// A branch manager may reopen a Done day of their own branch up to this many
+// days back; an admin has no limit.
+export const MANAGER_REOPEN_DAYS = 3;
+const withinManagerWindow = (date: string, today: string) => date >= addDays(today, -MANAGER_REOPEN_DAYS);
+
+function mayReopen(user: SessionUser, branchId: string, date: string, today: string) {
+  return user.role === "admin" || (isManagerOf(user, branchId) && withinManagerWindow(date, today));
+}
 
 function hasActivity(row: LedgerRow) {
   return (
@@ -158,7 +167,7 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
     today: businessDate(c.env),
     // The very first day of a desk: starting stock may still be typed in.
     isFirstDay: Boolean(day) && earlier.length === 0,
-    canReopen: user.role === "admin" && day?.status === "done" && laterDone.length === 0,
+    canReopen: mayReopen(user, desk.branch_id, date, businessDate(c.env)) && day?.status === "done" && laterDone.length === 0,
     incoming: incoming
       .filter((t) => t.sent_date <= date)
       .map((t) => ({ id: t.id, kind: t.kind, sku_id: t.sku_id, name_en: skuName(t.sku_id), qty: t.qty, from: deskName(t.from_desk_id), sent_date: t.sent_date })),
@@ -325,15 +334,20 @@ r.post("/stock/desk/:deskId/transition", async (c) => {
   return c.json({ ok: true });
 });
 
-// Admin only: unlock the desk's most recent Done day so it can be corrected.
-r.post("/stock/desk/:deskId/reopen", requireAdmin, async (c) => {
+// Admin, or a manager of the desk's branch for a recent day: unlock the desk's
+// most recent Done day so it can be corrected. It goes back to check-in.
+r.post("/stock/desk/:deskId/reopen", requireManager, async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
-  const date = requireDate(body.date, businessDate(c.env));
+  const today = businessDate(c.env);
+  const date = requireDate(body.date, today);
   const reason = String(body.reason ?? "").trim();
   if (reason.length < 3) throw new HttpError(400, "A reason is required to reopen a day", "REASON_REQUIRED");
   const desk = await requireDesk(store, user, c.req.param("deskId"));
+  if (!mayReopen(user, desk.branch_id, date, today)) {
+    throw new HttpError(403, `A manager can reopen a day up to ${MANAGER_REOPEN_DAYS} days back. Ask an admin.`, "REOPEN_TOO_OLD");
+  }
   const day = await getDay(store, desk.desk_id, date);
   if (!day || day.status !== "done") throw new HttpError(409, "Only a Done day can be reopened", "NOT_DONE");
   const [laterDone] = await store.deskDays({ deskId: desk.desk_id, after: date, status: "done", limit: 1 });
@@ -342,7 +356,7 @@ r.post("/stock/desk/:deskId/reopen", requireAdmin, async (c) => {
       laterDate: laterDone.ledger_date,
     });
   }
-  const updated = await store.updateDeskDay(desk.desk_id, date, { status: "final_stock", done_by: null, done_at: null }, "done");
+  const updated = await store.updateDeskDay(desk.desk_id, date, { status: "check_in", done_by: null, done_at: null }, "done");
   if (!updated) throw new HttpError(409, "This desk was changed on another device — reload", "STALE");
   await audit(store, user, "desk_day.reopen", `${desk.desk_id}/${date}`, { reason });
   return c.json({ ok: true });

@@ -64,7 +64,7 @@ r.get("/meta", requireAuth, async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
   const [branches, desks, config] = await Promise.all([store.branches(), store.desks(), store.config()]);
-  const mine = <T extends { branch_id: string }>(rows: T[]) => (user.role === "staff" ? rows.filter((x) => x.branch_id === user.branchId) : rows);
+  const mine = <T extends { branch_id: string }>(rows: T[]) => (user.role !== "admin" ? rows.filter((x) => x.branch_id === user.branchId) : rows);
   return c.json({ branches: mine(branches), desks: mine(desks), config, today: businessDate(c.env), live: isLive(c.env), user });
 });
 
