@@ -272,7 +272,12 @@ export function buildDeskDetail(
     // For the "Closed 18:42 by Noy" banner and the "Changed by Noy" conflict prompt.
     closed_at: day?.done_at ?? null,
     closed_by_name: day?.done_by ? staffById.get(day.done_by)?.display_name ?? null : null,
-    actors: Object.fromEntries(staffAccounts.map((s) => [s.id, s.display_name])),
+    // Only people who touched this desk's day, not every account company-wide.
+    actors: Object.fromEntries(
+      [...new Set([...ledgerRows.map((r) => r.performed_by), day?.done_by, day?.checked_in_by])]
+        .filter((id): id is string => Boolean(id) && staffById.has(id as string))
+        .map((id) => [id, staffById.get(id)!.display_name])
+    ),
     rows,
     totals: {
       pcs: totals.pcs,

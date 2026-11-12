@@ -206,7 +206,7 @@ function refreshTotals() {
   el.innerHTML = `
     <span class="min-w-0 truncate font-extrabold tabular-nums text-gray-900">${fmtInt(pcs)} pcs · ${fmtBaht(baht, 2)} Baht</span>
     <span class="flex shrink-0 items-center gap-2 text-xs font-semibold">
-      ${S.saveState ? `<span class="text-gray-600" role="status">${S.saveState === "saving" ? t("day.saving") : t("day.saved")}</span>` : ""}
+      ${S.saveState ? `<span class="text-gray-600" role="status">${S.saveState === "saving" ? t("day.saving") : S.saveState === "offline" ? `<b class="text-danger">${t("day.offline")}</b>` : t("day.saved")}</span>` : ""}
       ${low ? `<span class="font-extrabold text-danger">■ ${tf("day.lowCount", { n: low })}</span>` : ""}
     </span>`;
 }
@@ -235,6 +235,7 @@ function renderScreen() {
 
   const screen = $("#day-screen");
   screen.addEventListener("click", onClick);
+  screen.addEventListener("pointerdown", onPointerDown);
   screen.addEventListener("change", onChange);
   screen.addEventListener("input", onInput);
 }
@@ -390,7 +391,21 @@ function renderFooter() {
 // ---------------------------------------------------------------------------
 function onClick(e) {
   const btn = e.target.closest("[data-act]");
-  if (btn) onAction(btn.dataset.act, btn);
+  if (!btn) return;
+  // "✓ matches" runs on pointerdown (see onPointerDown); only a keyboard
+  // activation (click with no pointer, detail 0) comes through here.
+  if (btn.dataset.act === "match" && e.detail !== 0) return;
+  onAction(btn.dataset.act, btn);
+}
+
+// A focused count input fires change on blur, which re-renders the card and
+// would swallow the click. Acting on pointerdown, without moving focus, keeps
+// the first tap.
+function onPointerDown(e) {
+  const btn = e.target.closest('[data-act="match"]');
+  if (!btn || btn.disabled) return;
+  e.preventDefault();
+  onAction("match", btn);
 }
 
 function onAction(act, btn) {
@@ -503,6 +518,7 @@ async function closeDay() {
   try {
     await screen.queue.flushAll();
     const problems = findProblems(screen.rows);
+    if (screen.queue.hasUnsaved()) return toast(t("day.unsaved"), "error");
     if (problems.size) return showProblems(problems);
     const closingToday = screen.date === state.meta.today;
     if (closingToday && isBeforeStockCutoff() && !window.confirm(t("stock.earlySubmitConfirm"))) return;

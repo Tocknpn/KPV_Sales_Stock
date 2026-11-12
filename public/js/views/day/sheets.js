@@ -120,6 +120,7 @@ function openQtySheet(ctx, skuId, { title, fields, extra = "", focus, onMount: e
     {
       title: `${escapeHtml(skuName(row))} · ${title}`,
       onMount: (body) => {
+        body.__row = row;
         const refresh = () => {
           fields.forEach((f) => {
             const input = body.querySelector(`[data-stepper="${f.field}"] [data-input]`);

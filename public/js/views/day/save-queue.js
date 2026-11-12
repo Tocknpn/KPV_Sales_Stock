@@ -32,7 +32,13 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
   const pending = new Map();
   /** skuId -> promise of the request in flight (requests per SKU stay in order) */
   const inflight = new Map();
+  /** "skuId|field" -> number of requests carrying that field that have not finished */
+  const flying = new Map();
+  /** SKUs whose last request died without an answer: the server may or may not have applied it */
+  const unsynced = new Set();
   let busy = 0;
+  let offline = false;
+  const RETRY_MS = 5000;
 
   const begin = () => {
     busy++;
@@ -40,8 +46,40 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
   };
   const end = () => {
     busy--;
-    if (busy === 0 && pending.size === 0) onStatus?.("saved");
+    if (busy === 0 && pending.size === 0 && !offline) onStatus?.("saved");
   };
+  const fly = (skuId, fields, d) =>
+    fields.forEach((f) => {
+      const k = `${skuId}|${f}`;
+      const n = (flying.get(k) ?? 0) + d;
+      if (n > 0) flying.set(k, n);
+      else flying.delete(k);
+    });
+
+  // No HTTP status = the request never got an answer (offline, dropped).
+  const isNetworkError = (err) => err.status === undefined || err.status === null;
+
+  // Put unsent changes back in the queue (keeping anything newer) and retry later.
+  function requeue(skuId, entries) {
+    unsynced.add(skuId);
+    offline = true;
+    onStatus?.("offline");
+    let entry = pending.get(skuId);
+    if (!entry) {
+      entry = { timer: null, fields: new Map() };
+      pending.set(skuId, entry);
+    }
+    for (const [field, e] of entries) if (!entry.fields.has(field)) entry.fields.set(field, e);
+    clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => send(skuId), RETRY_MS);
+  }
+
+  // Reads the row from the server so the next change compares against the truth.
+  async function resync(skuId) {
+    const detail = await api.deskDetail(deskId, date);
+    const row = detail.rows.find((r) => r.sku_id === skuId);
+    if (row) onStored(skuId, row);
+  }
 
   // `cb` is the caller's own handler for this field; returning true means it
   // showed the result itself, otherwise the shared fallback handles it.
@@ -62,6 +100,11 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
       if (row) onStored(skuId, row);
       entries.forEach(([, e]) => report(e.cb, { ok: true }));
     } catch (err) {
+      if (isNetworkError(err)) {
+        // Do not revert and do not guess: the server may have applied it.
+        requeue(skuId, entries);
+        return;
+      }
       if (err.code === "ROW_CHANGED" && err.data?.row) {
         const cur = err.data.row;
         onStored(skuId, cur);
@@ -111,7 +154,18 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
     begin();
     // `from` is read when the request actually goes out, so taps made while an
     // earlier request was in flight compare against what that request saved.
-    const run = (inflight.get(skuId) ?? Promise.resolve()).then(() => {
+    fly(skuId, queued.map(([f]) => f), 1);
+    const run = (inflight.get(skuId) ?? Promise.resolve()).then(async () => {
+      if (unsynced.has(skuId)) {
+        try {
+          await resync(skuId);
+          unsynced.delete(skuId);
+          offline = unsynced.size > 0;
+        } catch {
+          requeue(skuId, queued);
+          return;
+        }
+      }
       const stored = getStored(skuId);
       const entries = queued
         .map(([field, e]) => [field, { ...e, from: stored[field] }])
@@ -119,6 +173,7 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
       return entries.length ? attempt(skuId, entries, false) : undefined;
     });
     const tracked = run.finally(() => {
+      fly(skuId, queued.map(([f]) => f), -1);
       if (inflight.get(skuId) === tracked) inflight.delete(skuId);
       end();
     });
@@ -160,8 +215,15 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
       }
     },
 
+    // True while a newer value for this field is queued, or a later request
+    // carrying it is still on its way: a server answer must not overwrite it.
     isPending(skuId, field) {
-      return pending.get(skuId)?.fields.has(field) ?? false;
+      return (pending.get(skuId)?.fields.has(field) ?? false) || (flying.get(`${skuId}|${field}`) ?? 0) > 1;
+    },
+
+    /** True while anything is unsent, in flight, or waiting for the network. */
+    hasUnsaved() {
+      return pending.size > 0 || inflight.size > 0 || unsynced.size > 0;
     },
 
     /** Sends everything buffered and waits for all requests to finish. */
