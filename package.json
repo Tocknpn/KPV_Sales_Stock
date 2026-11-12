@@ -11,6 +11,7 @@
     "deploy": "npm run build:css && wrangler deploy",
     "cf-typegen": "wrangler types",
     "test": "vitest run",
+    "test:sql": "vitest run test/sql",
     "typecheck": "tsc --noEmit",
     "db:sql": "node .wrangler/gen-sql.mjs",
     "db:admin": "node .wrangler/gen-sql.mjs admin",
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261023.1",
+    "@electric-sql/pglite": "0.5.16",
     "tailwindcss": "^3.4.13",
     "typescript": "^5.6.2",
     "vitest": "^3.2.7",
