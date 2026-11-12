@@ -34,7 +34,7 @@ export async function freshDb(opts: FreshDbOptions = {}): Promise<PGlite> {
   const migDir = join(SUPABASE_DIR, 'migrations');
   if (existsSync(migDir)) {
     const stop = opts.upTo?.replace(/\.sql$/, '');
-    const files = readdirSync(migDir).filter((f) => f.endsWith('.sql')).sort();
+    const files = readdirSync(migDir).filter((f: string) => f.endsWith('.sql')).sort();
     for (const f of files) {
       if (stop && f.replace(/\.sql$/, '') > stop) break;
       await db.exec(readSql('migrations', f));
