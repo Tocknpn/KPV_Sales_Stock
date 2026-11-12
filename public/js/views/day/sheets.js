@@ -28,12 +28,14 @@ function stepperHtml(field, label, value) {
 }
 
 // Wires a group of steppers. Changing one calls change(field, to, kind).
-function wireSteppers(body, change) {
+// The next value is based on the row's value, never on what the input shows:
+// on iOS a tapped button keeps focus off the input, so the input can lag.
+function wireSteppers(body, get, change) {
   body.querySelectorAll("[data-stepper]").forEach((box) => {
     const field = box.dataset.stepper;
     const input = box.querySelector("[data-input]");
     box.querySelectorAll("[data-step]").forEach((btn) =>
-      btn.addEventListener("click", () => change(field, clampQty(Number(input.value || 0) + Number(btn.dataset.step)), "step"))
+      btn.addEventListener("click", () => change(field, clampQty(get(field) + Number(btn.dataset.step)), "step"))
     );
     input.addEventListener("input", () => {
       input.value = input.value.replace(/\D/g, "").slice(0, 5);
@@ -121,7 +123,7 @@ function openQtySheet(ctx, skuId, { title, fields, extra = "", focus, onMount: e
         const refresh = () => {
           fields.forEach((f) => {
             const input = body.querySelector(`[data-stepper="${f.field}"] [data-input]`);
-            if (input && document.activeElement !== input) input.value = row[f.field];
+            if (input) input.value = row[f.field];
           });
           body.querySelector("[data-closing]").textContent = closingOf(row);
           extraMount?.refresh?.(body);
@@ -165,7 +167,7 @@ function openQtySheet(ctx, skuId, { title, fields, extra = "", focus, onMount: e
           ctx.queue.set(skuId, field, to, { kind, cb: handle(field) });
         };
 
-        wireSteppers(body, change);
+        wireSteppers(body, (field) => row[field], change);
         body.querySelector("[data-done]").addEventListener("click", () => {
           document.activeElement?.blur?.();
           closeSheet();
@@ -190,6 +192,21 @@ export function openInSheet(ctx, skuId) {
   });
 }
 
+// Destock needs a reason: mark the field and hold the Done button until it is filled.
+function validateReason(body, typed) {
+  const note = body.querySelector("[data-reason]");
+  const done = body.querySelector("[data-done]");
+  if (!note || !done) return;
+  const row = body.__row;
+  const text = typed !== undefined ? typed : note.value;
+  const invalid = row.destock > 0 && !text.trim();
+  note.setAttribute("aria-invalid", String(invalid));
+  note.classList.toggle("bg-danger-bg", invalid);
+  note.classList.toggle("ring-2", invalid);
+  note.classList.toggle("ring-danger", invalid);
+  done.disabled = invalid;
+}
+
 export function openOutSheet(ctx, skuId) {
   const row = ctx.row(skuId);
   openQtySheet(ctx, skuId, {
@@ -210,9 +227,12 @@ export function openOutSheet(ctx, skuId) {
     onMount: {
       refresh(body) {
         body.querySelector("[data-out-total]").textContent = outOf(row);
+        validateReason(body);
       },
       mount(body, { handle }) {
         const note = body.querySelector("[data-reason]");
+        note.addEventListener("input", () => validateReason(body, note.value));
+        validateReason(body);
         const commit = () => {
           const to = note.value.trim() || null;
           if (to === (row.destock_note ?? null)) return;
