@@ -151,4 +151,19 @@ describe('undo_move', () => {
     expect(await undo(first.ticket_id, REF2)).toMatchObject({ ok: false, code: 'DEST_DAY_LOCKED' });
     expect(await undo('00000000-0000-0000-0000-0000000000ff', REF3)).toMatchObject({ ok: false, code: 'NOT_FOUND' });
   });
+
+  it('a second undo of the same ticket is refused, and a unique index backs it', async () => {
+    const first = await move([{ sku_id: 'S1', qty: 2 }]);
+    expect((await undo(first.ticket_id, REF2)).ok).toBe(true);
+    expect(await undo(first.ticket_id, REF3)).toMatchObject({ ok: false, code: 'ALREADY_UNDONE' });
+    // bypass undo_move's own pre-check: the check under the lock still refuses
+    const direct = await db.query<{ r: any }>(
+      `select kpv_move_stock($1::date, 'MM-D02', 'MM-D01', '[{"sku_id":"S1","qty":2}]'::jsonb, $2::uuid, null, $3::uuid) as r`,
+      [D, REF3, first.ticket_id],
+    );
+    expect(direct.rows[0].r).toMatchObject({ ok: false, code: 'ALREADY_UNDONE' });
+    const idx = await db.query<any>(`select indexdef from pg_indexes where indexname = 'uq_transfers_reverses'`);
+    expect(idx.rows[0].indexdef).toContain('UNIQUE');
+    expect(await transferCount()).toBe(2);
+  });
 });

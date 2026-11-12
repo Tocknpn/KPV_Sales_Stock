@@ -3,6 +3,7 @@
 // MM-D02 finished yesterday and has not been checked in today.
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEMO_STAFF } from "../src/demoData";
+import { getStore } from "../src/store";
 import { TODAY, YESTERDAY, freshApp, call, asAdmin, asStaff } from "./helpers";
 
 beforeEach(freshApp);
@@ -167,5 +168,27 @@ describe("moves", () => {
     expect(ledger.filter((e: any) => e.op === "INSERT" && e.desk_id === "MM-D02")).toHaveLength(2);
     expect(transfers).toHaveLength(2);
     for (const e of entries) expect(e.actor_id).toBe(DEMO_STAFF["B-MM"]);
+  });
+});
+
+describe("carry-forward racing a move", () => {
+  it("a row created by a move before carry-forward inserts still gets its carried opening", async () => {
+    const store = getStore({ DEMO_DATE: TODAY } as any, { system: "test" } as any);
+    const yesterday = await store.ledger({ date: YESTERDAY, deskId: "MM-D02" });
+    const nk = yesterday.find((r) => r.sku_id === "NK-011")!;
+    const carried = nk.counted_qty ?? nk.closing_qty;
+    expect(carried).toBeGreaterThan(0);
+    const key = { ledger_date: TODAY, desk_id: "MM-D02", sku_id: "NK-011" };
+    await store.insertDeskDay({ desk_id: "MM-D02", ledger_date: TODAY, branch_id: "B-MM", checked_in_by: DEMO_STAFF["B-MM"] });
+    // the move got there first: opening 0, one piece moved in
+    await store.insertLedgerRows([{ ...key, branch_id: "B-MM", opening_qty: 0, performed_by: DEMO_STAFF["B-MM"] }]);
+    await store.ledgerAdd(key, "transfer_in", 1, DEMO_STAFF["B-MM"]);
+    // plain inserts leave the row alone
+    await store.insertLedgerRows([{ ...key, branch_id: "B-MM", opening_qty: carried, performed_by: DEMO_STAFF["B-MM"] }]);
+    expect((await store.ledger({ date: TODAY, deskId: "MM-D02" })).find((r) => r.sku_id === "NK-011")!.opening_qty).toBe(0);
+    // carry-forward overwrites the opening and keeps transfer_in
+    await store.insertLedgerRows([{ ...key, branch_id: "B-MM", opening_qty: carried, performed_by: DEMO_STAFF["B-MM"] }], { overwriteOpening: true });
+    const row = (await store.ledger({ date: TODAY, deskId: "MM-D02" })).find((r) => r.sku_id === "NK-011")!;
+    expect(row).toMatchObject({ opening_qty: carried, transfer_in: 1, closing_qty: carried + 1 });
   });
 });

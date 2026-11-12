@@ -146,7 +146,9 @@ export interface Store {
   // Ledger rows of each desk's most recent day.
   ledgerLatest(filter: { branchId?: string; deskId?: string }): Promise<LedgerRow[]>;
   // Existing rows are left untouched.
-  insertLedgerRows(rows: NewLedgerRow[]): Promise<LedgerRow[]>;
+  // `overwriteOpening` (carry-forward only) sets opening_qty on rows that already exist, so a
+  // row created meanwhile (e.g. by a move) still gets its carried opening.
+  insertLedgerRows(rows: NewLedgerRow[], opts?: { overwriteOpening?: boolean }): Promise<LedgerRow[]>;
   // Changes only the fields present on each patch. Throws DAY_LOCKED when the
   // desk day is Done.
   patchLedgerRows(patches: LedgerRowPatch[]): Promise<LedgerRow[]>;
@@ -434,12 +436,22 @@ export class DemoStore implements Store {
   private findRow(key: LedgerKey) {
     return this.db.ledger.find((r) => r.ledger_date === key.ledger_date && r.desk_id === key.desk_id && r.sku_id === key.sku_id);
   }
-  async insertLedgerRows(rows: NewLedgerRow[]) {
+  async insertLedgerRows(rows: NewLedgerRow[], opts?: { overwriteOpening?: boolean }) {
     this.guard();
     const out: LedgerRow[] = [];
     for (const r of rows) {
       this.assertUnlocked(r.desk_id, r.ledger_date);
-      if (this.findRow(r)) continue;
+      const existing = this.findRow(r);
+      if (existing) {
+        if (opts?.overwriteOpening && existing.opening_qty !== r.opening_qty) {
+          const before = { ...existing };
+          existing.opening_qty = r.opening_qty;
+          existing.closing_qty = computeClosing(existing);
+          existing.updated_at = this.now();
+          this.log("daily_stock_ledger", "UPDATE", before, existing);
+        }
+        continue;
+      }
       if (r.opening_qty < 0) throw new StoreError("NEGATIVE", `${r.desk_id} ${r.sku_id}: opening cannot be negative`);
       const now = this.now();
       const row: LedgerRow = {
@@ -975,11 +987,13 @@ class SupabaseStore implements Store {
     const q = ["select=*", ...this.dateFilters(filter), "order=desk_id,sku_id"];
     return this.restAll<LedgerRow>(`ledger_latest?${q.join("&")}`);
   }
-  async insertLedgerRows(rows: NewLedgerRow[]) {
+  async insertLedgerRows(rows: NewLedgerRow[], opts?: { overwriteOpening?: boolean }) {
     if (rows.length === 0) return [];
+    // merge-duplicates writes only the payload columns: opening_qty (and the key / branch / actor).
+    const merge = opts?.overwriteOpening === true;
     return this.rest<LedgerRow[]>("daily_stock_ledger?on_conflict=ledger_date,desk_id,sku_id", {
       method: "POST",
-      headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+      headers: { Prefer: `resolution=${merge ? "merge-duplicates" : "ignore-duplicates"},return=representation` },
       body: JSON.stringify(rows),
     });
   }

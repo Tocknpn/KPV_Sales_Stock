@@ -52,7 +52,7 @@ async function carryForward(store: Store, from: DeskDay, toDate: string, actor: 
     if (!target) inserts.push({ ...key, opening_qty: opening, performed_by: actor });
     else if (target.opening_qty !== opening) patches.push({ ...key, opening_qty: opening });
   }
-  await store.insertLedgerRows(inserts);
+  await store.insertLedgerRows(inserts, { overwriteOpening: true });
   await store.patchLedgerRows(patches);
 }
 

@@ -16,7 +16,8 @@ begin
 end $$;
 
 create index if not exists idx_transfers_ticket on transfers(ticket_id);
-create index if not exists idx_transfers_reverses on transfers(reverses_id);
+-- One reversal per original row, even when two undos race.
+create unique index if not exists uq_transfers_reverses on transfers(reverses_id) where reverses_id is not null;
 
 -- ---------------------------------------------------------------------------
 -- Shared body. p_reverses is the ticket being undone (null for a normal move).
@@ -82,10 +83,24 @@ begin
     select desk_id, status from desk_days
      where ledger_date = p_date and desk_id in (p_from, p_to)
      order by desk_id
-     for update
+     for no key update
   loop
     if v_day.desk_id = p_from then v_from_status := v_day.status; else v_to_status := v_day.status; end if;
   end loop;
+  -- Re-check under the lock: a request that lost a race replays or is refused
+  -- cleanly instead of failing on the unique indexes.
+  if p_client_ref is not null then
+    select ticket_id into v_ticket from transfers where client_ref = p_client_ref;
+    if found then
+      select coalesce(jsonb_agg(to_jsonb(t) order by t.created_at, t.sku_id), '[]'::jsonb) into v_moves
+        from transfers t where t.ticket_id = v_ticket;
+      return jsonb_build_object('ok', true, 'ticket_id', v_ticket, 'replayed', true, 'moves', v_moves);
+    end if;
+  end if;
+  if p_reverses is not null
+     and exists (select 1 from transfers where reverses_id in (select id from transfers where ticket_id = p_reverses)) then
+    return jsonb_build_object('ok', false, 'code', 'ALREADY_UNDONE');
+  end if;
   if v_from_status is null then
     return jsonb_build_object('ok', false, 'code', 'NOT_CHECKED_IN');
   end if;
