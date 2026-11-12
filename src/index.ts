@@ -26,7 +26,7 @@ app.route("/api", insightRoutes);
 app.route("/api", settingsRoutes);
 app.route("/api", caseRoutes);
 
-const STORE_STATUS = { DAY_LOCKED: 423, CONFLICT: 409, INVALID: 400, UNAVAILABLE: 503, NEGATIVE: 409, AUDIT_ACTOR_MISSING: 500 } as const;
+const STORE_STATUS = { DAY_LOCKED: 423, CONFLICT: 409, INVALID: 400, UNAVAILABLE: 503, NEGATIVE: 409, AUDIT_ACTOR_MISSING: 500, DENIED: 403, IMMUTABLE: 409 } as const;
 
 app.onError((err, c) => {
   if (err instanceof HttpError) {
@@ -40,6 +40,10 @@ app.onError((err, c) => {
         ? "The database cannot be reached. Try again."
         : err.code === "NEGATIVE"
         ? "This would make the stock negative"
+        : err.code === "DENIED"
+        ? "You are not allowed to do that"
+        : err.code === "IMMUTABLE"
+        ? "An assignment can only be ended, never rewritten"
         : err.code === "CONFLICT"
         ? "That already exists or was changed on another device"
         : "The database rejected that value";
@@ -47,7 +51,7 @@ app.onError((err, c) => {
     return c.json(
       {
         error: message,
-        code: err.code === "NEGATIVE" ? "NEGATIVE_CLOSING" : err.code,
+        code: err.code === "NEGATIVE" ? "NEGATIVE_CLOSING" : err.code === "DENIED" ? "ROLE_DENIED" : err.code === "IMMUTABLE" ? "ASSIGNMENT_IMMUTABLE" : err.code,
         ...(err.code === "NEGATIVE" && err.available !== undefined ? { available: err.available } : {}),
       },
       STORE_STATUS[err.code]

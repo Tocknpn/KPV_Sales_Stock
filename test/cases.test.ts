@@ -1,12 +1,16 @@
 // Branch closed days and case assignment with handover history.
 // Demo data: B-MM has cases MM-D01 and MM-D02, staff Somchai (DEMO_STAFF), Noy (DEMO_STAFF_MM2)
 // and manager Manivone. No assignments exist at the start.
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEMO_STAFF, DEMO_STAFF_MM2, DEMO_MANAGER } from "../src/demoData";
-import { getStore } from "../src/store";
+import { DemoStore, StoreError, getStore } from "../src/store";
 import { freshApp, call, asAdmin, asStaff, asManager } from "./helpers";
 
 beforeEach(freshApp);
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 const SOMCHAI = DEMO_STAFF["B-MM"];
 const NOY = DEMO_STAFF_MM2;
@@ -176,5 +180,50 @@ describe("case assignment", () => {
     await assign(await asManager("B-MM"), "MM-D01", NOY);
     const db = (getStore({} as any) as any).db;
     expect(db.audit.some((e: any) => e.action === "insert:desk_assignment")).toBe(true);
+  });
+});
+
+describe("database refusals", () => {
+  const live = { SUPABASE_URL: "https://x.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "k" } as any;
+  const stubFetch = (body: string) =>
+    vi.stubGlobal("fetch", async () => new Response(body, { status: 400, headers: { "Content-Type": "application/json" } }));
+
+  it("SupabaseStore turns ROLE_DENIED and ASSIGNMENT_IMMUTABLE into store errors, not a 500", async () => {
+    const store = getStore(live, { id: SOMCHAI });
+    stubFetch('{"code":"P0001","message":"ROLE_DENIED: only the holder or a manager can end an assignment"}');
+    await expect(store.releaseDesk("MM-D01")).rejects.toMatchObject({ code: "DENIED" });
+    await expect(store.assignDesk("MM-D01", SOMCHAI)).rejects.toBeInstanceOf(StoreError);
+    stubFetch('{"code":"P0001","message":"ASSIGNMENT_IMMUTABLE: an assignment can only be ended, never rewritten"}');
+    await expect(store.releaseDesk("MM-D01")).rejects.toMatchObject({ code: "IMMUTABLE" });
+  });
+
+  it("a staff race loser (database ROLE_DENIED) gets 403 NOT_HOLDER", async () => {
+    vi.spyOn(DemoStore.prototype, "assignDesk").mockRejectedValue(new StoreError("DENIED", "ROLE_DENIED"));
+    const res = await assign(await asStaff("B-MM"), "MM-D02", SOMCHAI);
+    expect(res.status).toBe(403);
+    expect(res.json.code).toBe("NOT_HOLDER");
+    vi.spyOn(DemoStore.prototype, "releaseDesk").mockRejectedValue(new StoreError("DENIED", "ROLE_DENIED"));
+    const rel = await call(await asStaff("B-MM"), "POST", "/desks/MM-D02/release");
+    expect(rel.status).toBe(403);
+    expect(rel.json.code).toBe("NOT_HOLDER");
+  });
+
+  it("DemoStore mirrors the guard: a staff actor cannot take another holder's case", async () => {
+    await assign(await asManager("B-MM"), "MM-D01", NOY);
+    const store = getStore({} as any, { id: SOMCHAI });
+    await expect(store.assignDesk("MM-D01", SOMCHAI)).rejects.toMatchObject({ code: "DENIED" });
+    await expect(store.releaseDesk("MM-D01")).rejects.toMatchObject({ code: "DENIED" });
+    expect(await store.activeAssignments({ branchId: "B-MM" })).toHaveLength(1);
+  });
+
+  it("any other route maps DENIED to 403 ROLE_DENIED and IMMUTABLE to 409, with a clean message", async () => {
+    vi.spyOn(DemoStore.prototype, "addClosedDays").mockRejectedValue(new StoreError("DENIED", "ROLE_DENIED: raw postgrest body"));
+    const denied = await call(await asManager("B-MM"), "POST", "/closed-days", { branchId: "B-MM", date: "2026-12-25", reason: "x" });
+    expect(denied.status).toBe(403);
+    expect(denied.json).toMatchObject({ code: "ROLE_DENIED", error: "You are not allowed to do that" });
+    vi.spyOn(DemoStore.prototype, "assignDesk").mockRejectedValue(new StoreError("IMMUTABLE", "raw"));
+    const frozen = await assign(await asManager("B-MM"), "MM-D01", NOY);
+    expect(frozen.status).toBe(409);
+    expect(frozen.json.code).toBe("ASSIGNMENT_IMMUTABLE");
   });
 });

@@ -6,6 +6,7 @@
 import { storeFor, newRouter, readBody, HttpError, scopeBranch, requireDesk } from "../app";
 import { requireManager, isManagerOf } from "../auth";
 import { isValidDate } from "../time";
+import { StoreError } from "../store";
 import type { ClosedDay } from "../types";
 
 const r = newRouter();
@@ -64,6 +65,11 @@ r.delete("/closed-days", requireManager, async (c) => {
 // ---------------------------------------------------------------------------
 // Assignment
 // ---------------------------------------------------------------------------
+function notHolder(err: unknown): never {
+  if (err instanceof StoreError && err.code === "DENIED") throw new HttpError(403, "Only the person holding this case can do that", "NOT_HOLDER");
+  throw err;
+}
+
 const holderOf = async (store: ReturnType<typeof storeFor>, deskId: string, branchId: string) =>
   (await store.activeAssignments({ branchId })).find((a) => a.desk_id === deskId);
 
@@ -85,7 +91,9 @@ r.post("/desks/:id/assign", async (c) => {
     if (!mayAct) throw new HttpError(403, "Only the person holding this case can hand it over", "NOT_HOLDER");
   }
   const note = body.note ? String(body.note).trim().slice(0, 200) || undefined : undefined;
-  return c.json({ assignment: await store.assignDesk(desk.desk_id, staffId, note) });
+  // A race with another tablet (the holder changed since the check above) is refused by the database guard.
+  const assignment = await store.assignDesk(desk.desk_id, staffId, note).catch(notHolder);
+  return c.json({ assignment });
 });
 
 r.post("/desks/:id/release", async (c) => {
@@ -96,7 +104,7 @@ r.post("/desks/:id/release", async (c) => {
     const current = await holderOf(store, desk.desk_id, desk.branch_id);
     if (current && current.staff_id !== user.accountId) throw new HttpError(403, "Only the person holding this case can release it", "NOT_HOLDER");
   }
-  await store.releaseDesk(desk.desk_id);
+  await store.releaseDesk(desk.desk_id).catch(notHolder);
   return c.json({ ok: true });
 });
 

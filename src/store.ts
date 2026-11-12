@@ -31,7 +31,7 @@ import { computeClosing } from "./logic";
 import { actorHeaders, type Actor } from "./actor";
 import { auditEntry, type AuditOp } from "./audit";
 
-export type StoreErrorCode = "DAY_LOCKED" | "CONFLICT" | "INVALID" | "UNAVAILABLE" | "NEGATIVE" | "AUDIT_ACTOR_MISSING";
+export type StoreErrorCode = "DAY_LOCKED" | "CONFLICT" | "INVALID" | "UNAVAILABLE" | "NEGATIVE" | "AUDIT_ACTOR_MISSING" | "DENIED" | "IMMUTABLE";
 
 // Errors the routes can turn into a meaningful HTTP status.
 export class StoreError extends Error {
@@ -846,6 +846,15 @@ export class DemoStore implements Store {
   private actorId() {
     return this.actor && "id" in this.actor ? this.actor.id : null;
   }
+  // Mirrors guard_desk_assignment for staff: a case may be taken for oneself when
+  // free, and handed over or released only by its holder.
+  private assertMayChangeAssignment(current: DeskAssignment | undefined, newStaffId: string | null) {
+    const id = this.actorId();
+    const me = id ? this.db.staffAccounts.find((a) => a.id === id) : undefined;
+    if (me?.role !== "staff") return;
+    const ok = current ? current.staff_id === me.id : newStaffId === me.id;
+    if (!ok) throw new StoreError("DENIED", "ROLE_DENIED");
+  }
   private endAssignment(a: DeskAssignment) {
     const before = { ...a };
     a.ended_at = this.now();
@@ -866,8 +875,9 @@ export class DemoStore implements Store {
     const current = this.db.assignments.find((a) => a.desk_id === deskId && a.ended_at === null);
     if (current) {
       if (current.staff_id === staffId) return current;
-      this.endAssignment(current);
     }
+    this.assertMayChangeAssignment(current, staffId);
+    if (current) this.endAssignment(current);
     const row: DeskAssignment = {
       id: crypto.randomUUID(),
       desk_id: deskId,
@@ -886,7 +896,9 @@ export class DemoStore implements Store {
   async releaseDesk(deskId: string) {
     this.guard();
     const current = this.db.assignments.find((a) => a.desk_id === deskId && a.ended_at === null);
-    if (current) this.endAssignment(current);
+    if (!current) return;
+    this.assertMayChangeAssignment(current, null);
+    this.endAssignment(current);
   }
 
   async audit(entry: Omit<AuditEntry, "id" | "created_at">) {
@@ -936,6 +948,9 @@ class SupabaseStore implements Store {
         throw new StoreError("NEGATIVE", "This would make the stock negative", Number.isFinite(available) ? Math.max(available, 0) : undefined);
       }
       if (body.includes("AUDIT_ACTOR_MISSING")) throw new StoreError("AUDIT_ACTOR_MISSING", "A write needs an acting user or system tag");
+      // Database role guards (every guard raises ROLE_DENIED) and the assignment history rule.
+      if (body.includes("ROLE_DENIED")) throw new StoreError("DENIED", "That action is not allowed for this user");
+      if (body.includes("ASSIGNMENT_IMMUTABLE")) throw new StoreError("IMMUTABLE", "An assignment can only be ended, never rewritten");
       if (/ASSIGN_(INACTIVE|OTHER_BRANCH)|DESK_NOT_FOUND/.test(body)) throw new StoreError("INVALID", body);
       if (body.includes("FUTURE_DATE")) throw new StoreError("INVALID", "That date is after today");
       const pgCode = /"code"\s*:\s*"([A-Za-z0-9]+)"/.exec(body)?.[1] ?? "";

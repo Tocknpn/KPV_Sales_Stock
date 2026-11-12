@@ -165,6 +165,7 @@ declare
   v_row desk_assignment := case when tg_op = 'DELETE' then old else new end;
   v_branch text;
   a record;
+  st record;
   v_held boolean;
 begin
   select branch_id into v_branch from desks where desk_id = v_row.desk_id;
@@ -174,9 +175,26 @@ begin
     return old;
   end if;
 
-  if tg_op = 'UPDATE' and (new.desk_id <> old.desk_id or new.staff_id <> old.staff_id
-      or new.started_at <> old.started_at or new.started_by is distinct from old.started_by) then
-    raise exception 'ASSIGNMENT_IMMUTABLE: only ended_at, ended_by and note may change' using errcode = 'P0001';
+  -- History is never rewritten: an active row may only be ended (ended_at and
+  -- ended_by set); an ended row never changes again.
+  if tg_op = 'UPDATE' and (
+        new.id <> old.id or new.desk_id <> old.desk_id or new.staff_id <> old.staff_id
+     or new.started_at <> old.started_at or new.started_by is distinct from old.started_by
+     or new.note is distinct from old.note or new.is_seed <> old.is_seed
+     or (old.ended_at is not null and (new.ended_at is distinct from old.ended_at or new.ended_by is distinct from old.ended_by))
+     or (new.ended_at is null and new.ended_by is not null)) then
+    raise exception 'ASSIGNMENT_IMMUTABLE: an assignment can only be ended, never rewritten' using errcode = 'P0001';
+  end if;
+
+  -- Same branch and active, whoever inserts (the RPC checks too; this is the backstop).
+  if tg_op = 'INSERT' then
+    select * into st from staff_accounts where id = new.staff_id;
+    if not found or not st.active then
+      raise exception 'ASSIGN_INACTIVE: that staff account is not active' using errcode = 'P0001';
+    end if;
+    if st.branch_id is distinct from v_branch then
+      raise exception 'ASSIGN_OTHER_BRANCH: staff and case belong to different branches' using errcode = 'P0001';
+    end if;
   end if;
 
   if kpv_actor_id() is null then

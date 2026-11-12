@@ -173,3 +173,39 @@ describe('branch_closed_day', () => {
     await db.query(`delete from branch_closed_day`);
   });
 });
+
+describe('desk_assignment table guards', () => {
+  const insertRow = (desk: string, staff: string) =>
+    db.query(`insert into desk_assignment (desk_id, staff_id) values ($1, $2)`, [desk, staff]);
+
+  it('a direct insert refuses another branch and an inactive staff member', async () => {
+    await asActor(db, admin);
+    await expectPgError(insertRow('MM-D01', tom), 'ASSIGN_OTHER_BRANCH');
+    await db.query(`update staff_accounts set active = false where id = $1`, [ann]);
+    await expectPgError(insertRow('MM-D01', ann), 'ASSIGN_INACTIVE');
+  });
+
+  it('history cannot be rewritten', async () => {
+    await asActor(db, mgrMM);
+    await assign('MM-D01', noy, 'first');
+    await assign('MM-D01', ann);
+    const upd = (set: string, params: unknown[] = []) =>
+      db.query(`update desk_assignment set ${set} where desk_id = 'MM-D01' and staff_id = $1`, [noy, ...params]);
+    // ended row: ended_* frozen, no reopening
+    await expectPgError(upd(`ended_at = null`), 'ASSIGNMENT_IMMUTABLE');
+    await expectPgError(upd(`ended_by = null`), 'ASSIGNMENT_IMMUTABLE');
+    await expectPgError(upd(`ended_at = now() + interval '1 hour'`), 'ASSIGNMENT_IMMUTABLE');
+    // other columns
+    await expectPgError(upd(`note = 'edited'`), 'ASSIGNMENT_IMMUTABLE');
+    await expectPgError(upd(`is_seed = true`), 'ASSIGNMENT_IMMUTABLE');
+    await expectPgError(upd(`id = gen_random_uuid()`), 'ASSIGNMENT_IMMUTABLE');
+    await expectPgError(upd(`desk_id = 'MM-D02'`), 'ASSIGNMENT_IMMUTABLE');
+    await expectPgError(upd(`staff_id = '${ann}'`), 'ASSIGNMENT_IMMUTABLE');
+    await expectPgError(upd(`started_at = now() - interval '1 day'`), 'ASSIGNMENT_IMMUTABLE');
+    await expectPgError(upd(`started_by = null`), 'ASSIGNMENT_IMMUTABLE');
+    // active row: note frozen, ended_by without ended_at refused
+    const act = (set: string) => db.query(`update desk_assignment set ${set} where desk_id = 'MM-D01' and ended_at is null`);
+    await expectPgError(act(`note = 'edited'`), 'ASSIGNMENT_IMMUTABLE');
+    await expectPgError(act(`ended_by = '${admin}'`), 'ASSIGNMENT_IMMUTABLE');
+  });
+});
