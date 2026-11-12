@@ -4,6 +4,22 @@
 import type { Context, Next } from "hono";
 import type { Env, SessionUser, StaffAccount } from "./types";
 import { getStore } from "./store";
+import { isLive } from "./time";
+
+// The token-signing secret. A live deployment must set AUTH_SECRET; only the
+// in-memory demo may fall back to a fixed development value.
+export function authSecret(env: Env): string {
+  if (env.AUTH_SECRET) return env.AUTH_SECRET;
+  if (isLive(env)) throw new Error("AUTH_SECRET is not set — refusing to sign or verify sessions");
+  return "dev-insecure-secret";
+}
+
+export const MAX_FAILED_PINS = 5;
+export const LOCK_MINUTES = 15;
+
+export function isValidPin(pin: unknown): pin is string {
+  return typeof pin === "string" && /^[0-9]{4}$/.test(pin);
+}
 
 const PBKDF2_ITERATIONS = 100_000;
 
@@ -116,7 +132,7 @@ export async function requireAuth(c: Context<{ Bindings: Env; Variables: { user:
   const header = c.req.header("Authorization") || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
   if (!token) return c.json({ error: "Login required" }, 401);
-  const payload = await verifyToken(token, c.env.AUTH_SECRET || "dev-insecure-secret");
+  const payload = await verifyToken(token, authSecret(c.env));
   if (!payload) return c.json({ error: "Session expired, please log in again" }, 401);
 
   const store = getStore(c.env);

@@ -10,7 +10,9 @@
     "dev": "npm run build:css && wrangler dev",
     "deploy": "npm run build:css && wrangler deploy",
     "cf-typegen": "wrangler types",
-    "db:push": "echo 'Run: supabase db execute -f supabase/schema.sql  (or paste into the Supabase SQL editor)'"
+    "db:push": "echo Run supabase/schema.sql then supabase/base.sql in the Supabase SQL editor",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "hono": "^4.6.0"
@@ -19,6 +21,7 @@
     "@cloudflare/workers-types": "^5.20261023.1",
     "tailwindcss": "^3.4.13",
     "typescript": "^5.6.2",
+    "vitest": "^3.2.7",
     "wrangler": "^4.0.0"
   }
 }

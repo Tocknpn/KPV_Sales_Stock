@@ -14,15 +14,11 @@ export interface Desk {
   created_at: string;
 }
 
-// Legacy fixed set, still seeded as the starting Types — kept only as a
-// reference; master_sku.category is now a free-text mirror of sku_type.name_en
-// (see SkuType below) since admins can add Types beyond this original list.
+// master_sku.category is a free-text mirror of sku_type.name_en, kept so
+// grouping code can read one column without joining.
 export type SkuCategory = string;
-export type SkuStatus = "in_stock" | "low_stock" | "depleted";
 
-// Editable product grouping ("Gold Bar", "Jewelry", ...) — reporting/dashboard
-// grouping + icon. Seeded from the old fixed SkuCategory list; admins can add,
-// rename, or deactivate from here on.
+// Editable product grouping ("Gold Bar", "Jewelry", ...).
 export interface SkuType {
   type_id: string;
   name_en: string;
@@ -54,20 +50,32 @@ export interface MasterSku {
   baht_weight: number | null;
   unit_cost_lak: number;
   unit_price_lak: number;
+  // Fallback low-stock level, used only while avg_daily_sales is not filled in.
   reorder_level: number;
-  // Per-SKU run-rate inputs driving "Order lead time and avg. RR setting".
-  // null = not yet filled in by the user.
+  // Per-SKU run-rate inputs. null = not yet filled in by the admin.
   avg_daily_sales: number | null;
   order_lead_time_days: number | null;
   active: boolean;
-  status: SkuStatus;
-  is_desk_item: boolean;
   icon: string;
 }
 
 export type DeskStatus = "check_in" | "final_stock" | "done";
-// Derived-only value for a desk/date with no ledger rows yet. Never stored.
+// "not_started" = no desk_days row for that desk/date. Never stored.
 export type CardStatus = DeskStatus | "not_started";
+
+// One row per desk per business date: the single place a day's status lives.
+export interface DeskDay {
+  desk_id: string;
+  ledger_date: string;
+  branch_id: string;
+  status: DeskStatus;
+  safe_drop_note: string | null;
+  checked_in_by: string | null;
+  done_by: string | null;
+  done_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface LedgerRow {
   id: string;
@@ -77,25 +85,29 @@ export interface LedgerRow {
   sku_id: string;
   opening_qty: number;
   stock_in: number;
+  // Credited only by a confirmed incoming transfer/move — never typed by staff.
+  transfer_in: number;
   retail_sale: number;
   wholesale: number;
   transfer_out: number;
   destock: number;
   destock_note: string | null;
   move: number;
+  // Computed by the database (generated column) / DemoStore — never written.
   closing_qty: number;
-  closing_gram: number;
-  closing_baht: number;
   counted_qty: number | null;
   counted_note: string | null;
   performed_by: string | null;
   excluded: boolean;
-  audit_verified: boolean;
-  desk_status: DeskStatus;
-  safe_drop_note: string | null;
   created_at: string;
   updated_at: string;
 }
+
+// Fields a route may change on a ledger row. transfer_in / transfer_out / move
+// are absent on purpose: they only change through Store.ledgerAdd.
+export type LedgerEntryPatch = Partial<
+  Pick<LedgerRow, "stock_in" | "retail_sale" | "wholesale" | "destock" | "destock_note" | "counted_qty" | "counted_note" | "performed_by" | "excluded" | "opening_qty">
+>;
 
 export type StaffRole = "staff" | "admin";
 
@@ -111,14 +123,6 @@ export interface StaffAccount {
   failed_attempts: number;
   locked_until: string | null;
   created_at: string;
-}
-
-// The only staff-account shape ever sent to the client (login picker etc).
-export interface PublicStaffAccount {
-  id: string;
-  branch_id: string | null;
-  display_name: string;
-  role: StaffRole;
 }
 
 // Verified-session identity, set on the Hono context by the auth middleware.
@@ -139,6 +143,9 @@ export interface DocumentRow {
   note: string | null;
 }
 
+export type DocumentKind = "document" | "proposal";
+export type ProposalStatus = "pending" | "approved" | "rejected";
+
 export interface DocumentRecord {
   id: string;
   doc_no: string;
@@ -149,39 +156,60 @@ export interface DocumentRecord {
   doc_date: string;
   created_at: string;
   notes: string | null;
+  kind: DocumentKind;
+  // Only proposals carry a status; ordinary documents stay null.
+  status: ProposalStatus | null;
+  decided_by: string | null;
+  decided_at: string | null;
   rows?: DocumentRow[];
 }
 
 export interface SystemConfig {
   id: 1;
   safety_buffer_days: number;
-  auto_draft_po: boolean;
-  sync_interval_min: number;
   spot_lak_per_baht: number;
   usd_to_lak_rate: number;
-  last_synced_at: string;
+  updated_at: string;
 }
 
-export interface PortfolioSnapshot {
-  snapshot_date: string;
-  total_baht_gold: number;
-  total_pcs: number;
-  usd_value: number;
-  lak_value: number;
-  audit_balanced_pct: number;
+export type TransferKind = "transfer" | "move";
+export type TransferStatus = "in_transit" | "received" | "cancelled";
+
+// A linked Transfer-out (any branch) or Move (same branch) between two desks.
+export interface Transfer {
+  id: string;
+  kind: TransferKind;
+  from_desk_id: string;
+  from_branch_id: string;
+  to_desk_id: string;
+  to_branch_id: string;
+  sku_id: string;
+  qty: number;
+  sent_date: string;
+  sent_by: string | null;
+  status: TransferStatus;
+  received_date: string | null;
+  received_by: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
-export interface BranchTarget {
-  branch_id: string;
-  current_baht: number;
-  target_baht: number;
-  health_state: "Optimal" | "Restock Needed" | "Alert";
+export interface AuditEntry {
+  id: string;
+  actor_id: string | null;
+  actor_name: string;
+  action: string;
+  target: string;
+  detail: Record<string, unknown> | null;
+  created_at: string;
 }
 
 export interface Env {
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
   AUTH_SECRET?: string;
+  // Demo/test only: pins "today" so the demo dataset and tests are stable.
+  // Ignored when Supabase is configured.
   DEMO_DATE?: string;
   APP_VERSION?: string;
   BUILD_DATE?: string;
