@@ -17,13 +17,13 @@ import {
   tf,
   openInSheet,
   openOutSheet,
-  openMoveSheet,
   openCountNoteSheet,
   openSafeDropSheet,
   openReopenSheet,
   openConflictSheet,
   openRemoveItemSheet,
 } from "./sheets.js";
+import { openMoveSheet } from "./move-sheet.js";
 
 const STOCK_CUTOFF_HOUR = 15;
 const STOCK_CUTOFF_MINUTE = 30;
@@ -420,7 +420,19 @@ function onAction(act, btn) {
     case "out":
       return openOutSheet(S.ctx, sku);
     case "move":
-      return openMoveSheet(S.ctx, sku);
+      return (async () => {
+        const ctx = S.ctx;
+        await ctx.queue.flushAll();
+        openMoveSheet({
+          desk: ctx.deskCard,
+          date: ctx.date,
+          detail: ctx.detail,
+          rows: ctx.rows(),
+          hooks: ctx.hooks,
+          onDone: () => ctx.hooks.reload?.(),
+          skuId: sku,
+        });
+      })();
     case "note":
       return openCountNoteSheet(S.ctx, sku);
     case "match": {

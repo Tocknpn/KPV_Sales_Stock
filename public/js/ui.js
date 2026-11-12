@@ -129,3 +129,30 @@ export function chip(label, active, extra = "") {
 export function pillDot(color) {
   return `<span class="h-1.5 w-1.5 rounded-full" style="background:${color}"></span>`;
 }
+
+// Toast with one action button that disappears after `ms` (default 6 s).
+export function toastAction(message, actionLabel, onAction, ms = 6000) {
+  const host = document.getElementById("toast");
+  const el = document.createElement("div");
+  el.className = "pointer-events-auto flex items-center gap-3 rounded-full bg-gray-900 py-1 pl-4 pr-1 text-sm font-semibold text-white shadow-pop";
+  const msg = document.createElement("span");
+  msg.className = "min-w-0 truncate";
+  msg.textContent = message;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "tap-target shrink-0 rounded-full px-4 font-extrabold text-brand-100 underline";
+  btn.textContent = actionLabel;
+  el.append(msg, btn);
+  host.appendChild(el);
+  let timer = setTimeout(() => el.remove(), ms);
+  btn.addEventListener("click", async () => {
+    clearTimeout(timer);
+    btn.disabled = true;
+    try {
+      await onAction();
+    } finally {
+      el.remove();
+    }
+  });
+  return el;
+}

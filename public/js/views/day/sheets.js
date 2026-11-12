@@ -344,23 +344,6 @@ export function openReopenSheet(ctx) {
   );
 }
 
-// --- the ⇄ cell -----------------------------------------------------------
-
-// Task 9 replaces this body with the real move sheet. Until then the cell opens
-// the existing transfer sheet (kept in stock.js), after asking which kind.
-export async function openMoveSheet(ctx, skuId) {
-  await ctx.queue.flushAll();
-  const row = ctx.row(skuId);
-  openActionSheet(
-    t("day.chooseMove"),
-    [
-      { label: t("stock.move"), value: "move" },
-      { label: t("stock.transferOut"), value: "transfer" },
-    ],
-    (opt) => ctx.hooks.openTransfer?.(ctx.deskCard, ctx.detail, skuId, opt.value, closingOf(row))
-  );
-}
-
 // --- remove an item -------------------------------------------------------
 
 export function openRemoveItemSheet(ctx) {

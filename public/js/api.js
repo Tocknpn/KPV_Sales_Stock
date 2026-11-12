@@ -91,6 +91,8 @@ export const api = {
   removeDeskSku: (deskId, skuId, date) => request(`/stock/desk/${deskId}/sku/${encodeURIComponent(skuId)}?${query({ date })}`, { method: "DELETE" }),
 
   transferDestinations: () => request(`/transfers/destinations`),
+  move: (payload) => post(`/moves`, payload),
+  undoMove: (ticketId, clientRef) => post(`/moves/${encodeURIComponent(ticketId)}/undo`, { clientRef }),
   transfers: (params) => request(`/transfers?${query(params ?? {})}`),
   createTransfer: (payload) => post(`/transfers`, payload),
   cancelTransfer: (id) => post(`/transfers/${id}/cancel`),

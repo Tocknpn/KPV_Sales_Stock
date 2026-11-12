@@ -362,6 +362,7 @@ function dayHooks(deskCard) {
     openSkuPicker: openSkuPickerSheet,
     askOpeningQty,
     openTransfer: openTransferSheet,
+    loadDestinations,
   };
 }
 
