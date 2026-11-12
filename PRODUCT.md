@@ -97,8 +97,9 @@ heavyweight ERP.
 
 ## Evidence on Hand
 
-`app.md` at the project root is the original governing requirements
-document (screen-by-screen spec) and remains authoritative for scope.
+The Lao user manual (`ຄູ່ມືນຳໃຊ້ — KPV ສະຕັອກ.html`, 2026-11-11) is the
+authoritative specification; where it differs from `app.md`, the manual wins
+(decided 2026-11-12). `app.md` is kept for history.
 No real logos, product photography, real SKU catalog, real staff roster, or
 real financial figures exist yet. All current branch names, staff names,
 SKU list, portfolio valuation, and spot price are demo/placeholder data

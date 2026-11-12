@@ -1,6 +1,16 @@
-# Copy this file to .dev.vars for local `wrangler dev` development.
-# Leave both unset (or delete this file) to run entirely against the built-in
-# demo dataset — the app works fully without Supabase for evaluation/demo.
+# Copy this file to .dev.vars for local `wrangler dev`.
+#
+# Leave SUPABASE_* unset to run on the built-in demo data (nothing is saved
+# for real). Demo logins and PINs are documented in src/demoData.ts.
 
+# --- Real database (Supabase) ---
 SUPABASE_URL=https://YOUR-PROJECT.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+# Required whenever SUPABASE_* is set: signs login sessions. Use a long random
+# value (e.g. `openssl rand -hex 32`) and never share it. Changing it logs
+# everyone out.
+AUTH_SECRET=replace-with-a-long-random-value
+
+# Demo only: pin "today" to a fixed date. Ignored when Supabase is set.
+# DEMO_DATE=2026-11-12
