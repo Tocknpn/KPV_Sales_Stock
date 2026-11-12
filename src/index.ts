@@ -22,7 +22,7 @@ app.route("/api", documentRoutes);
 app.route("/api", insightRoutes);
 app.route("/api", settingsRoutes);
 
-const STORE_STATUS = { DAY_LOCKED: 423, CONFLICT: 409, INVALID: 400, UNAVAILABLE: 503 } as const;
+const STORE_STATUS = { DAY_LOCKED: 423, CONFLICT: 409, INVALID: 400, UNAVAILABLE: 503, NEGATIVE: 409 } as const;
 
 app.onError((err, c) => {
   if (err instanceof HttpError) {
@@ -34,11 +34,13 @@ app.onError((err, c) => {
         ? "This day is Done and locked for this Desk"
         : err.code === "UNAVAILABLE"
         ? "The database cannot be reached. Try again."
+        : err.code === "NEGATIVE"
+        ? "This would make the stock negative"
         : err.code === "CONFLICT"
         ? "That already exists or was changed on another device"
         : "The database rejected that value";
     console.error(`[store ${err.code}] ${err.message}`);
-    return c.json({ error: message, code: err.code }, STORE_STATUS[err.code]);
+    return c.json({ error: message, code: err.code === "NEGATIVE" ? "NEGATIVE_CLOSING" : err.code }, STORE_STATUS[err.code]);
   }
   console.error(err);
   return c.json({ error: "Something went wrong on the server", code: "SERVER_ERROR" }, 500);

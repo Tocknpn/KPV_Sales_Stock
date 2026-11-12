@@ -27,7 +27,7 @@ import { buildDemoData, type DemoData } from "./demoData";
 import { businessDate, isLive } from "./time";
 import { computeClosing } from "./logic";
 
-export type StoreErrorCode = "DAY_LOCKED" | "CONFLICT" | "INVALID" | "UNAVAILABLE";
+export type StoreErrorCode = "DAY_LOCKED" | "CONFLICT" | "INVALID" | "UNAVAILABLE" | "NEGATIVE";
 
 // Errors the routes can turn into a meaningful HTTP status.
 export class StoreError extends Error {
@@ -352,6 +352,7 @@ export class DemoStore implements Store {
     for (const r of rows) {
       this.assertUnlocked(r.desk_id, r.ledger_date);
       if (this.findRow(r)) continue;
+      if (r.opening_qty < 0) throw new StoreError("NEGATIVE", `${r.desk_id} ${r.sku_id}: opening cannot be negative`);
       const now = this.now();
       const row: LedgerRow = {
         id: this.newId("ledger"),
@@ -378,6 +379,16 @@ export class DemoStore implements Store {
   }
   async patchLedgerRows(patches: LedgerRowPatch[]) {
     for (const p of patches) this.assertUnlocked(p.desk_id, p.ledger_date);
+    // Same rule as the database trigger: refuse a write that leaves closing
+    // below zero unless the row was already that low (closing does not drop).
+    for (const p of patches) {
+      const row = this.findRow(p);
+      if (!row) continue;
+      const next = computeClosing({ ...row, ...p });
+      if (next < 0 && next < row.closing_qty) {
+        throw new StoreError("NEGATIVE", `${row.desk_id} ${row.sku_id}: only ${Math.max(row.closing_qty, 0)} available`);
+      }
+    }
     const out: LedgerRow[] = [];
     for (const p of patches) {
       const row = this.findRow(p);
@@ -393,6 +404,8 @@ export class DemoStore implements Store {
     if (!row) return null;
     this.assertUnlocked(key.desk_id, key.ledger_date);
     if (row[field] + delta < 0) throw new StoreError("INVALID", `${field} cannot go below zero`);
+    const next = computeClosing({ ...row, [field]: row[field] + delta });
+    if (next < 0 && next < row.closing_qty) throw new StoreError("NEGATIVE", `${row.desk_id} ${row.sku_id}: only ${Math.max(row.closing_qty, 0)} available`);
     row[field] += delta;
     row.excluded = false;
     if (actor) row.performed_by = actor;
@@ -525,6 +538,8 @@ class SupabaseStore implements Store {
     if (!res.ok) {
       const body = await res.text();
       if (body.includes("DAY_LOCKED")) throw new StoreError("DAY_LOCKED", "This day is Done and locked");
+      if (body.includes("NEGATIVE_CLOSING")) throw new StoreError("NEGATIVE", "This would make the stock negative");
+      if (body.includes("FUTURE_DATE")) throw new StoreError("INVALID", "That date is after today");
       const pgCode = /"code"\s*:\s*"([A-Za-z0-9]+)"/.exec(body)?.[1] ?? "";
       if (res.status === 409 || pgCode === "23505") throw new StoreError("CONFLICT", body);
       if (pgCode === "23514" || pgCode === "23503" || pgCode.startsWith("22")) throw new StoreError("INVALID", body);

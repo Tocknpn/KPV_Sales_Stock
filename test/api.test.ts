@@ -184,6 +184,14 @@ describe("daily cycle", () => {
     expect(row.closing_qty).toBe(row.opening_qty + 7 - row.retail_sale - 2);
   });
 
+  it("refuses a sale larger than the stock with NEGATIVE_CLOSING", async () => {
+    const staff = await asStaff("B-MM");
+    const row = rowOf(await detailOf(staff, "MM-D01", TODAY), "GB-001");
+    const res = await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, rows: [{ sku_id: "GB-001", retail_sale: row.closing_qty + row.retail_sale + 1 }] });
+    expect(res.status).toBe(409);
+    expect(res.json.code).toBe("NEGATIVE_CLOSING");
+  });
+
   it("rejects bad quantities and unknown rows", async () => {
     const staff = await asStaff("B-MM");
     for (const bad of [-1, 1.5, "x"]) {
