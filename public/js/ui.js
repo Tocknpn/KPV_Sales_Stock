@@ -134,9 +134,9 @@ export function pillDot(color) {
 export function toastAction(message, actionLabel, onAction, ms = 6000) {
   const host = document.getElementById("toast");
   const el = document.createElement("div");
-  el.className = "pointer-events-auto flex items-center gap-3 rounded-full bg-gray-900 py-1 pl-4 pr-1 text-sm font-semibold text-white shadow-pop";
+  el.className = "pointer-events-auto flex max-w-full items-center gap-3 rounded-2xl bg-gray-900 py-1 pl-4 pr-1 text-sm font-semibold text-white shadow-pop";
   const msg = document.createElement("span");
-  msg.className = "min-w-0 truncate";
+  msg.className = "min-w-0 break-words py-2";
   msg.textContent = message;
   const btn = document.createElement("button");
   btn.type = "button";

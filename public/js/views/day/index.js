@@ -422,7 +422,11 @@ function onAction(act, btn) {
     case "move":
       return (async () => {
         const ctx = S.ctx;
-        await ctx.queue.flushAll();
+        try {
+          await ctx.queue.flushAll();
+        } catch (err) {
+          return toast(err.message || t("err.SERVER_ERROR"), "error");
+        }
         openMoveSheet({
           desk: ctx.deskCard,
           date: ctx.date,
