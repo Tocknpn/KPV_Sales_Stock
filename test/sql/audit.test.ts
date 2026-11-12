@@ -138,6 +138,36 @@ describe('audit trigger', () => {
   });
 });
 
+describe('audit context and transfer ends', () => {
+  it('carries natural-key context on a ledger update', async () => {
+    await db.exec(`update daily_stock_ledger set stock_in = 2 where desk_id = 'MM-D01'`);
+    const [a] = await audit();
+    expect(a.context.sku_id).toBe('S1');
+    expect(a.context.ledger_date).toBe(D);
+    expect(a.context.desk_id).toBe('MM-D01');
+    expect(a.context.branch_id).toBe('B-MM');
+    expect(a.context).not.toHaveProperty('to_desk_id');
+  });
+
+  it('records both ends of a transfer', async () => {
+    await db.exec(`insert into desks (desk_id, branch_id, display_name) values ('TS-D01','B-TS','t')`);
+    await db.exec(
+      `insert into transfers (kind, from_desk_id, from_branch_id, to_desk_id, to_branch_id, sku_id, qty, sent_date)
+       values ('transfer','MM-D01','B-MM','TS-D01','B-TS','S1',1,'${D}')`,
+    );
+    await db.exec(`update transfers set status = 'received', received_date = '${D}'`);
+    const rows = await audit(`table_name = 'transfers'`);
+    expect(rows).toHaveLength(2);
+    for (const r of rows) {
+      expect(r.desk_id).toBe('MM-D01');
+      expect(r.branch_id).toBe('B-MM');
+      expect(r.to_desk_id).toBe('TS-D01');
+      expect(r.to_branch_id).toBe('B-TS');
+      expect(r.context.to_desk_id).toBe('TS-D01');
+    }
+  });
+});
+
 describe('audit immutability', () => {
   beforeEach(async () => {
     await db.exec(`insert into audit_log (actor_name, action, target) values ('a','x','y')`);
