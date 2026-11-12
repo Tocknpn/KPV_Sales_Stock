@@ -60,6 +60,16 @@ async function switchView(view) {
   }
 }
 window.switchView = switchView;
+window.refreshNav = refreshNav;
+
+// Any action that fails (a rule the server refused, no connection) surfaces
+// as a toast instead of failing silently.
+window.addEventListener("unhandledrejection", (e) => {
+  const message = e.reason?.message;
+  if (!message) return;
+  e.preventDefault();
+  toast(message, "error");
+});
 
 document.getElementById("bottom-nav").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-view]");
@@ -77,11 +87,11 @@ async function loadMetaAndEnter() {
     state.report.branch = isAdmin(state.user) ? null : state.user.branchId;
     state.report.period = state.meta.today.slice(0, 7);
     if (!state.meta.live) {
-      toast("Demo mode — connect Supabase to go live (see Settings)");
+      toast(t("app.demoMode"));
     }
   } catch (err) {
     console.error(err);
-    document.getElementById("view-root").innerHTML = `<div class="card p-6 text-center text-sm text-gray-500">Failed to load app data. Pull to refresh.</div>`;
+    document.getElementById("view-root").innerHTML = `<div class="card p-6 text-center text-sm text-gray-500">${t("app.loadFailed")}</div>`;
     return;
   }
   refreshNav();

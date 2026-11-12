@@ -20,7 +20,7 @@ export const state = {
   user: null, // { accountId, displayName, role, branchId }
   view: "stock",
   stock: { date: null, branch: null, filter: "all" },
-  documents: { branch: null, desk: null, date: null, page: 1, view: getStoredDocView() },
+  documents: { branch: null, desk: null, date: null, page: 1, filter: "all", view: getStoredDocView() },
   report: { period: null, branch: null, desk: null, q: "", view: "cards" },
   dashboard: { period: "today", branch: null, desk: null, category: null, stockFlag: null },
 };

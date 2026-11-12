@@ -1,7 +1,13 @@
 import { api } from "../../api.js";
 import { toast } from "../../ui.js";
-import { escapeHtml, clamp, toggleSwitch, fmtPct, debounce } from "../../util.js";
+import { escapeHtml, clamp, fmtPct, debounce } from "../../util.js";
 import { t } from "../../i18n.js";
+import { state } from "../../state.js";
+import { isAdmin } from "../../session.js";
+
+// Staff can read these settings; only an admin can change them.
+const canEdit = () => isAdmin(state.user);
+const lock = () => (canEdit() ? "" : "disabled");
 
 const dirty = new Set();
 let filter = "all"; // "all" | "incomplete"
@@ -68,19 +74,22 @@ function renderChrome(root, items, summary, config) {
 
     <div id="rr-table-wrap"></div>
 
-    <button id="rr-save-all" class="btn-primary sticky bottom-3 mt-4 w-full" disabled>${t("settings.saveAll")}</button>
+    ${canEdit() ? `<button id="rr-save-all" class="btn-primary sticky bottom-3 mt-4 w-full" disabled>${t("settings.saveAll")}</button>` : `<p class="mt-3 text-center text-[11px] font-semibold text-gray-500">${t("settings.adminOnly")}</p>`}
 
-    ${sectionTitle(t("settings.bufferLabel"))}
+    ${sectionTitle(t("settings.reorderSection"))}
     <div class="card p-4">
-      ${stepperField("safety-buffer", t("settings.bufferLabel"), config.safety_buffer_days, "Days", 0.5)}
-      <div class="mt-1 flex items-center justify-between rounded-xl bg-gray-50 px-3.5 py-3">
-        <div>
-          <div class="text-xs font-bold text-gray-800">${t("settings.autoDraftTitle")}</div>
-          <div class="text-[11px] text-gray-600">${t("settings.autoDraftDesc")}</div>
-        </div>
-        ${toggleSwitch(config.auto_draft_po, 'id="auto-draft-toggle"')}
-      </div>
-      <button id="save-config" class="btn-primary mt-4 w-full">${t("settings.save")}</button>
+      ${stepperField("safety-buffer", t("settings.bufferLabel"), config.safety_buffer_days, t("settings.daysUnit"), 0.5)}
+      <p class="rounded-xl bg-gray-50 px-3.5 py-2.5 text-[11px] font-medium text-gray-600">${t("settings.reorderFormula")}</p>
+    </div>
+
+    ${sectionTitle(t("settings.priceSection"))}
+    <div class="card p-4">
+      <label for="spot-price" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.spotPriceLabel")}</label>
+      <input id="spot-price" type="number" min="0" step="1000" inputmode="numeric" value="${Number(config.spot_lak_per_baht) || ""}" ${lock()} class="input-filled text-center text-base font-extrabold" />
+      <label for="usd-rate" class="mb-1.5 mt-3 block text-xs font-bold text-gray-600">${t("settings.usdRateLabel")}</label>
+      <input id="usd-rate" type="number" min="0" step="1" inputmode="numeric" value="${Number(config.usd_to_lak_rate) || ""}" ${lock()} class="input-filled text-center text-base font-extrabold" />
+      <p class="mt-2 text-[11px] text-gray-500">${t("settings.priceHint")}</p>
+      ${canEdit() ? `<button id="save-config" class="btn-primary mt-4 w-full">${t("settings.save")}</button>` : ""}
     </div>
     <div class="h-4"></div>
   `;
@@ -112,7 +121,7 @@ function renderChrome(root, items, summary, config) {
   );
 
   renderTable(root, items);
-  root.querySelector("#rr-save-all").addEventListener("click", () => saveAll(root, items));
+  root.querySelector("#rr-save-all")?.addEventListener("click", () => saveAll(root, items));
   wireConfigCard(root);
 }
 
@@ -170,9 +179,9 @@ function tableRow(item) {
   <div data-rr-row="${item.sku_id}" class="grid grid-cols-[52px_1fr_54px_54px_26px] items-center gap-1.5 px-1.5 py-1.5">
     <span class="truncate text-[10px] text-gray-500" title="${escapeHtml(item.weight_name || "")}">${escapeHtml(item.weight_name || "—")}</span>
     <span class="truncate text-xs font-bold text-gray-900" title="${subtitle}">${subtitle}</span>
-    <input data-rr-input="sales" type="number" inputmode="decimal" step="0.1" value="${item.avg_daily_sales ?? ""}" placeholder="—"
+    <input data-rr-input="sales" type="number" min="0" inputmode="decimal" step="0.1" value="${item.avg_daily_sales ?? ""}" placeholder="—" ${lock()}
       class="w-full rounded-lg border border-hairline bg-gray-50 py-1 text-center text-[11px] font-bold text-gray-900 focus:outline-none focus:ring-1 focus:ring-brand-300" />
-    <input data-rr-input="lead" type="number" inputmode="decimal" step="0.5" value="${item.order_lead_time_days ?? ""}" placeholder="—"
+    <input data-rr-input="lead" type="number" min="0" inputmode="decimal" step="0.5" value="${item.order_lead_time_days ?? ""}" placeholder="—" ${lock()}
       class="w-full rounded-lg border border-hairline bg-gray-50 py-1 text-center text-[11px] font-bold text-gray-900 focus:outline-none focus:ring-1 focus:ring-brand-300" />
     <div class="relative flex h-6 w-6 items-center justify-center">
       <span data-rr-status-slot>${statusBadge(isComplete(item))}</span>
@@ -192,12 +201,12 @@ function stepperField(id, label, value, unit, step) {
   <div class="mb-3" data-stepper data-step="${step}">
     <label class="mb-1.5 block text-xs font-bold text-gray-600">${label}</label>
     <div class="flex items-center gap-2">
-      <button data-minus class="tap-target flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-hairline text-lg font-bold text-gray-500 active:bg-gray-50">−</button>
+      <button data-minus ${lock()} class="tap-target flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-hairline text-lg font-bold text-gray-500 active:bg-gray-50 disabled:opacity-40">−</button>
       <div class="input-filled flex flex-1 items-center justify-center gap-1.5">
-        <input id="${id}" type="number" step="${step}" value="${Number(value).toFixed(1)}" class="w-16 bg-transparent text-center font-extrabold text-gray-900 focus:outline-none" />
+        <input id="${id}" type="number" min="0" step="${step}" value="${Number(value).toFixed(1)}" ${lock()} class="w-16 bg-transparent text-center font-extrabold text-gray-900 focus:outline-none" />
         <span class="text-xs font-semibold text-gray-600">${unit}</span>
       </div>
-      <button data-plus class="tap-target flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-hairline text-lg font-bold text-gray-500 active:bg-gray-50">+</button>
+      <button data-plus ${lock()} class="tap-target flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-hairline text-lg font-bold text-gray-500 active:bg-gray-50 disabled:opacity-40">+</button>
     </div>
   </div>`;
 }
@@ -252,7 +261,8 @@ async function saveAll(root, items) {
 
 function syncFooter(root) {
   root.querySelector("#rr-unsaved").classList.toggle("hidden", dirty.size === 0);
-  root.querySelector("#rr-save-all").disabled = dirty.size === 0;
+  const saveAllBtn = root.querySelector("#rr-save-all");
+  if (saveAllBtn) saveAllBtn.disabled = dirty.size === 0;
 }
 
 function wireConfigCard(root) {
@@ -267,19 +277,15 @@ function wireConfigCard(root) {
     });
   });
 
-  const toggleBtn = root.querySelector("#auto-draft-toggle");
-  toggleBtn.addEventListener("click", () => {
-    const on = toggleBtn.dataset.on === "true";
-    toggleBtn.dataset.on = String(!on);
-    toggleBtn.classList.toggle("bg-brand-600", !on);
-    toggleBtn.classList.toggle("bg-gray-300", on);
-    toggleBtn.querySelector("span").classList.toggle("translate-x-4", !on);
-  });
-
-  root.querySelector("#save-config").addEventListener("click", async () => {
-    const safetyBufferDays = Number(root.querySelector("#safety-buffer").value);
-    const autoDraftPo = toggleBtn.dataset.on === "true";
-    await api.saveConfig({ safetyBufferDays, autoDraftPo });
-    toast(t("settings.save"), "success");
+  root.querySelector("#save-config")?.addEventListener("click", async () => {
+    const spot = Number(root.querySelector("#spot-price").value);
+    const usd = Number(root.querySelector("#usd-rate").value);
+    if (!(spot > 0)) return toast(t("settings.needSpotPrice"), "error");
+    state.meta.config = await api.saveConfig({
+      safetyBufferDays: Math.max(0, Number(root.querySelector("#safety-buffer").value) || 0),
+      spotLakPerBaht: spot,
+      usdToLakRate: usd > 0 ? usd : 0,
+    });
+    toast(t("settings.savedToast"), "success");
   });
 }

@@ -1,4 +1,5 @@
-import { api } from "../api.js";
+import { api, openDocumentPrint, openPrintTab, fillPrintTab } from "../api.js";
+import { isAdmin } from "../session.js";
 import { state, branchName, setStoredDocView } from "../state.js";
 import { toast, openSheet, closeSheet, openActionSheet } from "../ui.js";
 import { fmtDateTime, escapeHtml, icon } from "../util.js";
@@ -35,7 +36,25 @@ function renderTopbar() {
       </button>
     </div>
     <input id="date-filter" type="date" value="${state.documents.date ?? ""}" class="input-filled mt-2 w-full text-xs" />
+    <div class="mt-2 flex gap-1.5" id="doc-kind-filter">
+      ${KIND_FILTERS.map((f) => `<button data-kind-filter="${f.id}" class="chip min-h-0 flex-1 justify-center text-[11px]">${t(f.labelKey)}</button>`).join("")}
+    </div>
   `;
+
+  const paintKindFilter = () =>
+    document.querySelectorAll("[data-kind-filter]").forEach((btn) => {
+      const active = btn.dataset.kindFilter === (state.documents.filter ?? "all");
+      btn.className = `chip min-h-0 flex-1 justify-center text-[11px] ${active ? "border-brand-600 bg-brand-600 text-white" : "border-hairline bg-white text-gray-600"}`;
+    });
+  document.querySelectorAll("[data-kind-filter]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      state.documents.filter = btn.dataset.kindFilter;
+      state.documents.page = 1;
+      paintKindFilter();
+      refreshDocuments();
+    })
+  );
+  paintKindFilter();
 
   document.getElementById("branch-select").addEventListener("click", () => {
     const options = [{ label: t("documents.allBranches"), value: null }, ...state.meta.branches.map((b) => ({ label: branchName(b.branch_id), value: b.branch_id }))];
@@ -97,6 +116,28 @@ function applyViewToggleStyles() {
 
 let lastData = { documents: [], total: 0, page: 1, pageSize: PAGE_SIZE };
 
+const KIND_FILTERS = [
+  { id: "all", labelKey: "documents.filterAll", params: {} },
+  { id: "proposals", labelKey: "documents.filterProposals", params: { kind: "proposal" } },
+  { id: "pending", labelKey: "documents.filterPending", params: { kind: "proposal", status: "pending" } },
+];
+
+const STATUS_STYLE = {
+  pending: "bg-warning-bg text-warning",
+  approved: "bg-success-bg text-success",
+  rejected: "bg-danger-bg text-danger",
+};
+
+// Only purchase proposals carry a status.
+function statusChip(doc) {
+  if (!doc.status) return "";
+  return `<span class="status-pill shrink-0 ${STATUS_STYLE[doc.status]}">${t(`documents.status.${doc.status}`)}</span>`;
+}
+
+function deskLabelOf(doc) {
+  return doc.desk_id ? ` · ${escapeHtml(doc.desk_name ? `${doc.desk_id} ${doc.desk_name}` : doc.desk_id)}` : "";
+}
+
 async function refreshDocuments() {
   const root = document.getElementById("view-root");
   root.innerHTML = `<div class="py-16 text-center text-sm text-gray-600">${t("documents.loading")}</div>`;
@@ -106,6 +147,7 @@ async function refreshDocuments() {
     date: state.documents.date,
     page: state.documents.page,
     pageSize: PAGE_SIZE,
+    ...(KIND_FILTERS.find((f) => f.id === state.documents.filter)?.params ?? {}),
   });
   lastData = data;
   renderList(data);
@@ -151,11 +193,18 @@ function renderCards(listEl, docs) {
           <div class="truncate text-xs font-extrabold text-gray-900">${escapeHtml(d.title)}</div>
           <div class="text-[10px] text-gray-500">${escapeHtml(d.doc_no)}</div>
         </div>
-        <button data-delete="${d.id}" aria-label="${t("documents.delete")}" class="tap-target shrink-0 text-gray-400 hover:text-danger">
+        <div class="flex shrink-0 items-center gap-1">
+          ${statusChip(d)}
+          ${
+            isAdmin(state.user)
+              ? `<button data-delete="${d.id}" aria-label="${t("documents.delete")}" class="tap-target shrink-0 text-gray-400 hover:text-danger">
           <svg class="h-4 w-4 md:h-5 md:w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M9 7V4h6v3m-7 0 1 13h6l1-13"/></svg>
-        </button>
+        </button>`
+              : ""
+          }
+        </div>
       </div>
-      <div class="mt-1.5 text-[11px] text-gray-600">${escapeHtml(branchName(d.branch_id))}${d.desk_id ? ` · ${d.desk_id}` : ""} · ${fmtDateTime(d.created_at)}</div>
+      <div class="mt-1.5 text-[11px] text-gray-600">${escapeHtml(branchName(d.branch_id))}${deskLabelOf(d)} · ${fmtDateTime(d.created_at)} · ${escapeHtml(d.created_by)}</div>
       <div class="mt-2 flex items-center justify-between border-t border-hairline pt-2 text-[11px]">
         <span class="text-gray-500">${d.rowCount} ${t("documents.rows")}</span>
         <button data-print="${d.id}" class="font-bold text-brand-600">${t("documents.printPdf")} ↗</button>
@@ -186,13 +235,13 @@ function renderTable(listEl, docs) {
             (d) => `
           <tr data-doc="${d.id}">
             <td class="whitespace-nowrap px-3 py-2 font-semibold text-gray-800">${escapeHtml(d.doc_no)}</td>
-            <td class="px-3 py-2 text-gray-700">${escapeHtml(d.title)}</td>
-            <td class="px-3 py-2 text-gray-500">${escapeHtml(branchName(d.branch_id))}${d.desk_id ? ` · ${d.desk_id}` : ""}</td>
+            <td class="px-3 py-2 text-gray-700">${escapeHtml(d.title)} ${statusChip(d)}</td>
+            <td class="px-3 py-2 text-gray-500">${escapeHtml(branchName(d.branch_id))}${deskLabelOf(d)}</td>
             <td class="whitespace-nowrap px-3 py-2 text-gray-500">${d.doc_date}</td>
             <td class="px-3 py-2 text-right text-gray-500">${d.rowCount}</td>
             <td class="whitespace-nowrap px-3 py-2 text-right">
               <button data-print="${d.id}" class="font-bold text-brand-600">${t("documents.printPdf")}</button>
-              <button data-delete="${d.id}" class="ml-2 font-bold text-danger">${t("documents.delete")}</button>
+              ${isAdmin(state.user) ? `<button data-delete="${d.id}" class="ml-2 font-bold text-danger">${t("documents.delete")}</button>` : ""}
             </td>
           </tr>`
           )
@@ -213,7 +262,7 @@ function wireCardActions(listEl, docs) {
   listEl.querySelectorAll("[data-print]").forEach((btn) =>
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      window.open(`/api/documents/${btn.dataset.print}/print`, "_blank");
+      openDocumentPrint(btn.dataset.print);
     })
   );
   listEl.querySelectorAll("[data-delete]").forEach((btn) =>
@@ -274,7 +323,14 @@ function openDocumentDetail(doc) {
   openSheet(
     `
     <div class="mb-3 text-[11px] text-gray-600">${escapeHtml(doc.doc_no)} · ${fmtDateTime(doc.created_at)}</div>
-    <div class="mb-4 text-xs text-gray-500">${escapeHtml(branchName(doc.branch_id))}${doc.desk_id ? ` · ${doc.desk_id}` : ""} · ${t("documents.createdBy")} ${escapeHtml(doc.created_by)}</div>
+    <div class="mb-3 text-xs text-gray-500">${escapeHtml(branchName(doc.branch_id))}${deskLabelOf(doc)} · ${t("documents.createdBy")} ${escapeHtml(doc.created_by)}</div>
+    ${
+      doc.status
+        ? `<div class="mb-4 flex items-center gap-2">${statusChip(doc)}${
+            doc.decided_by ? `<span class="text-[11px] text-gray-500">${escapeHtml(doc.decided_by)} · ${fmtDateTime(doc.decided_at)}</span>` : ""
+          }</div>`
+        : ""
+    }
     <div class="flex flex-col gap-2">
       ${doc.rows
         .map(
@@ -293,19 +349,35 @@ function openDocumentDetail(doc) {
         .join("")}
     </div>
     ${doc.notes ? `<p class="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">${escapeHtml(doc.notes)}</p>` : ""}
-    <div class="mt-5 flex gap-2.5 pb-2">
+    ${
+      doc.status === "pending" && isAdmin(state.user)
+        ? `<div class="mt-5 flex gap-2.5">
+             <button id="reject-btn" class="btn-secondary flex-1 border-danger/30 text-danger">${t("documents.reject")}</button>
+             <button id="approve-btn" class="btn-primary flex-1">${t("documents.approve")}</button>
+           </div>`
+        : ""
+    }
+    <div class="mt-3 flex gap-2.5 pb-2">
       <button id="print-btn" class="btn-secondary flex-1">${t("documents.printPdf")}</button>
-      <button id="delete-btn" class="btn-secondary flex-1 text-danger">${t("documents.delete")}</button>
+      ${isAdmin(state.user) ? `<button id="delete-btn" class="btn-secondary flex-1 text-danger">${t("documents.delete")}</button>` : ""}
     </div>
   `,
     {
       title: doc.title,
       onMount: (body) => {
-        body.querySelector("#print-btn").addEventListener("click", () => window.open(`/api/documents/${doc.id}/print`, "_blank"));
-        body.querySelector("#delete-btn").addEventListener("click", () => {
+        body.querySelector("#print-btn").addEventListener("click", () => openDocumentPrint(doc.id));
+        body.querySelector("#delete-btn")?.addEventListener("click", () => {
           closeSheet();
           confirmDelete(doc.id);
         });
+        const decide = async (decision) => {
+          await api.decideDocument(doc.id, decision);
+          closeSheet();
+          toast(t(`documents.status.${decision}`), "success");
+          refreshDocuments();
+        };
+        body.querySelector("#approve-btn")?.addEventListener("click", () => decide("approved"));
+        body.querySelector("#reject-btn")?.addEventListener("click", () => decide("rejected"));
       },
     }
   );
@@ -520,7 +592,6 @@ async function openNewDocumentSheet() {
 
     body.querySelector("#doc-date").addEventListener("change", (e) => {
       docDate = e.target.value || state.meta.today;
-      refreshBalance(body);
     });
 
     body.querySelector("#add-row").addEventListener("click", () => {
@@ -553,7 +624,7 @@ async function openNewDocumentSheet() {
       return;
     }
     try {
-      const detail = await api.deskDetail(selectedDeskId, docDate);
+      const detail = await api.deskDetail(selectedDeskId, "latest");
       balanceMap = new Map(detail.rows.map((r) => [r.sku_id, { closing_qty: r.closing_qty }]));
     } catch {
       balanceMap = new Map();
@@ -736,7 +807,9 @@ async function openReorderProposalPage() {
     render();
     let detail;
     try {
-      detail = await api.deskDetail(selectedDeskId, docDate);
+      // Stock as of the desk's latest recorded day — a proposal is about
+      // what is on the desk now, whatever date is written on the document.
+      detail = await api.deskDetail(selectedDeskId, "latest");
     } catch {
       loading = false;
       toast(t("documents.proposalLoadFailed"), "error");
@@ -845,7 +918,6 @@ async function openReorderProposalPage() {
 
     root.querySelector("#doc-date").addEventListener("change", (e) => {
       docDate = e.target.value || state.meta.today;
-      loadCaseRows();
     });
 
     root.querySelector("#doc-title").addEventListener("input", (e) => {
@@ -864,17 +936,26 @@ async function openReorderProposalPage() {
       if (!selectedDeskId) return toast(t("documents.proposalNeedCase"), "error");
       const cleanRows = cleanProposalRows(rows);
       if (cleanRows.length === 0) return toast(t("documents.proposalNeedAnyQty"), "error");
-      const saved = await api.createDocument({
-        title,
-        branchId: selectedBranchId,
-        deskId: selectedDeskId,
-        date: docDate,
-        notes: t("documents.proposalAutoNote"),
-        rows: cleanRows,
-      });
-      toast(t("documents.savedToast"), "success");
+      // Opened now, while this is still a tap, so the browser allows the tab.
+      const printTab = openPrintTab();
+      let saved;
+      try {
+        saved = await api.createDocument({
+          title,
+          kind: "proposal",
+          branchId: selectedBranchId,
+          deskId: selectedDeskId,
+          date: docDate,
+          notes: t("documents.proposalAutoNote"),
+          rows: cleanRows,
+        });
+      } catch (err) {
+        printTab?.close();
+        throw err;
+      }
+      toast(t("documents.proposalSavedToast"), "success");
       backOut();
-      if (saved?.id) window.open(`/api/documents/${saved.id}/print`, "_blank");
+      await fillPrintTab(printTab, saved.id);
     });
   }
 

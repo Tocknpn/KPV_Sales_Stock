@@ -14,6 +14,14 @@ export const CATEGORY_COLORS = {
   "Rings & Accessories": "#e11d48",
 };
 
+// SKU types are editable, so a type outside the original four takes the next
+// colour from this ordered fallback set.
+const EXTRA_CATEGORY_COLORS = ["#2563eb", "#65a30d", "#c026d3", "#0891b2", "#ea580c", "#475569"];
+
+export function categoryColor(category, index) {
+  return CATEGORY_COLORS[category] ?? EXTRA_CATEGORY_COLORS[index % EXTRA_CATEGORY_COLORS.length];
+}
+
 const STATUS_COLORS = { success: "#10b981", warning: "#f59e0b", danger: "#ee552b" };
 
 /**
@@ -131,7 +139,7 @@ export function renderBranchClusterChart(container, rows) {
  * Three-segment horizontal capacity/status bar.
  * `segments`: [{ label, pct, color }]  color is a hex.
  */
-export function renderCapacityBar(container, segments) {
+export function renderCapacityBar(container, segments, unitLabel = "") {
   const bar = segments
     .map(
       (seg, i) => `<div class="h-full transition-all" style="width:${seg.pct}%;background:${seg.color};${i > 0 ? "margin-left:2px" : ""}"></div>`
@@ -143,7 +151,7 @@ export function renderCapacityBar(container, segments) {
     <div class="flex items-center gap-1.5 text-xs text-gray-600">
       <span class="h-2 w-2 rounded-full" style="background:${seg.color}"></span>
       <span class="font-semibold">${seg.label}</span>
-      <span class="text-gray-600">${fmtPct(seg.pct, 0)} · ${seg.count.toLocaleString()} SKUs</span>
+      <span class="text-gray-600">${fmtPct(seg.pct, 0)} · ${seg.count.toLocaleString()} ${unitLabel}</span>
     </div>`
     )
     .join("");

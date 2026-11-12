@@ -2,6 +2,14 @@ import { api } from "../../api.js";
 import { toast, openSheet, closeSheet } from "../../ui.js";
 import { icon, escapeHtml, fmtInt, ICONS, toggleSwitch, debounce } from "../../util.js";
 import { t } from "../../i18n.js";
+import { state } from "../../state.js";
+import { isAdmin } from "../../session.js";
+import { parseCsv, csvRowsToSkus, CSV_TEMPLATE } from "../../csv.js";
+
+// Staff can look at the master data; only an admin can change it.
+const canEdit = () => isAdmin(state.user);
+const PURITY_OPTIONS = ["96.5%", "99.99%"];
+const GRAMS_PER_BAHT = 15.244;
 
 let activeTab = "sku";
 let skuGroupFilter = "all"; // "all" | type_id
@@ -54,14 +62,14 @@ async function renderTab(root) {
 async function renderTypeTab(body) {
   const { types } = await api.skuTypes();
   body.innerHTML = `
-    <button id="add-type" class="btn-primary mb-3 w-full py-2.5 text-xs">${t("settings.addType")}</button>
+    ${canEdit() ? `<button id="add-type" class="btn-primary mb-3 w-full py-2.5 text-xs">${t("settings.addType")}</button>` : ""}
     <div class="card divide-y divide-hairline p-0">
       ${types.map((ty) => typeRow(ty)).join("") || `<div class="py-6 text-center text-xs text-gray-500">—</div>`}
     </div>
   `;
-  body.querySelector("#add-type").addEventListener("click", () => openTypeForm(null, body));
+  body.querySelector("#add-type")?.addEventListener("click", () => openTypeForm(null, body));
   body.querySelectorAll("[data-edit-type]").forEach((btn) =>
-    btn.addEventListener("click", () => openTypeForm(types.find((ty) => ty.type_id === btn.dataset.editType), body))
+    btn.addEventListener("click", () => canEdit() && openTypeForm(types.find((ty) => ty.type_id === btn.dataset.editType), body))
   );
   body.querySelectorAll("[data-toggle-type]").forEach((btn) =>
     btn.addEventListener("click", async () => {
@@ -80,7 +88,7 @@ function typeRow(ty) {
         <span class="block truncate text-xs font-bold text-gray-900">${escapeHtml(ty.name_en)}</span>
         <span class="block text-[10px] text-gray-500">${ty.active ? t("settings.activeLabel") : t("settings.inactiveLabel")}</span>
       </button>
-      ${toggleSwitch(ty.active, `data-toggle-type="${ty.type_id}"`)}
+      ${canEdit() ? toggleSwitch(ty.active, `data-toggle-type="${ty.type_id}"`) : ""}
     </div>`;
 }
 
@@ -140,14 +148,14 @@ function openTypeForm(existing, body) {
 async function renderWeightTab(body) {
   const { weights } = await api.skuWeights();
   body.innerHTML = `
-    <button id="add-weight" class="btn-primary mb-3 w-full py-2.5 text-xs">${t("settings.addWeight")}</button>
+    ${canEdit() ? `<button id="add-weight" class="btn-primary mb-3 w-full py-2.5 text-xs">${t("settings.addWeight")}</button>` : ""}
     <div class="card divide-y divide-hairline p-0">
       ${weights.map((w) => weightRow(w)).join("") || `<div class="py-6 text-center text-xs text-gray-500">—</div>`}
     </div>
   `;
-  body.querySelector("#add-weight").addEventListener("click", () => openWeightForm(null, body));
+  body.querySelector("#add-weight")?.addEventListener("click", () => openWeightForm(null, body));
   body.querySelectorAll("[data-edit-weight]").forEach((btn) =>
-    btn.addEventListener("click", () => openWeightForm(weights.find((w) => w.weight_id === btn.dataset.editWeight), body))
+    btn.addEventListener("click", () => canEdit() && openWeightForm(weights.find((w) => w.weight_id === btn.dataset.editWeight), body))
   );
   body.querySelectorAll("[data-toggle-weight]").forEach((btn) =>
     btn.addEventListener("click", async () => {
@@ -165,7 +173,7 @@ function weightRow(w) {
         <span class="block truncate text-xs font-bold text-gray-900">${escapeHtml(w.name_en)}</span>
         <span class="block text-[10px] text-gray-500">${w.gram_value}g · ${w.active ? t("settings.activeLabel") : t("settings.inactiveLabel")}</span>
       </button>
-      ${toggleSwitch(w.active, `data-toggle-weight="${w.weight_id}"`)}
+      ${canEdit() ? toggleSwitch(w.active, `data-toggle-weight="${w.weight_id}"`) : ""}
     </div>`;
 }
 
@@ -220,12 +228,16 @@ async function renderSkuTab(body) {
       <button id="sku-search-toggle" aria-label="${t("settings.searchPlaceholder")}" class="tap-target flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-hairline text-gray-500 ${searchOpen ? "border-brand-600 bg-brand-50 text-brand-600" : "bg-white"}">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><circle cx="11" cy="11" r="6.5"/><path stroke-linecap="round" d="M20 20l-4.3-4.3"/></svg>
       </button>
-      <button id="import-csv" aria-label="${t("settings.importCsv")}" class="tap-target flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-hairline bg-white text-gray-500">
+      ${
+        canEdit()
+          ? `<button id="import-csv" aria-label="${t("settings.importCsv")}" class="tap-target flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-hairline bg-white text-gray-500">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15V4M8 8l4-4 4 4"/><path stroke-linecap="round" d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
       </button>
       <button id="add-sku" aria-label="${t("settings.addSku")}" class="tap-target flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white shadow-pop active:scale-95">
         <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>
-      </button>
+      </button>`
+          : ""
+      }
     </div>
     <div id="sku-search-row" class="mb-3 ${searchOpen ? "" : "hidden"}">
       <input id="sku-search" type="search" placeholder="${t("settings.searchPlaceholder")}" value="${escapeHtml(skuSearchQuery)}"
@@ -234,8 +246,8 @@ async function renderSkuTab(body) {
     <div id="sku-list-wrap"></div>
   `;
 
-  body.querySelector("#import-csv").addEventListener("click", () => toast("CSV import coming soon"));
-  body.querySelector("#add-sku").addEventListener("click", () => openSkuForm(null, activeTypes, activeWeights, types, weights, body));
+  body.querySelector("#import-csv")?.addEventListener("click", () => openImportSheet(body));
+  body.querySelector("#add-sku")?.addEventListener("click", () => openSkuForm(null, activeTypes, activeWeights, types, weights, body));
   body.querySelector("#sku-group-filter").addEventListener("change", (e) => {
     skuGroupFilter = e.target.value;
     renderSkuList(body, skus, types, weights, activeTypes, activeWeights);
@@ -311,7 +323,7 @@ function renderSkuList(body, skus, types, weights, activeTypes, activeWeights) {
     : `<div class="card p-0"><div class="py-6 text-center text-xs text-gray-500">—</div></div>`;
 
   wrap.querySelectorAll("[data-edit-sku]").forEach((btn) =>
-    btn.addEventListener("click", () => openSkuForm(skus.find((s) => s.sku_id === btn.dataset.editSku), activeTypes, activeWeights, types, weights, body))
+    btn.addEventListener("click", () => canEdit() && openSkuForm(skus.find((s) => s.sku_id === btn.dataset.editSku), activeTypes, activeWeights, types, weights, body))
   );
   wrap.querySelectorAll("[data-toggle-sku]").forEach((btn) =>
     btn.addEventListener("click", async (e) => {
@@ -324,7 +336,7 @@ function renderSkuList(body, skus, types, weights, activeTypes, activeWeights) {
 }
 
 function skuRow(s) {
-  const subtitle = s.weight_name || s.sku_id;
+  const subtitle = [s.weight_name, s.purity, s.baht_weight > 0 ? `${s.baht_weight} Baht` : null].filter(Boolean).join(" · ") || s.sku_id;
   return `
     <div class="flex items-center gap-2.5 px-4 py-3">
       <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">${icon(s.icon, "h-4 w-4")}</span>
@@ -332,7 +344,7 @@ function skuRow(s) {
         <span class="block truncate text-xs font-bold text-gray-900">${escapeHtml(s.name_en)}</span>
         <span class="block text-[10px] text-gray-500">${escapeHtml(subtitle)} · ${s.active ? t("settings.activeLabel") : t("settings.inactiveLabel")}</span>
       </button>
-      ${toggleSwitch(s.active, `data-toggle-sku="${s.sku_id}"`)}
+      ${canEdit() ? toggleSwitch(s.active, `data-toggle-sku="${s.sku_id}"`) : ""}
     </div>`;
 }
 
@@ -350,7 +362,9 @@ function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights,
   openSheet(
     `
     <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("stock.skuNameLabel")}</label>
-    <input id="new-sku-name" type="text" value="${existing ? escapeHtml(existing.name_en) : ""}" class="input-filled" />
+    <input id="new-sku-name" type="text" maxlength="120" value="${existing ? escapeHtml(existing.name_en) : ""}" class="input-filled" />
+    <label class="mb-1.5 mt-3 block text-xs font-bold text-gray-600">${t("settings.skuNameLoLabel")}</label>
+    <input id="new-sku-name-lo" type="text" maxlength="120" lang="lo" value="${existing?.name_lo ? escapeHtml(existing.name_lo) : ""}" class="input-filled" />
     <div class="mt-3 grid grid-cols-2 gap-2">
       <div>
         <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuTypeLabel")}</label>
@@ -365,24 +379,135 @@ function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights,
         </select>
       </div>
     </div>
+    <div class="mt-3 grid grid-cols-2 gap-2">
+      <div>
+        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.purityLabel")}</label>
+        <select id="new-sku-purity" class="input-filled">
+          <option value="">${t("settings.notGold")}</option>
+          ${PURITY_OPTIONS.map((p) => `<option value="${p}" ${existing?.purity === p ? "selected" : ""}>${p}</option>`).join("")}
+        </select>
+      </div>
+      <div>
+        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.bahtWeightLabel")}</label>
+        <input id="new-sku-baht" type="number" min="0" step="0.0001" inputmode="decimal" value="${existing ? existing.baht_weight ?? 0 : ""}" class="input-filled" />
+      </div>
+    </div>
+    <p class="mt-1.5 text-[11px] text-gray-500">${t("settings.bahtWeightHint")}</p>
+    <div class="mt-3 grid grid-cols-2 gap-2">
+      <div>
+        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.priceLabel")}</label>
+        <input id="new-sku-price" type="number" min="0" step="1000" inputmode="numeric" value="${existing ? existing.unit_price_lak ?? 0 : 0}" class="input-filled" />
+      </div>
+      <div>
+        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.reorderLevelLabel")}</label>
+        <input id="new-sku-reorder" type="number" min="0" step="1" inputmode="numeric" value="${existing ? existing.reorder_level ?? 5 : 5}" class="input-filled" />
+      </div>
+    </div>
+    <p class="mt-1.5 text-[11px] text-gray-500">${t("settings.reorderLevelHint")}</p>
     <button id="save-sku" class="btn-primary mt-4 w-full">${t("settings.saveSku")}</button>
   `,
     {
       title: existing ? existing.name_en : t("settings.addSku"),
       onMount: (sheetBody) => {
+        // Gold items: suggest the Baht weight from the chosen size until the
+        // admin types their own.
+        const bahtInput = sheetBody.querySelector("#new-sku-baht");
+        const suggestBaht = () => {
+          if (bahtInput.dataset.touched || !sheetBody.querySelector("#new-sku-purity").value) return;
+          const weight = allWeights.find((w) => w.weight_id === sheetBody.querySelector("#new-sku-weight").value);
+          if (weight) bahtInput.value = String(Math.round((weight.gram_value / GRAMS_PER_BAHT) * 10000) / 10000);
+        };
+        bahtInput.addEventListener("input", () => (bahtInput.dataset.touched = "1"));
+        if (existing) bahtInput.dataset.touched = "1";
+        sheetBody.querySelector("#new-sku-weight").addEventListener("change", suggestBaht);
+        sheetBody.querySelector("#new-sku-purity").addEventListener("change", suggestBaht);
+
         sheetBody.querySelector("#save-sku").addEventListener("click", async () => {
           const name_en = sheetBody.querySelector("#new-sku-name").value.trim();
           if (!name_en) return toast(t("stock.needSkuName"), "error");
           const payload = {
             name_en,
+            name_lo: sheetBody.querySelector("#new-sku-name-lo").value.trim() || null,
             type_id: sheetBody.querySelector("#new-sku-type").value,
             weight_id: sheetBody.querySelector("#new-sku-weight").value,
+            purity: sheetBody.querySelector("#new-sku-purity").value || null,
+            baht_weight: Math.max(0, Number(bahtInput.value) || 0),
+            unit_price_lak: Math.max(0, Number(sheetBody.querySelector("#new-sku-price").value) || 0),
+            reorder_level: Math.max(0, Math.round(Number(sheetBody.querySelector("#new-sku-reorder").value) || 0)),
           };
           if (existing) await api.updateSku(existing.sku_id, payload);
           else await api.createSku(payload);
           closeSheet();
           toast(t("settings.saveSku"), "success");
           renderSkuTab(body);
+        });
+      },
+    }
+  );
+}
+
+// --- CSV import: every row is checked first; one bad row imports nothing ---
+
+function openImportSheet(body) {
+  openSheet(
+    `
+    <p class="text-xs text-gray-600">${t("settings.importIntro")}</p>
+    <button id="csv-template" class="mt-2 text-xs font-bold text-brand-600 underline">${t("settings.importTemplate")}</button>
+    <label for="csv-file" class="mb-1.5 mt-4 block text-xs font-bold text-gray-600">${t("settings.importChoose")}</label>
+    <input id="csv-file" type="file" accept=".csv,text/csv" class="input-filled text-xs" />
+    <div id="csv-result" class="mt-3"></div>
+    <button id="csv-submit" class="btn-primary mt-4 w-full" disabled>${t("settings.importCsv")}</button>
+  `,
+    {
+      title: t("settings.importCsv"),
+      onMount: (sheetBody) => {
+        let rows = [];
+        const result = sheetBody.querySelector("#csv-result");
+        const submit = sheetBody.querySelector("#csv-submit");
+        const showErrors = (errors) => {
+          result.innerHTML = `
+            <div class="rounded-xl bg-danger-bg px-3.5 py-3 text-xs font-semibold text-danger" role="alert">
+              <div class="font-extrabold">${t("settings.importNothing")}</div>
+              <ul class="mt-1 list-disc pl-4">${errors
+                .slice(0, 30)
+                .map((e) => `<li>${t("settings.importLine")} ${e.line}: ${escapeHtml(e.error)}</li>`)
+                .join("")}</ul>
+            </div>`;
+        };
+
+        sheetBody.querySelector("#csv-template").addEventListener("click", () => {
+          const url = URL.createObjectURL(new Blob(["\ufeff" + CSV_TEMPLATE], { type: "text/csv;charset=utf-8" }));
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "kpv-sku-template.csv";
+          a.click();
+          URL.revokeObjectURL(url);
+        });
+
+        sheetBody.querySelector("#csv-file").addEventListener("change", async (e) => {
+          rows = [];
+          submit.disabled = true;
+          const file = e.target.files[0];
+          if (!file) return (result.innerHTML = "");
+          const parsed = csvRowsToSkus(parseCsv(await file.text()));
+          if (parsed.error) return showErrors([{ line: 1, error: parsed.error }]);
+          rows = parsed.rows;
+          result.innerHTML = `<p class="rounded-xl bg-gray-50 px-3.5 py-2.5 text-xs font-semibold text-gray-700">${rows.length} ${t("settings.importRowsFound")}</p>`;
+          submit.disabled = rows.length === 0;
+        });
+
+        submit.addEventListener("click", async () => {
+          submit.disabled = true;
+          try {
+            const { imported } = await api.importSkus(rows);
+            closeSheet();
+            toast(`${imported} ${t("settings.importDone")}`, "success");
+            renderSkuTab(body);
+          } catch (err) {
+            if (err.code === "IMPORT_INVALID") return showErrors(err.data.errors);
+            submit.disabled = false;
+            throw err;
+          }
         });
       },
     }

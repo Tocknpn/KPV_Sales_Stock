@@ -1,8 +1,18 @@
 import { getToken, clearSession } from "./session.js";
+import { t } from "./i18n.js";
 
 const BASE = "/api";
 
-async function request(path, options = {}) {
+// Server errors carry a stable `code`; when a translation exists for it the
+// user sees that instead of the server's English text.
+function errorMessage(body, status) {
+  const key = body?.code ? `err.${body.code}` : null;
+  const translated = key ? t(key) : null;
+  if (translated && translated !== key) return translated;
+  return body?.error || `Request failed (${status})`;
+}
+
+async function send(path, options = {}) {
   const token = getToken();
   const res = await fetch(`${BASE}${path}`, {
     ...options,
@@ -12,75 +22,117 @@ async function request(path, options = {}) {
       ...(options.headers || {}),
     },
   });
-  if (res.status === 401) {
-    // Session expired or was invalidated server-side — drop it and force a
-    // fresh login rather than letting every subsequent call fail silently.
+  // A 401 on an authenticated call means the session ended server-side (PIN
+  // changed, account closed, 30 days passed) — drop it and return to login.
+  // A 401 from the login call itself is just a wrong PIN.
+  if (res.status === 401 && token && !path.startsWith("/auth/login")) {
     clearSession();
     window.location.reload();
-    throw new Error("Session expired");
+    throw new Error(t("err.SESSION_EXPIRED"));
   }
   if (!res.ok) {
-    let message = `Request failed (${res.status})`;
+    let body = null;
     try {
-      const body = await res.json();
-      if (body?.error) message = body.error;
+      body = await res.json();
     } catch {}
-    throw new Error(message);
+    const err = new Error(errorMessage(body, res.status));
+    err.status = res.status;
+    err.code = body?.code ?? null;
+    err.data = body ?? {};
+    throw err;
   }
+  return res;
+}
+
+async function request(path, options) {
+  const res = await send(path, options);
   if (res.status === 204) return null;
   return res.json();
 }
+
+const post = (path, payload) => request(path, { method: "POST", body: JSON.stringify(payload ?? {}) });
+const patch = (path, payload) => request(path, { method: "PATCH", body: JSON.stringify(payload ?? {}) });
+const query = (params) => new URLSearchParams(Object.entries(params).filter(([, v]) => v !== null && v !== undefined && v !== "")).toString();
 
 export const api = {
   meta: () => request("/meta"),
   branches: () => request("/branches"),
 
   authAccounts: (branchId) => request(`/auth/accounts${branchId ? `?branchId=${branchId}` : ""}`),
-  login: (accountId, pin) => request(`/auth/login`, { method: "POST", body: JSON.stringify({ accountId, pin }) }),
+  login: (accountId, pin) => post(`/auth/login`, { accountId, pin }),
   me: () => request("/auth/me"),
-  logout: () => request(`/auth/logout`, { method: "POST" }),
+  logout: () => post(`/auth/logout`),
 
-  createDesk: (payload) => request(`/desks`, { method: "POST", body: JSON.stringify(payload) }),
+  createDesk: (payload) => post(`/desks`, payload),
   skus: (all = false) => request(`/skus${all ? "?all=1" : ""}`),
-  createSku: (payload) => request(`/skus`, { method: "POST", body: JSON.stringify(payload) }),
-  updateSku: (skuId, payload) => request(`/skus/${skuId}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  createSku: (payload) => post(`/skus`, payload),
+  updateSku: (skuId, payload) => patch(`/skus/${encodeURIComponent(skuId)}`, payload),
+  importSkus: (rows) => post(`/skus/import`, { rows }),
 
   skuTypes: () => request(`/sku-types`),
-  createSkuType: (payload) => request(`/sku-types`, { method: "POST", body: JSON.stringify(payload) }),
-  updateSkuType: (typeId, payload) => request(`/sku-types/${typeId}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  createSkuType: (payload) => post(`/sku-types`, payload),
+  updateSkuType: (typeId, payload) => patch(`/sku-types/${encodeURIComponent(typeId)}`, payload),
   skuWeights: () => request(`/sku-weights`),
-  createSkuWeight: (payload) => request(`/sku-weights`, { method: "POST", body: JSON.stringify(payload) }),
-  updateSkuWeight: (weightId, payload) => request(`/sku-weights/${weightId}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  createSkuWeight: (payload) => post(`/sku-weights`, payload),
+  updateSkuWeight: (weightId, payload) => patch(`/sku-weights/${encodeURIComponent(weightId)}`, payload),
 
-  deskCards: (date, branchId) => request(`/stock/desks?date=${date}${branchId ? `&branchId=${branchId}` : ""}`),
-  deskDetail: (deskId, date) => request(`/stock/desk/${deskId}?date=${date}`),
-  calendar: (branchId, month) => request(`/stock/calendar?branchId=${branchId}&month=${month}`),
-  checkIn: (deskId, date) => request(`/stock/desk/${deskId}/checkin`, { method: "POST", body: JSON.stringify({ date }) }),
-  saveEntry: (deskId, payload) => request(`/stock/desk/${deskId}/entry`, { method: "POST", body: JSON.stringify(payload) }),
-  transitionDesk: (deskId, payload) => request(`/stock/desk/${deskId}/transition`, { method: "POST", body: JSON.stringify(payload) }),
-  addDeskSku: (deskId, payload) => request(`/stock/desk/${deskId}/sku`, { method: "POST", body: JSON.stringify(payload) }),
-  removeDeskSku: (deskId, skuId, date) => request(`/stock/desk/${deskId}/sku/${skuId}?date=${date}`, { method: "DELETE" }),
+  deskCards: (date, branchId) => request(`/stock/desks?${query({ date, branchId })}`),
+  // date may be "latest" = the desk's most recent recorded day.
+  deskDetail: (deskId, date) => request(`/stock/desk/${deskId}?${query({ date })}`),
+  calendar: (branchId, month) => request(`/stock/calendar?${query({ branchId, month })}`),
+  checkIn: (deskId, date) => post(`/stock/desk/${deskId}/checkin`, { date }),
+  saveEntries: (deskId, payload) => post(`/stock/desk/${deskId}/entries`, payload),
+  transitionDesk: (deskId, payload) => post(`/stock/desk/${deskId}/transition`, payload),
+  reopenDesk: (deskId, payload) => post(`/stock/desk/${deskId}/reopen`, payload),
+  addDeskSku: (deskId, payload) => post(`/stock/desk/${deskId}/sku`, payload),
+  removeDeskSku: (deskId, skuId, date) => request(`/stock/desk/${deskId}/sku/${encodeURIComponent(skuId)}?${query({ date })}`, { method: "DELETE" }),
 
-  documents: (params) => {
-    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== null && v !== undefined && v !== ""));
-    return request(`/documents?${qs.toString()}`);
-  },
-  createDocument: (payload) => request(`/documents`, { method: "POST", body: JSON.stringify(payload) }),
+  transferDestinations: () => request(`/transfers/destinations`),
+  transfers: (params) => request(`/transfers?${query(params ?? {})}`),
+  createTransfer: (payload) => post(`/transfers`, payload),
+  cancelTransfer: (id) => post(`/transfers/${id}/cancel`),
+  receiveTransfer: (id, date) => post(`/transfers/${id}/receive`, { date }),
+
+  documents: (params) => request(`/documents?${query(params)}`),
+  createDocument: (payload) => post(`/documents`, payload),
+  decideDocument: (id, decision) => post(`/documents/${id}/decision`, { decision }),
   deleteDocument: (id) => request(`/documents/${id}`, { method: "DELETE" }),
+  documentPrintHtml: async (id) => (await send(`/documents/${id}/print`)).text(),
 
-  dashboard: (params) => {
-    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v));
-    return request(`/dashboard?${qs.toString()}`);
-  },
-
-  report: (params) => {
-    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v));
-    return request(`/report?${qs.toString()}`);
-  },
+  dashboard: (params) => request(`/dashboard?${query(params)}`),
+  report: (params) => request(`/report?${query(params)}`),
 
   settingsSummary: () => request("/settings/summary"),
-  saveConfig: (payload) => request("/settings/config", { method: "POST", body: JSON.stringify(payload) }),
+  saveConfig: (payload) => post("/settings/config", payload),
   runRate: () => request("/settings/run-rate"),
-  saveRunRate: (skuId, payload) => request(`/settings/run-rate/${skuId}`, { method: "POST", body: JSON.stringify(payload) }),
+  saveRunRate: (skuId, payload) => post(`/settings/run-rate/${encodeURIComponent(skuId)}`, payload),
   about: () => request("/settings/about"),
+
+  createUser: (payload) => post(`/users`, payload),
+  updateUser: (id, payload) => patch(`/users/${id}`, payload),
+  audit: (limit = 50) => request(`/audit?limit=${limit}`),
 };
+
+// Printing needs the login token, which a plain new-tab link cannot send. The
+// tab is opened immediately (so the browser does not block it as a popup) and
+// filled once the document has been fetched.
+export function openPrintTab() {
+  return window.open("", "_blank");
+}
+
+export async function fillPrintTab(win, id) {
+  try {
+    const html = await api.documentPrintHtml(id);
+    if (!win) return;
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+  } catch (err) {
+    win?.close();
+    throw err;
+  }
+}
+
+export function openDocumentPrint(id) {
+  return fillPrintTab(openPrintTab(), id);
+}
