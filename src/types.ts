@@ -190,6 +190,13 @@ export interface Transfer {
   status: TransferStatus;
   received_date: string | null;
   received_by: string | null;
+  // Same-branch moves: one ticket groups the lines of a single move; a retried
+  // request carries the same client_ref; an undo points at the rows it reverses.
+  client_ref: string | null;
+  reverses_id: string | null;
+  ticket_id: string | null;
+  note: string | null;
+  is_seed: boolean;
   created_at: string;
   updated_at: string;
 }

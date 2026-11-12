@@ -266,32 +266,32 @@ describe("admin reopen", () => {
 
 describe("linked transfers", () => {
   it("gold leaves the sender, stays in the company total while in transit, and lands when confirmed", async () => {
+    // Same-branch hand-overs are instant Moves (test/moves.test.ts); this is the cross-branch send / receive flow.
     const staff = await asStaff("B-MM");
+    const ts = await asStaff("B-TS");
     const admin = await asAdmin();
     const total = async () => (await call(admin, "GET", "/dashboard")).json.portfolio.total_pcs;
     const totalBefore = await total();
     const fromBefore = rowOf(await detailOf(staff, "MM-D01", TODAY), "GB-001");
 
-    expect((await call(staff, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "MM-D02", skuId: "GB-001", qty: 999 })).json.code).toBe("NOT_ENOUGH_STOCK");
-    const sent = await call(staff, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "MM-D02", skuId: "GB-001", qty: 3 });
+    expect((await call(staff, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "TS-D02", skuId: "GB-001", qty: 999 })).json.code).toBe("NOT_ENOUGH_STOCK");
+    const sent = await call(staff, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "TS-D02", skuId: "GB-001", qty: 3 });
     expect(sent.status).toBe(200);
-    expect(sent.json.kind).toBe("move"); // same branch
+    expect(sent.json.kind).toBe("transfer"); // another branch
 
     const fromAfter = rowOf(await detailOf(staff, "MM-D01", TODAY), "GB-001");
-    expect(fromAfter.move).toBe(3);
+    expect(fromAfter.transfer_out).toBe(fromBefore.transfer_out + 3);
     expect(fromAfter.closing_qty).toBe(fromBefore.closing_qty - 3);
     expect(await total()).toBe(totalBefore);
     expect((await call(admin, "GET", "/dashboard")).json.transit).toMatchObject({ count: 1, pcs: 3 });
 
     // The receiving desk must have an open day to receive into.
-    expect((await call(staff, "POST", `/transfers/${sent.json.id}/receive`, { date: TODAY })).json.code).toBe("NOT_CHECKED_IN");
-    await call(staff, "POST", "/stock/desk/MM-D02/checkin", { date: TODAY });
-    const incoming = (await detailOf(staff, "MM-D02", TODAY)).incoming;
-    expect(incoming).toHaveLength(1);
-    expect((await call(staff, "POST", `/transfers/${sent.json.id}/receive`, { date: TODAY })).status).toBe(200);
-    expect((await call(staff, "POST", `/transfers/${sent.json.id}/receive`, { date: TODAY })).json.code).toBe("NOT_IN_TRANSIT");
+    expect((await call(ts, "POST", `/transfers/${sent.json.id}/receive`, { date: TODAY })).json.code).toBe("NOT_CHECKED_IN");
+    await call(ts, "POST", "/stock/desk/TS-D02/checkin", { date: TODAY });
+    expect((await call(ts, "POST", `/transfers/${sent.json.id}/receive`, { date: TODAY })).status).toBe(200);
+    expect((await call(ts, "POST", `/transfers/${sent.json.id}/receive`, { date: TODAY })).json.code).toBe("NOT_IN_TRANSIT");
 
-    const received = rowOf(await detailOf(staff, "MM-D02", TODAY), "GB-001");
+    const received = rowOf(await detailOf(ts, "TS-D02", TODAY), "GB-001");
     expect(received.transfer_in).toBe(3);
     expect(received.closing_qty).toBe(3);
     expect(await total()).toBe(totalBefore);

@@ -223,19 +223,12 @@ r.get("/stock/desk/:deskId", async (c) => {
   return c.json(await deskDetail(c, store, c.get("user"), deskId, date));
 });
 
-// ---------------------------------------------------------------------------
-// Check-in: opens the day and carries the previous day's stock forward.
-// ---------------------------------------------------------------------------
-r.post("/stock/desk/:deskId/checkin", async (c) => {
-  const store = storeFor(c);
-  const user = c.get("user");
-  const body = await readBody(c);
-  const today = businessDate(c.env);
-  const date = requireDate(body.date, today);
-  const desk = await requireDesk(store, user, c.req.param("deskId"));
+// Opens a desk's day and carries the previous day's stock forward. Shared by the
+// check-in route and moves (a destination case is checked in on demand).
+export async function checkInDesk(store: Store, user: SessionUser, desk: Desk, date: string, today: string): Promise<"created" | "exists"> {
   if (!desk.active) throw new HttpError(409, "This desk is not active", "DESK_INACTIVE");
 
-  if (await getDay(store, desk.desk_id, date)) return c.json({ ok: true, alreadyCheckedIn: true });
+  if (await getDay(store, desk.desk_id, date)) return "exists";
   assertDateWritable(user, date, today, undefined);
 
   const [openEarlier, later, previous] = await Promise.all([
@@ -255,9 +248,22 @@ r.post("/stock/desk/:deskId/checkin", async (c) => {
   }
 
   const created = await store.insertDeskDay({ desk_id: desk.desk_id, ledger_date: date, branch_id: desk.branch_id, checked_in_by: user.accountId });
-  if (!created) return c.json({ ok: true, alreadyCheckedIn: true });
+  if (!created) return "exists";
   if (previous[0]) await carryForward(store, previous[0], date, user.accountId);
-  return c.json({ ok: true });
+  return "created";
+}
+
+// ---------------------------------------------------------------------------
+// Check-in: opens the day and carries the previous day's stock forward.
+// ---------------------------------------------------------------------------
+r.post("/stock/desk/:deskId/checkin", async (c) => {
+  const store = storeFor(c);
+  const user = c.get("user");
+  const body = await readBody(c);
+  const today = businessDate(c.env);
+  const date = requireDate(body.date, today);
+  const desk = await requireDesk(store, user, c.req.param("deskId"));
+  return c.json((await checkInDesk(store, user, desk, date, today)) === "exists" ? { ok: true, alreadyCheckedIn: true } : { ok: true });
 });
 
 // ---------------------------------------------------------------------------

@@ -82,6 +82,7 @@ export interface TransferFilter {
   toDeskId?: string;
   status?: TransferStatus;
   sentDate?: string;
+  ticketId?: string;
 }
 
 export interface LedgerKey {
@@ -94,7 +95,21 @@ export type NewLedgerRow = LedgerKey & { branch_id: string; opening_qty: number;
 export type LedgerRowPatch = LedgerKey & { branch_id: string } & LedgerEntryPatch;
 export type NewDocument = Omit<DocumentRecord, "id" | "doc_no" | "created_at" | "rows">;
 export type NewDocumentRow = Omit<DocumentRow, "id" | "document_id">;
-export type NewTransfer = Omit<Transfer, "id" | "status" | "received_date" | "received_by" | "created_at" | "updated_at">;
+export type NewTransfer = Omit<Transfer, "id" | "status" | "received_date" | "received_by" | "created_at" | "updated_at" | "client_ref" | "reverses_id" | "ticket_id" | "note" | "is_seed"> &
+  Partial<Pick<Transfer, "client_ref" | "reverses_id" | "ticket_id" | "note">>;
+
+export interface MoveInput {
+  date: string;
+  fromDeskId: string;
+  toDeskId: string;
+  lines: { skuId: string; qty: number }[];
+  clientRef: string;
+  note?: string;
+}
+// A refusal writes nothing. Trigger errors (DAY_LOCKED, NEGATIVE) are thrown as StoreError instead.
+export type MoveResult =
+  | { ok: true; ticketId: string; moves: Transfer[]; replayed?: boolean }
+  | { ok: false; code: string; skuId?: string; available?: number };
 export type NewStaffAccount = Pick<StaffAccount, "branch_id" | "display_name" | "pin_hash" | "role">;
 export type NewSku = Omit<MasterSku, "active"> & { active?: boolean };
 
@@ -154,6 +169,10 @@ export interface Store {
   getTransfer(id: string): Promise<Transfer | null>;
   createTransfer(transfer: NewTransfer): Promise<Transfer>;
   updateTransfer(id: string, patch: Partial<Transfer>, expectedStatus: TransferStatus): Promise<Transfer | null>;
+  // Same-branch move: both cases change in one atomic step (the move_stock RPC).
+  moveStock(input: MoveInput): Promise<MoveResult>;
+  // Reverses a whole ticket on its original date (the undo_move RPC).
+  undoMove(ticketId: string, clientRef: string): Promise<MoveResult>;
 
   audit(entry: Omit<AuditEntry, "id" | "created_at">): Promise<void>;
   auditLog(limit: number): Promise<AuditEntry[]>;
@@ -592,6 +611,7 @@ export class DemoStore implements Store {
         if (filter.toDeskId && t.to_desk_id !== filter.toDeskId) return false;
         if (filter.status && t.status !== filter.status) return false;
         if (filter.sentDate && t.sent_date !== filter.sentDate) return false;
+        if (filter.ticketId && t.ticket_id !== filter.ticketId) return false;
         return true;
       })
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -602,7 +622,7 @@ export class DemoStore implements Store {
   async createTransfer(transfer: NewTransfer) {
     this.guard();
     const now = this.now();
-    const row: Transfer = { id: crypto.randomUUID(), status: "in_transit", received_date: null, received_by: null, created_at: now, updated_at: now, ...transfer };
+    const row: Transfer = { id: crypto.randomUUID(), status: "in_transit", received_date: null, received_by: null, client_ref: null, reverses_id: null, ticket_id: null, note: null, is_seed: false, created_at: now, updated_at: now, ...transfer };
     this.db.transfers.push(row);
     this.log("transfers", "INSERT", null, row);
     return row;
@@ -615,6 +635,149 @@ export class DemoStore implements Store {
     Object.assign(row, patch, { updated_at: this.now() });
     this.log("transfers", "UPDATE", before, row);
     return row;
+  }
+
+  // The whole move runs without an await, so two simultaneous requests cannot
+  // interleave between the stock check and the writes (the SQL RPC gets the same
+  // guarantee from row locks).
+  private moveCore(input: MoveInput, reversesTicket: string | null): MoveResult {
+    this.guard();
+    const ticketRows = (ticket: string) => this.db.transfers.filter((t) => t.ticket_id === ticket);
+    const prior = this.db.transfers.find((t) => t.client_ref === input.clientRef);
+    if (prior?.ticket_id) return { ok: true, ticketId: prior.ticket_id, moves: ticketRows(prior.ticket_id), replayed: true };
+
+    const { date, fromDeskId, toDeskId } = input;
+    if (fromDeskId === toDeskId) return { ok: false, code: "SAME_DESK" };
+    const from = this.db.desks.find((d) => d.desk_id === fromDeskId);
+    const to = this.db.desks.find((d) => d.desk_id === toDeskId);
+    if (!from || !to) return { ok: false, code: "DESK_NOT_FOUND" };
+    if (from.branch_id !== to.branch_id) return { ok: false, code: "OTHER_BRANCH" };
+
+    if (input.lines.length === 0 || input.lines.some((l) => !Number.isInteger(l.qty) || l.qty < 1 || l.qty > 99999)) {
+      return { ok: false, code: "BAD_QTY" };
+    }
+    const fromStatus = this.dayStatus(fromDeskId, date);
+    const toStatus = this.dayStatus(toDeskId, date);
+    if (fromStatus === null) return { ok: false, code: "NOT_CHECKED_IN" };
+    if (toStatus === null) return { ok: false, code: "DEST_NOT_OPEN" };
+    if (fromStatus === "done") return { ok: false, code: "DAY_LOCKED" };
+    if (toStatus === "done") return { ok: false, code: "DEST_DAY_LOCKED" };
+
+    const totals = new Map<string, number>();
+    for (const l of input.lines) totals.set(l.skuId, (totals.get(l.skuId) ?? 0) + l.qty);
+    const lines = [...totals.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    for (const [skuId, qty] of lines) {
+      const row = this.findRow({ ledger_date: date, desk_id: fromDeskId, sku_id: skuId });
+      if (!row || row.excluded || qty > row.closing_qty) {
+        return { ok: false, code: "NOT_ENOUGH_STOCK", skuId, available: row && !row.excluded ? Math.max(row.closing_qty, 0) : 0 };
+      }
+    }
+
+    const actorId = this.actor && "id" in this.actor ? this.actor.id : null;
+    const ticketId = crypto.randomUUID();
+    const original = reversesTicket ? ticketRows(reversesTicket) : [];
+    const moves: Transfer[] = [];
+    lines.forEach(([skuId, qty], i) => {
+      const src = this.findRow({ ledger_date: date, desk_id: fromDeskId, sku_id: skuId })!;
+      const srcBefore = { ...src };
+      src.move += qty;
+      src.excluded = false;
+      if (actorId) src.performed_by = actorId;
+      src.closing_qty = computeClosing(src);
+      src.updated_at = this.now();
+      this.log("daily_stock_ledger", "UPDATE", srcBefore, src);
+
+      const dst = this.findRow({ ledger_date: date, desk_id: toDeskId, sku_id: skuId });
+      if (dst) {
+        const before = { ...dst };
+        dst.transfer_in += qty;
+        dst.excluded = false;
+        if (actorId) dst.performed_by = actorId;
+        dst.closing_qty = computeClosing(dst);
+        dst.updated_at = this.now();
+        this.log("daily_stock_ledger", "UPDATE", before, dst);
+      } else {
+        const stamp = this.now();
+        const row: LedgerRow = {
+          id: this.newId("ledger"),
+          ledger_date: date,
+          desk_id: toDeskId,
+          branch_id: to.branch_id,
+          sku_id: skuId,
+          opening_qty: 0,
+          stock_in: 0,
+          transfer_in: qty,
+          retail_sale: 0,
+          wholesale: 0,
+          transfer_out: 0,
+          destock: 0,
+          destock_note: null,
+          move: 0,
+          closing_qty: qty,
+          counted_qty: null,
+          counted_note: null,
+          performed_by: actorId,
+          excluded: false,
+          created_at: stamp,
+          updated_at: stamp,
+        };
+        this.db.ledger.push(row);
+        this.log("daily_stock_ledger", "INSERT", null, row);
+      }
+
+      const now = this.now();
+      const transfer: Transfer = {
+        id: crypto.randomUUID(),
+        kind: "move",
+        from_desk_id: fromDeskId,
+        from_branch_id: from.branch_id,
+        to_desk_id: toDeskId,
+        to_branch_id: to.branch_id,
+        sku_id: skuId,
+        qty,
+        sent_date: date,
+        sent_by: actorId,
+        status: "received",
+        received_date: date,
+        received_by: actorId,
+        client_ref: i === 0 ? input.clientRef : null,
+        reverses_id: original.find((t) => t.sku_id === skuId)?.id ?? null,
+        ticket_id: ticketId,
+        note: input.note ?? null,
+        is_seed: false,
+        created_at: now,
+        updated_at: now,
+      };
+      this.db.transfers.push(transfer);
+      this.log("transfers", "INSERT", null, transfer);
+      moves.push(transfer);
+    });
+    return { ok: true, ticketId, moves };
+  }
+  async moveStock(input: MoveInput): Promise<MoveResult> {
+    return this.moveCore(input, null);
+  }
+  async undoMove(ticketId: string, clientRef: string): Promise<MoveResult> {
+    this.guard();
+    const prior = this.db.transfers.find((t) => t.client_ref === clientRef);
+    if (prior?.ticket_id) {
+      return { ok: true, ticketId: prior.ticket_id, moves: this.db.transfers.filter((t) => t.ticket_id === prior.ticket_id), replayed: true };
+    }
+    const original = this.db.transfers.filter((t) => t.ticket_id === ticketId);
+    if (original.length === 0) return { ok: false, code: "NOT_FOUND" };
+    if (original[0].kind !== "move" || original[0].status !== "received") return { ok: false, code: "NOT_A_MOVE" };
+    const ids = new Set(original.map((t) => t.id));
+    if (this.db.transfers.some((t) => t.reverses_id && ids.has(t.reverses_id))) return { ok: false, code: "ALREADY_UNDONE" };
+    return this.moveCore(
+      {
+        date: original[0].sent_date,
+        fromDeskId: original[0].to_desk_id,
+        toDeskId: original[0].from_desk_id,
+        lines: original.map((t) => ({ skuId: t.sku_id, qty: t.qty })),
+        clientRef,
+      },
+      ticketId
+    );
   }
 
   async audit(entry: Omit<AuditEntry, "id" | "created_at">) {
@@ -921,6 +1084,7 @@ class SupabaseStore implements Store {
     if (filter.toDeskId) q.push(`to_desk_id=eq.${enc(filter.toDeskId)}`);
     if (filter.status) q.push(`status=eq.${filter.status}`);
     if (filter.sentDate) q.push(`sent_date=eq.${filter.sentDate}`);
+    if (filter.ticketId) q.push(`ticket_id=eq.${enc(filter.ticketId)}`);
     return this.restAll<Transfer>(`transfers?${q.join("&")}`);
   }
   async getTransfer(id: string) {
@@ -933,6 +1097,29 @@ class SupabaseStore implements Store {
   }
   async updateTransfer(id: string, patch: Partial<Transfer>, expectedStatus: TransferStatus) {
     return this.patchOne<Transfer>(`transfers?id=eq.${enc(id)}&status=eq.${expectedStatus}`, patch);
+  }
+
+  // The RPC speaks snake_case; the Store speaks camelCase.
+  private moveResult(r: { ok: boolean; code?: string; sku_id?: string; available?: number; ticket_id?: string; moves?: Transfer[]; replayed?: boolean }): MoveResult {
+    if (!r.ok) {
+      return { ok: false, code: r.code ?? "UNKNOWN", ...(r.sku_id !== undefined ? { skuId: r.sku_id } : {}), ...(r.available !== undefined ? { available: r.available } : {}) };
+    }
+    return { ok: true, ticketId: r.ticket_id!, moves: r.moves ?? [], ...(r.replayed ? { replayed: true } : {}) };
+  }
+  async moveStock(input: MoveInput) {
+    return this.moveResult(
+      await this.rpc("move_stock", {
+        p_date: input.date,
+        p_from: input.fromDeskId,
+        p_to: input.toDeskId,
+        p_lines: input.lines.map((l) => ({ sku_id: l.skuId, qty: l.qty })),
+        p_client_ref: input.clientRef,
+        p_note: input.note ?? null,
+      })
+    );
+  }
+  async undoMove(ticketId: string, clientRef: string) {
+    return this.moveResult(await this.rpc("undo_move", { p_ticket: ticketId, p_client_ref: clientRef }));
   }
 
   async audit(entry: Omit<AuditEntry, "id" | "created_at">) {
