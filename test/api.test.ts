@@ -121,9 +121,10 @@ describe("daily cycle", () => {
     const staff = await asStaff("B-MM");
     const desk = "MM-D01";
     await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, rows: [{ sku_id: "GB-001", destock: 1 }] });
-    // Counts cannot be entered before the Final Stock step.
+    // Counts can be entered at any time, including at check-in.
     await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, rows: [{ sku_id: "GB-001", counted_qty: 1 }] });
-    expect(rowOf(await detailOf(staff, desk, TODAY), "GB-001").counted_qty).toBeNull();
+    expect(rowOf(await detailOf(staff, desk, TODAY), "GB-001").counted_qty).toBe(1);
+    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, rows: [{ sku_id: "GB-001", counted_qty: null }] });
     expect((await call(staff, "POST", `/stock/desk/${desk}/transition`, { date: TODAY, toStatus: "done" })).status).toBe(409);
     expect((await call(staff, "POST", `/stock/desk/${desk}/transition`, { date: TODAY, toStatus: "final_stock" })).status).toBe(200);
 
@@ -515,5 +516,92 @@ describe("branch manager", () => {
     expect((await call(session, "GET", "/auth/me")).json.user.role).toBe("manager");
     const summary = (await call(admin, "GET", "/settings/summary")).json.staff;
     expect(summary.roleCounts.manager).toBe(2);
+  });
+});
+
+describe("compare-and-set entries, counts any time, one-step close", () => {
+  const entries = (s: any, body: object, desk = "MM-D01") => call(s, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, ...body });
+
+  it("two devices: the second stale change gets 409 ROW_CHANGED with the current row", async () => {
+    const a = await asStaff("B-MM");
+    const b = await asStaff("B-MM");
+    const before = rowOf(await detailOf(a, "MM-D01", TODAY), "NK-010");
+    const first = await entries(a, { changes: [{ sku_id: "NK-010", field: "retail_sale", from: before.retail_sale, to: before.retail_sale + 1 }] });
+    expect(first.status).toBe(200);
+    expect(first.json.ok).toBe(true);
+    expect(first.json.rows[0].retail_sale).toBe(before.retail_sale + 1);
+    const second = await entries(b, { changes: [{ sku_id: "NK-010", field: "retail_sale", from: before.retail_sale, to: before.retail_sale + 5 }] });
+    expect(second.status).toBe(409);
+    expect(second.json.code).toBe("ROW_CHANGED");
+    expect(second.json.row.retail_sale).toBe(before.retail_sale + 1);
+    expect(rowOf(await detailOf(a, "MM-D01", TODAY), "NK-010").retail_sale).toBe(before.retail_sale + 1);
+  });
+
+  it("a retried change that already applied returns ok", async () => {
+    const staff = await asStaff("B-MM");
+    const before = rowOf(await detailOf(staff, "MM-D01", TODAY), "NK-010");
+    const change = { sku_id: "NK-010", field: "stock_in", from: before.stock_in, to: before.stock_in + 3 };
+    expect((await entries(staff, { changes: [change] })).status).toBe(200);
+    const retry = await entries(staff, { changes: [change] });
+    expect(retry.status).toBe(200);
+    expect(retry.json.ok).toBe(true);
+    expect(rowOf(await detailOf(staff, "MM-D01", TODAY), "NK-010").stock_in).toBe(before.stock_in + 3);
+  });
+
+  it("a change that would make closing negative gets 409 NEGATIVE_CLOSING with available", async () => {
+    const staff = await asStaff("B-MM");
+    const row = rowOf(await detailOf(staff, "MM-D01", TODAY), "GB-001");
+    const res = await entries(staff, { changes: [{ sku_id: "GB-001", field: "retail_sale", from: row.retail_sale, to: row.retail_sale + row.closing_qty + 1 }] });
+    expect(res.status).toBe(409);
+    expect(res.json.code).toBe("NEGATIVE_CLOSING");
+    expect(res.json.available).toBe(row.closing_qty);
+    // the legacy body reports it the same way
+    const legacy = await entries(staff, { rows: [{ sku_id: "GB-001", retail_sale: row.retail_sale + row.closing_qty + 1 }] });
+    expect(legacy.json.available).toBe(row.closing_qty);
+  });
+
+  it("validates fields, quantities and rows of a change", async () => {
+    const staff = await asStaff("B-MM");
+    expect((await entries(staff, { changes: [{ sku_id: "GB-001", field: "opening_qty", to: 5 }] })).json.code).toBe("BAD_FIELD");
+    expect((await entries(staff, { changes: [{ sku_id: "GB-001", field: "retail_sale", to: -1 }] })).json.code).toBe("BAD_QTY");
+    expect((await entries(staff, { changes: [{ sku_id: "GB-001", field: "retail_sale", from: "x", to: 1 }] })).json.code).toBe("BAD_QTY");
+    expect((await entries(staff, { changes: [{ sku_id: "NOPE", field: "retail_sale", to: 1 }] })).json.code).toBe("ROW_NOT_FOUND");
+  });
+
+  it("counted_qty saves while the day is check_in, and may be cleared with from set", async () => {
+    const staff = await asStaff("B-MM");
+    expect((await detailOf(staff, "MM-D01", TODAY)).status).toBe("check_in");
+    const saved = await entries(staff, { changes: [{ sku_id: "GB-001", field: "counted_qty", from: null, to: 3 }, { sku_id: "GB-001", field: "counted_note", from: null, to: "ok" }] });
+    expect(saved.status).toBe(200);
+    expect(rowOf(await detailOf(staff, "MM-D01", TODAY), "GB-001")).toMatchObject({ counted_qty: 3, counted_note: "ok" });
+    expect((await entries(staff, { changes: [{ sku_id: "GB-001", field: "counted_qty", from: 3, to: null }] })).status).toBe(200);
+    expect(rowOf(await detailOf(staff, "MM-D01", TODAY), "GB-001").counted_qty).toBeNull();
+  });
+
+  it("close goes straight from check_in to done when everything is counted", async () => {
+    const staff = await asStaff("B-MM");
+    await countEverything(staff, "MM-D01", TODAY);
+    const res = await call(staff, "POST", "/stock/desk/MM-D01/close", { date: TODAY, safe_drop_note: "dropped" });
+    expect(res.status).toBe(200);
+    expect((await detailOf(staff, "MM-D01", TODAY)).status).toBe("done");
+    const tomorrow = on(staff, TOMORROW);
+    expect((await call(tomorrow, "POST", "/stock/desk/MM-D01/checkin", { date: TOMORROW })).status).toBe(200);
+  });
+
+  it("close refuses with DAY_INCOMPLETE listing count_missing", async () => {
+    const staff = await asStaff("B-MM");
+    const res = await call(staff, "POST", "/stock/desk/MM-D01/close", { date: TODAY });
+    expect(res.status).toBe(422);
+    expect(res.json.code).toBe("DAY_INCOMPLETE");
+    expect(res.json.failures.filter((f: any) => f.rule === "count_missing")).toHaveLength(4);
+    expect((await detailOf(staff, "MM-D01", TODAY)).status).toBe("check_in");
+  });
+
+  it("close also works from final_stock and refuses a Done day", async () => {
+    const staff = await asStaff("B-MM");
+    await call(staff, "POST", "/stock/desk/MM-D01/transition", { date: TODAY, toStatus: "final_stock" });
+    await countEverything(staff, "MM-D01", TODAY);
+    expect((await call(staff, "POST", "/stock/desk/MM-D01/close", { date: TODAY })).status).toBe(200);
+    expect((await call(staff, "POST", "/stock/desk/MM-D01/close", { date: TODAY })).status).toBe(423);
   });
 });

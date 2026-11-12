@@ -56,11 +56,6 @@ export async function countEverything(session: Session, deskId: string, date: st
 }
 
 export async function closeDay(session: Session, deskId: string, date: string) {
-  const detail = (await call(session, "GET", `/stock/desk/${deskId}?date=${date}`)).json;
-  if (detail.status === "check_in") {
-    const step = await call(session, "POST", `/stock/desk/${deskId}/transition`, { date, toStatus: "final_stock" });
-    if (step.status !== 200) throw new Error(`final_stock failed: ${step.text}`);
-  }
   await countEverything(session, deskId, date);
-  return call(session, "POST", `/stock/desk/${deskId}/transition`, { date, toStatus: "done" });
+  return call(session, "POST", `/stock/desk/${deskId}/close`, { date });
 }

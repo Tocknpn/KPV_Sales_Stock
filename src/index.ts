@@ -40,7 +40,14 @@ app.onError((err, c) => {
         ? "That already exists or was changed on another device"
         : "The database rejected that value";
     console.error(`[store ${err.code}] ${err.message}`);
-    return c.json({ error: message, code: err.code === "NEGATIVE" ? "NEGATIVE_CLOSING" : err.code }, STORE_STATUS[err.code]);
+    return c.json(
+      {
+        error: message,
+        code: err.code === "NEGATIVE" ? "NEGATIVE_CLOSING" : err.code,
+        ...(err.code === "NEGATIVE" && err.available !== undefined ? { available: err.available } : {}),
+      },
+      STORE_STATUS[err.code]
+    );
   }
   console.error(err);
   return c.json({ error: "Something went wrong on the server", code: "SERVER_ERROR" }, 500);

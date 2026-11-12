@@ -33,10 +33,21 @@ export type StoreErrorCode = "DAY_LOCKED" | "CONFLICT" | "INVALID" | "UNAVAILABL
 
 // Errors the routes can turn into a meaningful HTTP status.
 export class StoreError extends Error {
-  constructor(public code: StoreErrorCode, message: string) {
+  // `available` accompanies NEGATIVE: the row's closing before the refused change.
+  constructor(public code: StoreErrorCode, message: string, public available?: number) {
     super(message);
   }
 }
+
+export type LedgerChangeField = "stock_in" | "retail_sale" | "wholesale" | "destock" | "destock_note" | "counted_qty" | "counted_note";
+export const LEDGER_CHANGE_FIELDS: readonly LedgerChangeField[] = ["stock_in", "retail_sale", "wholesale", "destock", "destock_note", "counted_qty", "counted_note"];
+export const TEXT_CHANGE_FIELDS: readonly LedgerChangeField[] = ["destock_note", "counted_note"];
+// Compare-and-set: when `from` is present the change applies only if the stored
+// value is still `from` (or already `to`, which makes a retry harmless).
+export type LedgerChange = { field: LedgerChangeField; from?: number | string | null; to: number | string | null };
+export type ApplyResult =
+  | { ok: true; row: LedgerRow }
+  | { ok: false; code: "ROW_CHANGED" | "ROW_NOT_FOUND"; row?: LedgerRow };
 
 export interface LedgerFilter {
   date?: string;
@@ -127,6 +138,8 @@ export interface Store {
   // Atomic increment of one movement column. Returns the new value, or null
   // when the row does not exist.
   ledgerAdd(key: LedgerKey, field: "transfer_in" | "transfer_out" | "move", delta: number, actor: string | null): Promise<number | null>;
+  // Atomic compare-and-set of several fields of one row (the ledger_apply RPC).
+  applyLedgerChanges(key: LedgerKey, changes: LedgerChange[]): Promise<ApplyResult>;
 
   documents(filter: DocumentFilter): Promise<{ rows: DocumentRecord[]; total: number }>;
   getDocument(id: string): Promise<DocumentRecord | null>;
@@ -444,7 +457,7 @@ export class DemoStore implements Store {
       if (!row) continue;
       const next = computeClosing({ ...row, ...p });
       if (next < 0 && next < row.closing_qty) {
-        throw new StoreError("NEGATIVE", `${row.desk_id} ${row.sku_id}: only ${Math.max(row.closing_qty, 0)} available`);
+        throw new StoreError("NEGATIVE", `${row.desk_id} ${row.sku_id}: only ${Math.max(row.closing_qty, 0)} available`, Math.max(row.closing_qty, 0));
       }
     }
     const out: LedgerRow[] = [];
@@ -466,7 +479,7 @@ export class DemoStore implements Store {
     this.assertUnlocked(key.desk_id, key.ledger_date);
     if (row[field] + delta < 0) throw new StoreError("INVALID", `${field} cannot go below zero`);
     const next = computeClosing({ ...row, [field]: row[field] + delta });
-    if (next < 0 && next < row.closing_qty) throw new StoreError("NEGATIVE", `${row.desk_id} ${row.sku_id}: only ${Math.max(row.closing_qty, 0)} available`);
+    if (next < 0 && next < row.closing_qty) throw new StoreError("NEGATIVE", `${row.desk_id} ${row.sku_id}: only ${Math.max(row.closing_qty, 0)} available`, Math.max(row.closing_qty, 0));
     const before = { ...row };
     row[field] += delta;
     row.excluded = false;
@@ -475,6 +488,32 @@ export class DemoStore implements Store {
     row.updated_at = this.now();
     this.log("daily_stock_ledger", "UPDATE", before, row);
     return row[field];
+  }
+  // Synchronous body between the read and the write, so it is atomic.
+  async applyLedgerChanges(key: LedgerKey, changes: LedgerChange[]): Promise<ApplyResult> {
+    this.guard();
+    for (const c of changes) {
+      if (!LEDGER_CHANGE_FIELDS.includes(c.field)) throw new StoreError("INVALID", `ledger_apply: field ${c.field} not allowed`);
+    }
+    const row = this.findRow(key);
+    if (!row) return { ok: false, code: "ROW_NOT_FOUND" };
+    this.assertUnlocked(key.desk_id, key.ledger_date);
+    for (const c of changes) {
+      if (c.from === undefined) continue;
+      const stored = row[c.field] ?? null;
+      if (stored !== c.from && stored !== c.to) return { ok: false, code: "ROW_CHANGED", row: { ...row } };
+    }
+    const patch = Object.fromEntries(changes.map((c) => [c.field, c.to])) as Partial<LedgerRow>;
+    const next = computeClosing({ ...row, ...patch });
+    if (next < 0 && next < row.closing_qty) {
+      throw new StoreError("NEGATIVE", `${row.desk_id} ${row.sku_id}: only ${Math.max(row.closing_qty, 0)} available`, Math.max(row.closing_qty, 0));
+    }
+    const before = { ...row };
+    Object.assign(row, patch, { updated_at: this.now() });
+    if (this.actor && "id" in this.actor) row.performed_by = this.actor.id;
+    row.closing_qty = computeClosing(row);
+    this.log("daily_stock_ledger", "UPDATE", before, row);
+    return { ok: true, row: { ...row } };
   }
 
   async documents(filter: DocumentFilter) {
@@ -620,7 +659,10 @@ class SupabaseStore implements Store {
     if (!res.ok) {
       const body = await res.text();
       if (body.includes("DAY_LOCKED")) throw new StoreError("DAY_LOCKED", "This day is Done and locked");
-      if (body.includes("NEGATIVE_CLOSING")) throw new StoreError("NEGATIVE", "This would make the stock negative");
+      if (body.includes("NEGATIVE_CLOSING")) {
+        const available = Number(/NEGATIVE_CLOSING: available (-?\d+)/.exec(body)?.[1]);
+        throw new StoreError("NEGATIVE", "This would make the stock negative", Number.isFinite(available) ? Math.max(available, 0) : undefined);
+      }
       if (body.includes("AUDIT_ACTOR_MISSING")) throw new StoreError("AUDIT_ACTOR_MISSING", "A write needs an acting user or system tag");
       if (body.includes("FUTURE_DATE")) throw new StoreError("INVALID", "That date is after today");
       const pgCode = /"code"\s*:\s*"([A-Za-z0-9]+)"/.exec(body)?.[1] ?? "";
@@ -809,6 +851,10 @@ class SupabaseStore implements Store {
       p_delta: delta,
       p_actor: actor,
     });
+  }
+
+  async applyLedgerChanges(key: LedgerKey, changes: LedgerChange[]) {
+    return this.rpc<ApplyResult>("ledger_apply", { p_date: key.ledger_date, p_desk: key.desk_id, p_sku: key.sku_id, p_changes: changes });
   }
 
   async documents(filter: DocumentFilter) {

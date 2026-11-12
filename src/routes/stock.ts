@@ -2,11 +2,12 @@
 // (not started -> check_in -> final_stock -> done) and row entry.
 import { storeFor, newRouter, readBody, HttpError, scopeBranch, requireDesk, requireDate, assertDateWritable, getDay, requireOpenDay, audit } from "../app";
 import type { Ctx } from "../app";
-import type { Store, LedgerRowPatch, NewLedgerRow } from "../store";
+import { LEDGER_CHANGE_FIELDS, TEXT_CHANGE_FIELDS } from "../store";
+import type { Store, LedgerRowPatch, NewLedgerRow, LedgerChange, LedgerChangeField } from "../store";
 import { requireManager, assertBranchAccess, isManagerOf } from "../auth";
 import { addDays, businessDate, datesInMonth, isValidMonth } from "../time";
 import { buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, parseQty, validateDeskDay } from "../logic";
-import type { DeskDay, LedgerRow, SessionUser } from "../types";
+import type { Desk, DeskDay, LedgerRow, SessionUser } from "../types";
 
 // Mounted behind requireAuth in src/index.ts.
 const r = newRouter();
@@ -53,6 +54,35 @@ async function carryForward(store: Store, from: DeskDay, toDate: string, actor: 
   }
   await store.insertLedgerRows(inserts);
   await store.patchLedgerRows(patches);
+}
+
+const safeDropNote = (body: Record<string, any>) =>
+  body.safe_drop_note !== undefined ? { safe_drop_note: body.safe_drop_note ? String(body.safe_drop_note).slice(0, 500) : null } : {};
+
+// Marks an open day Done (from check-in or final stock) once every row is
+// counted and explained, then updates the following day's opening balances if
+// that day already exists. Shared by /transition (to done) and /close.
+async function closeDeskDay(store: Store, user: SessionUser, desk: Desk, date: string, note: { safe_drop_note?: string | null }) {
+  const day = await getDay(store, desk.desk_id, date);
+  if (!day || (day.status !== "check_in" && day.status !== "final_stock")) {
+    throw new HttpError(409, `Cannot close a day that is ${day?.status ?? "not started"}`, "BAD_TRANSITION");
+  }
+  const failures = validateDeskDay(await store.ledger({ date, deskId: desk.desk_id }));
+  if (failures.length > 0) {
+    throw new HttpError(422, "This desk cannot be closed yet", "DAY_INCOMPLETE", { failures });
+  }
+  const updated = await store.updateDeskDay(
+    desk.desk_id,
+    date,
+    { status: "done", done_by: user.accountId, done_at: new Date().toISOString(), ...note },
+    day.status
+  );
+  if (!updated) throw new HttpError(409, "This desk was changed on another device — reload", "STALE");
+
+  // If the following day is already open (this day was reopened and closed
+  // again), its opening balances follow the corrected count.
+  const [next] = await store.deskDays({ deskId: desk.desk_id, after: date, order: "asc", limit: 1 });
+  if (next && next.status !== "done") await carryForward(store, updated, next.ledger_date, user.accountId);
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +267,27 @@ r.post("/stock/desk/:deskId/checkin", async (c) => {
 // ---------------------------------------------------------------------------
 const QTY_FIELDS = ["stock_in", "retail_sale", "wholesale", "destock"] as const;
 
+const parseCount = (v: unknown) => (v === null || v === "" ? null : parseQty(v));
+
+// One compare-and-set change: {sku_id, field, from?, to}. `from` omitted means
+// "apply whatever is stored".
+function parseChange(item: Record<string, any>): { sku_id: string; change: LedgerChange } {
+  const sku_id = String(item?.sku_id ?? "");
+  const field = item?.field as LedgerChangeField;
+  if (!LEDGER_CHANGE_FIELDS.includes(field)) throw new HttpError(400, `Field ${String(item?.field)} cannot be changed here`, "BAD_FIELD", { sku_id, field: item?.field });
+  const value = (v: unknown): number | string | null => {
+    if (TEXT_CHANGE_FIELDS.includes(field)) return v === null || v === undefined || v === "" ? null : String(v).slice(0, 200);
+    const qty = field === "counted_qty" ? parseCount(v) : parseQty(v);
+    if (qty === null && !(field === "counted_qty" && (v === null || v === ""))) {
+      throw new HttpError(400, `${field} must be a whole number, 0 or more`, "BAD_QTY", { sku_id, field });
+    }
+    return qty;
+  };
+  const change: LedgerChange = { field, to: value(item.to) };
+  if (item.from !== undefined) change.from = value(item.from);
+  return { sku_id, change };
+}
+
 r.post("/stock/desk/:deskId/entries", async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
@@ -244,14 +295,42 @@ r.post("/stock/desk/:deskId/entries", async (c) => {
   const today = businessDate(c.env);
   const date = requireDate(body.date, today);
   const desk = await requireDesk(store, user, c.req.param("deskId"));
-  const day = await requireOpenDay(store, user, desk.desk_id, date, today);
+  await requireOpenDay(store, user, desk.desk_id, date, today);
 
-  const items: Record<string, any>[] = Array.isArray(body.rows) ? body.rows : [];
   const known = new Set((await store.ledger({ date, deskId: desk.desk_id })).filter((row) => !row.excluded).map((row) => row.sku_id));
+  const unknownSku = (skuId: string) => new HttpError(400, `SKU ${skuId} is not on this desk for ${date}`, "ROW_NOT_FOUND", { sku_id: skuId });
+  const saveNote = async () => {
+    if (body.safe_drop_note !== undefined) await store.updateDeskDay(desk.desk_id, date, safeDropNote(body));
+  };
+
+  // Compare-and-set form. Changes already applied stay applied if a later row
+  // is refused; resending the whole request is safe (stored == to is success).
+  if (Array.isArray(body.changes)) {
+    const bySku = new Map<string, LedgerChange[]>();
+    for (const item of body.changes) {
+      const { sku_id, change } = parseChange(item);
+      if (!known.has(sku_id)) throw unknownSku(sku_id);
+      bySku.set(sku_id, [...(bySku.get(sku_id) ?? []), change]);
+    }
+    const rows: LedgerRow[] = [];
+    for (const [sku_id, changes] of bySku) {
+      const res = await store.applyLedgerChanges({ ledger_date: date, desk_id: desk.desk_id, sku_id }, changes);
+      if (!res.ok) {
+        if (res.code === "ROW_NOT_FOUND") throw unknownSku(sku_id);
+        throw new HttpError(409, "This row was changed on another device", "ROW_CHANGED", { row: res.row });
+      }
+      rows.push(res.row);
+    }
+    await saveNote();
+    return c.json({ ok: true, rows });
+  }
+
+  // Legacy form: last write wins, only the fields sent are changed.
+  const items: Record<string, any>[] = Array.isArray(body.rows) ? body.rows : [];
   const patches: LedgerRowPatch[] = [];
   for (const item of items) {
     const skuId = String(item?.sku_id ?? "");
-    if (!known.has(skuId)) throw new HttpError(400, `SKU ${skuId} is not on this desk for ${date}`, "ROW_NOT_FOUND", { sku_id: skuId });
+    if (!known.has(skuId)) throw unknownSku(skuId);
     const patch: LedgerRowPatch = { ledger_date: date, desk_id: desk.desk_id, sku_id: skuId, branch_id: desk.branch_id };
     let changed = false;
     for (const field of QTY_FIELDS) {
@@ -265,28 +344,23 @@ r.post("/stock/desk/:deskId/entries", async (c) => {
       patch.destock_note = item.destock_note ? String(item.destock_note).slice(0, 200) : null;
       changed = true;
     }
-    // The physical count belongs to the Final Stock step only.
-    if (day.status === "final_stock") {
-      if (item.counted_qty !== undefined) {
-        const counted = item.counted_qty === null || item.counted_qty === "" ? null : parseQty(item.counted_qty);
-        if (counted === null && item.counted_qty !== null && item.counted_qty !== "") {
-          throw new HttpError(400, "Count must be a whole number, 0 or more", "BAD_QTY", { sku_id: skuId, field: "counted_qty" });
-        }
-        patch.counted_qty = counted;
-        changed = true;
+    if (item.counted_qty !== undefined) {
+      const counted = parseCount(item.counted_qty);
+      if (counted === null && item.counted_qty !== null && item.counted_qty !== "") {
+        throw new HttpError(400, "Count must be a whole number, 0 or more", "BAD_QTY", { sku_id: skuId, field: "counted_qty" });
       }
-      if (item.counted_note !== undefined) {
-        patch.counted_note = item.counted_note ? String(item.counted_note).slice(0, 200) : null;
-        changed = true;
-      }
+      patch.counted_qty = counted;
+      changed = true;
+    }
+    if (item.counted_note !== undefined) {
+      patch.counted_note = item.counted_note ? String(item.counted_note).slice(0, 200) : null;
+      changed = true;
     }
     if (changed) patches.push({ ...patch, performed_by: user.accountId });
   }
 
   await store.patchLedgerRows(patches);
-  if (body.safe_drop_note !== undefined) {
-    await store.updateDeskDay(desk.desk_id, date, { safe_drop_note: body.safe_drop_note ? String(body.safe_drop_note).slice(0, 500) : null });
-  }
+  await saveNote();
   return c.json({ ok: true, saved: patches.length });
 });
 
@@ -307,30 +381,26 @@ r.post("/stock/desk/:deskId/transition", async (c) => {
   const expected = toStatus === "final_stock" ? "check_in" : "final_stock";
   if (day.status !== expected) throw new HttpError(409, `Cannot move from ${day.status} to ${toStatus}`, "BAD_TRANSITION");
 
-  const note = body.safe_drop_note !== undefined ? { safe_drop_note: body.safe_drop_note ? String(body.safe_drop_note).slice(0, 500) : null } : {};
-
   if (toStatus === "final_stock") {
-    const updated = await store.updateDeskDay(desk.desk_id, date, { status: "final_stock", ...note }, "check_in");
+    const updated = await store.updateDeskDay(desk.desk_id, date, { status: "final_stock", ...safeDropNote(body) }, "check_in");
     if (!updated) throw new HttpError(409, "This desk was changed on another device — reload", "STALE");
     return c.json({ ok: true });
   }
 
-  const failures = validateDeskDay(await store.ledger({ date, deskId: desk.desk_id }));
-  if (failures.length > 0) {
-    throw new HttpError(422, "This desk cannot be closed yet", "DAY_INCOMPLETE", { failures });
-  }
-  const updated = await store.updateDeskDay(
-    desk.desk_id,
-    date,
-    { status: "done", done_by: user.accountId, done_at: new Date().toISOString(), ...note },
-    "final_stock"
-  );
-  if (!updated) throw new HttpError(409, "This desk was changed on another device — reload", "STALE");
+  await closeDeskDay(store, user, desk, date, safeDropNote(body));
+  return c.json({ ok: true });
+});
 
-  // If the following day is already open (this day was reopened and closed
-  // again), its opening balances follow the corrected count.
-  const [next] = await store.deskDays({ deskId: desk.desk_id, after: date, order: "asc", limit: 1 });
-  if (next && next.status !== "done") await carryForward(store, updated, next.ledger_date, user.accountId);
+// One step to Done from check-in or final stock: every row must be counted.
+r.post("/stock/desk/:deskId/close", async (c) => {
+  const store = storeFor(c);
+  const user = c.get("user");
+  const body = await readBody(c);
+  const today = businessDate(c.env);
+  const date = requireDate(body.date, today);
+  const desk = await requireDesk(store, user, c.req.param("deskId"));
+  await requireOpenDay(store, user, desk.desk_id, date, today);
+  await closeDeskDay(store, user, desk, date, safeDropNote(body));
   return c.json({ ok: true });
 });
 
