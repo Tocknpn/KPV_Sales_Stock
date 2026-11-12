@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>KPV Goldsmith &amp; Retail Inventory</title>
+<meta name="description" content="KPV Goldsmith & Retail Inventory — daily stock, documents, dashboard and reporting for gold cases." />
+<meta name="theme-color" content="#990000" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="data:," />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Lao:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/css/app.css" />
+</head>
+<body class="bg-canvas text-gray-900 antialiased">
+  <div id="app" class="mx-auto flex min-h-screen max-w-[430px] flex-col bg-canvas md:max-w-xl lg:max-w-2xl">
+
+    <header id="topbar" class="sticky top-0 z-30 border-b border-hairline bg-canvas/95 px-4 pb-3 pt-[calc(env(safe-area-inset-top)+12px)] backdrop-blur">
+      <div id="topbar-slot"></div>
+    </header>
+
+    <!-- View container -->
+    <main id="view-root" class="flex-1 overflow-y-auto px-4 pb-28 pt-4"></main>
+
+    <!-- Toast -->
+    <div id="toast" role="status" aria-live="polite" class="pointer-events-none fixed inset-x-0 bottom-24 z-50 flex justify-center px-4"></div>
+
+    <!-- Bottom Sheet / Modal host -->
+    <div id="sheet-host" class="fixed inset-0 z-40 hidden"></div>
+
+    <!-- Bottom Navigation -->
+    <nav id="bottom-nav" class="sticky bottom-0 z-30 flex border-t border-hairline bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+      <button data-view="stock" class="nav-item">
+        <svg class="h-5 w-5 md:h-6 md:w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10l9-7 9 7v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 21V12h6v9"/></svg>
+        <span data-nav-label>Daily Stock</span>
+      </button>
+      <button data-view="documents" class="nav-item">
+        <svg class="h-5 w-5 md:h-6 md:w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 2h6l1 4H8l1-4z"/><path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16l-1.2 12.1A2 2 0 0 1 16.8 21H7.2a2 2 0 0 1-2-1.9L4 7z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 11h6M9 15h6"/></svg>
+        <span data-nav-label>Documents</span>
+      </button>
+      <button data-view="dashboard" class="nav-item">
+        <svg class="h-5 w-5 md:h-6 md:w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M12 12V5.5M12 12l5 2.5"/></svg>
+        <span data-nav-label>Dashboard</span>
+      </button>
+      <button data-view="report" class="nav-item">
+        <svg class="h-5 w-5 md:h-6 md:w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 19V9M10 19V5M16 19v-7M4 19h16"/></svg>
+        <span data-nav-label>Report</span>
+      </button>
+      <button data-view="settings" class="nav-item">
+        <svg class="h-5 w-5 md:h-6 md:w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path stroke-linecap="round" stroke-linejoin="round" d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9c.2.6.7 1 1.5 1H21a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.6 1z"/></svg>
+        <span data-nav-label>Settings</span>
+      </button>
+    </nav>
+  </div>
+
+  <script src="/js/app.js" type="module"></script>
+</body>
+</html>

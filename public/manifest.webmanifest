@@ -1,0 +1,10 @@
+{
+  "name": "KPV Goldsmith & Retail Inventory",
+  "short_name": "KPV Inventory",
+  "description": "Daily stock, documents, dashboard and reporting for gold cases.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fdf4f3",
+  "theme_color": "#990000",
+  "icons": []
+}

@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    background: #fdf4f3;
+    font-family: "Plus Jakarta Sans", "Noto Sans Lao", sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* .lao only sets the font - it carries no language metadata on its own.
+     Every element using it must also carry lang="lo", or a screen reader
+     set to English will try to pronounce the Lao script with English
+     rules (WCAG 3.1.2). Pair them: <span lang="lo" class="lao ...">. */
+  :lang(lo),
+  .lao {
+    font-family: "Noto Sans Lao", "Plus Jakarta Sans", sans-serif;
+  }
+}
+
+@layer components {
+  .tap-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .status-pill {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold tap-target;
+    min-height: auto;
+  }
+  .card {
+    @apply rounded-2xl bg-surface border border-hairline shadow-card;
+  }
+  /* Themed keyboard-focus ring (brand palette, not the unstyled browser
+     default) - :focus-visible so it only shows for keyboard/AT navigation,
+     never on a mouse/touch tap. */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 focus-visible:ring-offset-2;
+  }
+  .btn-primary {
+    @apply focus-ring inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-pop tap-target active:scale-[0.98] transition;
+  }
+  .btn-secondary {
+    @apply focus-ring inline-flex items-center justify-center gap-2 rounded-xl bg-white border border-hairline px-4 py-3 text-sm font-semibold text-gray-700 tap-target active:scale-[0.98] transition;
+  }
+  .input-filled {
+    @apply w-full rounded-xl border border-hairline bg-gray-50 px-3.5 py-3 text-sm font-semibold text-gray-900 tap-target focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100;
+  }
+  .chip {
+    /* Chips are interactive filter/selector controls (branch, date, status,
+       period) tapped repeatedly by a cashier moving fast at a counter -
+       they keep the full 44px floor from .tap-target, unlike .status-pill
+       (below), which is never itself a tap target. */
+    @apply focus-ring inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold border tap-target;
+  }
+  .nav-item {
+    @apply focus-ring flex flex-1 flex-col items-center justify-center gap-0.5 py-1.5 text-[11px] font-semibold text-gray-600 tap-target;
+  }
+  .nav-item.active {
+    color: #990000;
+  }
+  .bottom-fill-bar {
+    @apply h-1.5 w-full overflow-hidden rounded-full bg-gray-100;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scroll-snap-x {
+    scroll-snap-type: x mandatory;
+  }
+}

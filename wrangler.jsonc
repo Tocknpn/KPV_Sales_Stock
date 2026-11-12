@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kpv-goldsmith-inventory",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public"
+  },
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "DEMO_DATE": "2026-10-24",
+    "APP_VERSION": "1.0.0",
+    "BUILD_DATE": "2026-11-02"
+  }
+}

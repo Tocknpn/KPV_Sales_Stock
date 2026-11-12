@@ -1,0 +1,6 @@
+# Copy this file to .dev.vars for local `wrangler dev` development.
+# Leave both unset (or delete this file) to run entirely against the built-in
+# demo dataset — the app works fully without Supabase for evaluation/demo.
+
+SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
