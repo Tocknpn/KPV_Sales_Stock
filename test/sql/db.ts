@@ -55,8 +55,8 @@ export async function asActor(
   opts: { system?: string; jwtRole?: string } = {},
 ): Promise<void> {
   const headers: Record<string, string> = {};
-  if (actorId) headers['x-actor-id'] = actorId;
-  if (opts.system) headers['x-system'] = opts.system;
+  if (actorId) headers['x-kpv-actor-id'] = actorId;
+  if (opts.system) headers['x-kpv-actor-system'] = opts.system;
   await db.query(`select set_config('request.headers', $1, false)`, [JSON.stringify(headers)]);
   await db.query(`select set_config('request.jwt.claims', $1, false)`, [
     JSON.stringify({ role: opts.jwtRole ?? 'service_role' }),
