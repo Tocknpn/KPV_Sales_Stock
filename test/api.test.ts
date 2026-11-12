@@ -6,6 +6,7 @@
 //   VT-D01  in final count today
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEMO_STAFF } from "../src/demoData";
+import { getStore } from "../src/store";
 import { TODAY, YESTERDAY, TOMORROW, freshApp, call, login, asAdmin, asStaff, asManager, on, closeDay, countEverything } from "./helpers";
 
 beforeEach(freshApp);
@@ -603,5 +604,43 @@ describe("compare-and-set entries, counts any time, one-step close", () => {
     await countEverything(staff, "MM-D01", TODAY);
     expect((await call(staff, "POST", "/stock/desk/MM-D01/close", { date: TODAY })).status).toBe(200);
     expect((await call(staff, "POST", "/stock/desk/MM-D01/close", { date: TODAY })).status).toBe(423);
+  });
+});
+
+describe("cards: streak, tier, holder and branch summary (CR3)", () => {
+  const db = () => (getStore({} as any) as any).db;
+
+  it("overdue case is first; branchSummary counts", async () => {
+    const staff = await asStaff("B-MM"); // builds the demo store on the pinned date
+    // Morning Market: the two spare cases are brand new, MM-D02 was last done 4 days ago.
+    for (const d of db().desks) if (d.desk_id === "MM-D03" || d.desk_id === "MM-D04") d.created_at = `${TODAY}T03:00:00.000Z`;
+    db().deskDays = db().deskDays.filter((d: any) => d.desk_id !== "MM-D02");
+    db().deskDays.push({ ...db().deskDays.find((d: any) => d.desk_id === "MM-D01"), desk_id: "MM-D02", ledger_date: "2026-11-08", status: "done" });
+    const res = await call(staff, "GET", "/stock/desks");
+    const cards = res.json.desks.filter((d: any) => d.branch_id === "B-MM");
+    expect(cards[0].desk_id).toBe("MM-D02");
+    expect(cards[0]).toMatchObject({ tier: "overdue", daysBehind: 3, lastDoneDate: "2026-11-08", streak: 0 });
+    const d01 = cards.find((d: any) => d.desk_id === "MM-D01");
+    expect(d01).toMatchObject({ tier: "on_track", streak: 3, daysBehind: 0, lastDoneByName: "Somchai S." });
+    expect(cards.find((d: any) => d.desk_id === "MM-D03")).toMatchObject({ tier: "on_track", streak: 0, daysBehind: 0, assignee: null });
+    expect(res.json.branchSummary).toEqual({ cases: 4, checkedToday: 0, behind1: 0, overdue: 1 });
+  });
+
+  it("a closed day keeps the streak and is not behind", async () => {
+    await call(await asAdmin(), "POST", "/closed-days", { branchId: "B-IT", date: YESTERDAY, reason: "Holiday" });
+    const cards = (await call(await asStaff("B-IT"), "GET", "/stock/desks")).json.desks;
+    // IT-D01 was Done the last 4 days including today; yesterday is closed.
+    expect(cards.find((d: any) => d.desk_id === "IT-D01")).toMatchObject({ tier: "done_today", streak: 3 });
+  });
+
+  it("assignee started yesterday is stale; today is not", async () => {
+    const m = await asManager("B-MM");
+    await call(m, "POST", "/desks/MM-D01/assign", { staffId: DEMO_STAFF["B-MM"] });
+    await call(m, "POST", "/desks/MM-D02/assign", { staffId: DEMO_STAFF["B-MM"] });
+    const a = db().assignments.find((x: any) => x.desk_id === "MM-D01");
+    a.started_at = `${YESTERDAY}T05:00:00.000Z`;
+    const cards = (await call(m, "GET", "/stock/desks?branchId=B-MM")).json.desks;
+    expect(cards.find((d: any) => d.desk_id === "MM-D01").assignee).toMatchObject({ staffId: DEMO_STAFF["B-MM"], name: "Somchai S.", stale: true });
+    expect(cards.find((d: any) => d.desk_id === "MM-D02").assignee.stale).toBe(false);
   });
 });

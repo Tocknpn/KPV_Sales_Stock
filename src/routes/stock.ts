@@ -5,7 +5,8 @@ import type { Ctx } from "../app";
 import { LEDGER_CHANGE_FIELDS, TEXT_CHANGE_FIELDS } from "../store";
 import type { Store, LedgerRowPatch, NewLedgerRow, LedgerChange, LedgerChangeField } from "../store";
 import { requireManager, assertBranchAccess, isManagerOf } from "../auth";
-import { addDays, businessDate, datesInMonth, isValidMonth } from "../time";
+import { addDays, businessDate, datesInMonth, isValidMonth, laosDate } from "../time";
+import { buildDayStatus } from "../dayStatus";
 import { buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, parseQty, validateDeskDay } from "../logic";
 import type { Desk, DeskDay, LedgerRow, SessionUser } from "../types";
 
@@ -94,7 +95,7 @@ r.get("/stock/desks", async (c) => {
   const today = businessDate(c.env);
   const date = requireDate(c.req.query("date"), today);
   const branchId = scopeBranch(user, c.req.query("branchId") || undefined);
-  const [desks, branches, skus, days, ledgerRows, staffAccounts, config, openEarlier] = await Promise.all([
+  const [desks, branches, skus, days, ledgerRows, staffAccounts, config, openEarlier, history, closed, assignments] = await Promise.all([
     store.desks(),
     store.branches(),
     store.skus(),
@@ -103,16 +104,56 @@ r.get("/stock/desks", async (c) => {
     store.staffAccounts(),
     store.config(),
     store.deskDays({ branchId, before: date, notStatus: "done" }),
+    // Check history for streaks: 400 days (a streak shows "365+" beyond that).
+    store.deskDays({ branchId, from: addDays(today, -400), to: today }),
+    store.closedDays({ branchId, from: addDays(today, -400), to: today }),
+    store.activeAssignments({ branchId }),
   ]);
   const scopedDesks = branchId ? desks.filter((d) => d.branch_id === branchId) : desks;
   // Earliest unfinished earlier day per desk — check-in is blocked until it is closed.
   const blockedBy = new Map<string, string>();
   for (const d of openEarlier) if (!blockedBy.has(d.desk_id)) blockedBy.set(d.desk_id, d.ledger_date);
-  const cards = buildDeskCards(scopedDesks, branches, skus, days, ledgerRows, staffAccounts, config).map((card) => ({
-    ...card,
-    openEarlierDate: blockedBy.get(card.desk_id) ?? null,
-  }));
-  return c.json({ date, today, desks: cards });
+  const staffName = new Map(staffAccounts.map((a) => [a.id, a.display_name]));
+  const historyByDesk = new Map<string, typeof history>();
+  for (const d of history) historyByDesk.set(d.desk_id, [...(historyByDesk.get(d.desk_id) ?? []), d]);
+  const closedByBranch = new Map<string, Set<string>>();
+  for (const cd of closed) closedByBranch.set(cd.branch_id, (closedByBranch.get(cd.branch_id) ?? new Set()).add(cd.closed_date));
+  const holderByDesk = new Map(assignments.map((a) => [a.desk_id, a]));
+  const deskById = new Map(desks.map((d) => [d.desk_id, d]));
+  const none = new Set<string>();
+
+  const cards = buildDeskCards(scopedDesks, branches, skus, days, ledgerRows, staffAccounts, config).map((card) => {
+    const desk = deskById.get(card.desk_id)!;
+    const status = buildDayStatus({
+      deskCreatedDate: laosDate(new Date(desk.created_at)),
+      days: historyByDesk.get(card.desk_id) ?? [],
+      closedDates: closedByBranch.get(card.branch_id) ?? none,
+      today,
+    });
+    const held = holderByDesk.get(card.desk_id);
+    return {
+      ...card,
+      openEarlierDate: blockedBy.get(card.desk_id) ?? null,
+      streak: status.streak,
+      lastDoneDate: status.lastDoneDate,
+      lastDoneAt: status.lastDoneAt,
+      lastDoneByName: status.lastDoneBy ? staffName.get(status.lastDoneBy) ?? null : null,
+      daysBehind: status.daysBehind,
+      tier: status.tier,
+      assignee: held
+        ? { staffId: held.staff_id, name: staffName.get(held.staff_id) ?? null, since: held.started_at, stale: laosDate(new Date(held.started_at)) < today }
+        : null,
+    };
+  });
+  // Overdue cases first; the rest keep their order (Array.sort is stable).
+  cards.sort((a, b) => Number(b.tier === "overdue") - Number(a.tier === "overdue"));
+  const branchSummary = {
+    cases: cards.length,
+    checkedToday: cards.filter((x) => x.tier === "done_today").length,
+    behind1: cards.filter((x) => x.tier === "behind_1").length,
+    overdue: cards.filter((x) => x.tier === "overdue").length,
+  };
+  return c.json({ date, today, desks: cards, branchSummary });
 });
 
 r.get("/stock/calendar", async (c) => {
