@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "plus jakarta sans",
+        "createdAt": "2026-11-12T08:21:11.285Z",
+        "reason": "Same brand typeface (lowercase match); PRODUCT.md Brand Commitments"
+      }
+    ]
+  }
+}
