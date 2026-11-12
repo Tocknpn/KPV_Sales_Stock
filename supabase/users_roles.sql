@@ -41,15 +41,15 @@ $$;
 -- Raises ROLE_DENIED unless the acting user holds one of p_roles and (for a
 -- non-admin, when p_branch is given) belongs to p_branch.
 --  * No actor and not service_role (SQL editor, scripts): allowed.
---  * No actor but a system tag (login lockouts): allowed.
---  * service_role with neither: refused.
+--  * service_role with no actor: refused, whatever tags it carries. (The one
+--    system exception, login lockouts, lives in guard_staff_accounts only.)
 create or replace function kpv_require(p_roles text[], p_branch text default null) returns void
 language plpgsql stable as $$
 declare
   a record;
 begin
   if kpv_actor_id() is null then
-    if kpv_jwt_role() = 'service_role' and kpv_header('x-kpv-actor-system') is null then
+    if kpv_jwt_role() = 'service_role' then
       raise exception 'ROLE_DENIED: a write needs an acting user' using errcode = 'P0001';
     end if;
     return;
@@ -83,6 +83,13 @@ language plpgsql as $$
 declare
   a record;
 begin
+  -- Login lockouts: a system-tagged, actor-less write may touch only the
+  -- lockout counters.
+  if tg_op = 'UPDATE' and kpv_actor_id() is null and kpv_header('x-kpv-actor-system') is not null
+     and (to_jsonb(new) - 'failed_attempts' - 'locked_until')
+         = (to_jsonb(old) - 'failed_attempts' - 'locked_until') then
+    return new;
+  end if;
   if tg_op = 'UPDATE' and kpv_actor_id() is not null then
     select * into a from kpv_actor();
     if found and a.role = 'manager'

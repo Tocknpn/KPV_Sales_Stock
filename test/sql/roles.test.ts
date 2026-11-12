@@ -86,9 +86,22 @@ describe('master data guard', () => {
     await expectPgError(db.query(`update master_sku set name_en = 'x' where sku_id = 'S1'`), 'ROLE_DENIED');
   });
 
-  it('a system-tagged call (login lockout) may touch staff accounts', async () => {
+  it('a system tag does not unlock any other guard', async () => {
+    await asActor(db, null, { system: 'login', jwtRole: 'service_role' });
+    await expectPgError(db.query(`update master_sku set name_en = 'x' where sku_id = 'S1'`), 'ROLE_DENIED');
+    await expectPgError(db.query(`update system_config set spot_lak_per_baht = 1`), 'ROLE_DENIED');
+    await expectPgError(db.query(`update staff_accounts set pin_hash = 'x' where id = $1`, [staffMM]), 'ROLE_DENIED');
+    await expectPgError(db.query(`update staff_accounts set role = 'admin', branch_id = null where id = $1`, [staffMM]), 'ROLE_DENIED');
+    await expectPgError(db.query(`update staff_accounts set failed_attempts = 0, pin_hash = 'x' where id = $1`, [staffMM]), 'ROLE_DENIED');
+    await expectPgError(db.query(`delete from staff_accounts where id = $1`, [staffMM]), 'ROLE_DENIED');
+    await doneDay('MM-D01', 'B-MM', 9);
+    await expectPgError(reopen('MM-D01', 9), 'ROLE_DENIED');
+  });
+
+  it('a system-tagged call (login lockout) may touch only the lockout counters', async () => {
     await asActor(db, null, { system: 'login', jwtRole: 'service_role' });
     await db.query(`update staff_accounts set failed_attempts = 1 where id = $1`, [staffMM]);
+    await db.query(`update staff_accounts set failed_attempts = 0, locked_until = now() where id = $1`, [staffMM]);
   });
 });
 
