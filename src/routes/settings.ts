@@ -2,8 +2,7 @@
 // user management and the audit log. Reads are open to every logged-in user;
 // every change is admin only.
 // Mounted behind requireAuth in src/index.ts.
-import { newRouter, readBody, HttpError, audit } from "../app";
-import { getStore } from "../store";
+import { storeFor, newRouter, readBody, HttpError, audit } from "../app";
 import type { NewSku, Store } from "../store";
 import { requireAdmin, hashPin, isValidPin } from "../auth";
 import { isLive } from "../time";
@@ -34,7 +33,7 @@ function nonNegative(value: unknown): number | null {
 // SKUs
 // ---------------------------------------------------------------------------
 r.get("/skus", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const includeInactive = c.req.query("all") === "1";
   const [skus, types, weights] = await Promise.all([store.skus(), store.skuTypes(), store.skuWeights()]);
   const typeById = new Map(types.map((t) => [t.type_id, t]));
@@ -93,7 +92,7 @@ function buildSku(input: Record<string, any>, types: SkuType[], weights: SkuWeig
 }
 
 r.post("/skus", requireAdmin, async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const body = await readBody(c);
   const [types, weights] = await Promise.all([store.skuTypes(), store.skuWeights()]);
   if (!body.weight_id) throw new HttpError(400, "name_en, type_id and weight_id are required", "BAD_SKU");
@@ -108,7 +107,7 @@ r.post("/skus", requireAdmin, async (c) => {
 // (the browser parses the file). Every row is validated first; if any row is
 // wrong nothing is imported and the errors are returned per line.
 r.post("/skus/import", requireAdmin, async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const body = await readBody(c);
   const rows: Record<string, any>[] = Array.isArray(body.rows) ? body.rows : [];
   if (rows.length === 0) throw new HttpError(400, "The file has no rows", "EMPTY_IMPORT");
@@ -134,7 +133,7 @@ r.post("/skus/import", requireAdmin, async (c) => {
 });
 
 r.patch("/skus/:id", requireAdmin, async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const body = await readBody(c);
   const patch: Partial<MasterSku> = {};
   if (body.name_en !== undefined) {
@@ -177,10 +176,10 @@ r.patch("/skus/:id", requireAdmin, async (c) => {
 // ---------------------------------------------------------------------------
 // SKU Type / Weight master data
 // ---------------------------------------------------------------------------
-r.get("/sku-types", async (c) => c.json({ types: await getStore(c.env).skuTypes() }));
+r.get("/sku-types", async (c) => c.json({ types: await storeFor(c).skuTypes() }));
 
 r.post("/sku-types", requireAdmin, async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const body = await readBody(c);
   const name_en = String(body.name_en ?? "").trim();
   if (!name_en) throw new HttpError(400, "name_en is required", "BAD_TYPE");
@@ -199,7 +198,7 @@ async function renameCategory(store: Store, typeId: string, name: string) {
 }
 
 r.patch("/sku-types/:id", requireAdmin, async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const body = await readBody(c);
   const patch: Partial<SkuType> = {};
   if (body.name_en !== undefined) {
@@ -217,10 +216,10 @@ r.patch("/sku-types/:id", requireAdmin, async (c) => {
   return c.json(type);
 });
 
-r.get("/sku-weights", async (c) => c.json({ weights: await getStore(c.env).skuWeights() }));
+r.get("/sku-weights", async (c) => c.json({ weights: await storeFor(c).skuWeights() }));
 
 r.post("/sku-weights", requireAdmin, async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const body = await readBody(c);
   const name_en = String(body.name_en ?? "").trim();
   const gram_value = Number(body.gram_value);
@@ -233,7 +232,7 @@ r.post("/sku-weights", requireAdmin, async (c) => {
 });
 
 r.patch("/sku-weights/:id", requireAdmin, async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const body = await readBody(c);
   const patch: Partial<SkuWeight> = {};
   if (body.name_en !== undefined) {
@@ -262,7 +261,7 @@ r.patch("/sku-weights/:id", requireAdmin, async (c) => {
 // Summary + system config
 // ---------------------------------------------------------------------------
 r.get("/settings/summary", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const [skus, staffAccounts, branches, config] = await Promise.all([store.skus(), store.staffAccounts(), store.branches(), store.config()]);
   const scoped = user.role === "staff" ? staffAccounts.filter((a) => a.branch_id === user.branchId) : staffAccounts;
@@ -275,7 +274,7 @@ r.get("/settings/summary", async (c) => {
 });
 
 r.post("/settings/config", requireAdmin, async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const body = await readBody(c);
   const patch: Record<string, number> = {};
   const fields = { safetyBufferDays: "safety_buffer_days", spotLakPerBaht: "spot_lak_per_baht", usdToLakRate: "usd_to_lak_rate" } as const;
@@ -294,7 +293,7 @@ r.post("/settings/config", requireAdmin, async (c) => {
 // Per-SKU run rate (avg sold per day + order lead time)
 // ---------------------------------------------------------------------------
 r.get("/settings/run-rate", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const [skus, types, weights] = await Promise.all([store.skus(), store.skuTypes(), store.skuWeights()]);
   const typeById = new Map(types.map((t) => [t.type_id, t]));
   const weightById = new Map(weights.map((w) => [w.weight_id, w]));
@@ -320,7 +319,7 @@ r.get("/settings/run-rate", async (c) => {
 });
 
 r.post("/settings/run-rate/:skuId", requireAdmin, async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const body = await readBody(c);
   const avg = nonNegative(body.avgDailySales);
   const lead = nonNegative(body.orderLeadTimeDays);
@@ -337,7 +336,7 @@ r.get("/settings/about", async (c) => c.json({ version: c.env.APP_VERSION || "de
 // User management (admin)
 // ---------------------------------------------------------------------------
 r.post("/users", requireAdmin, async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const body = await readBody(c);
   const display_name = String(body.displayName ?? "").trim();
   const role = body.role === "admin" ? "admin" : "staff";
@@ -351,7 +350,7 @@ r.post("/users", requireAdmin, async (c) => {
 });
 
 r.patch("/users/:id", requireAdmin, async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const me = c.get("user");
   const body = await readBody(c);
   const accounts = await store.staffAccounts();
@@ -404,7 +403,7 @@ r.patch("/users/:id", requireAdmin, async (c) => {
 
 r.get("/audit", requireAdmin, async (c) => {
   const limit = Math.min(200, Math.max(1, Math.floor(Number(c.req.query("limit")) || 50)));
-  return c.json({ entries: await getStore(c.env).auditLog(limit) });
+  return c.json({ entries: await storeFor(c).auditLog(limit) });
 });
 
 export default r;

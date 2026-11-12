@@ -3,12 +3,18 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { Desk, DeskDay, Env, SessionUser } from "./types";
-import type { Store } from "./store";
+import { getStore, type Store } from "./store";
 import { assertBranchAccess } from "./auth";
 import { isValidDate } from "./time";
 
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser } };
 export type Ctx = Context<AppEnv>;
+
+// The store for this request: every write is attributed to the logged-in user.
+export function storeFor(c: Ctx): Store {
+  const user = c.get("user");
+  return getStore(c.env, user ? { id: user.accountId } : undefined);
+}
 
 export function newRouter() {
   return new Hono<AppEnv>();

@@ -1,8 +1,7 @@
 // Daily Stock: desk cards, the desk day lifecycle
 // (not started -> check_in -> final_stock -> done) and row entry.
-import { newRouter, readBody, HttpError, scopeBranch, requireDesk, requireDate, assertDateWritable, getDay, requireOpenDay, audit } from "../app";
+import { storeFor, newRouter, readBody, HttpError, scopeBranch, requireDesk, requireDate, assertDateWritable, getDay, requireOpenDay, audit } from "../app";
 import type { Ctx } from "../app";
-import { getStore } from "../store";
 import type { Store, LedgerRowPatch, NewLedgerRow } from "../store";
 import { requireAdmin, assertBranchAccess } from "../auth";
 import { businessDate, datesInMonth, isValidMonth } from "../time";
@@ -51,7 +50,7 @@ async function carryForward(store: Store, from: DeskDay, toDate: string, actor: 
 // Desk cards + calendar
 // ---------------------------------------------------------------------------
 r.get("/stock/desks", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const today = businessDate(c.env);
   const date = requireDate(c.req.query("date"), today);
@@ -78,7 +77,7 @@ r.get("/stock/desks", async (c) => {
 });
 
 r.get("/stock/calendar", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const branchId = scopeBranch(user, c.req.query("branchId") || undefined);
   if (!branchId) throw new HttpError(400, "branchId is required", "BRANCH_REQUIRED");
@@ -93,7 +92,7 @@ r.get("/stock/calendar", async (c) => {
 // New desk ("case") with its starting stock
 // ---------------------------------------------------------------------------
 r.post("/desks", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const branchId = String(body.branchId ?? "");
@@ -172,7 +171,7 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
 // ?date=latest resolves to the desk's most recent recorded day — "what is on
 // this desk right now" for screens that are not tied to one date.
 r.get("/stock/desk/:deskId", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const today = businessDate(c.env);
   const deskId = c.req.param("deskId");
   let date: string;
@@ -189,7 +188,7 @@ r.get("/stock/desk/:deskId", async (c) => {
 // Check-in: opens the day and carries the previous day's stock forward.
 // ---------------------------------------------------------------------------
 r.post("/stock/desk/:deskId/checkin", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const today = businessDate(c.env);
@@ -230,7 +229,7 @@ r.post("/stock/desk/:deskId/checkin", async (c) => {
 const QTY_FIELDS = ["stock_in", "retail_sale", "wholesale", "destock"] as const;
 
 r.post("/stock/desk/:deskId/entries", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const today = businessDate(c.env);
@@ -286,7 +285,7 @@ r.post("/stock/desk/:deskId/entries", async (c) => {
 // Status transitions — forward only, one step at a time.
 // ---------------------------------------------------------------------------
 r.post("/stock/desk/:deskId/transition", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const today = businessDate(c.env);
@@ -328,7 +327,7 @@ r.post("/stock/desk/:deskId/transition", async (c) => {
 
 // Admin only: unlock the desk's most recent Done day so it can be corrected.
 r.post("/stock/desk/:deskId/reopen", requireAdmin, async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const date = requireDate(body.date, businessDate(c.env));
@@ -353,7 +352,7 @@ r.post("/stock/desk/:deskId/reopen", requireAdmin, async (c) => {
 // Add / remove a SKU on a desk day
 // ---------------------------------------------------------------------------
 r.post("/stock/desk/:deskId/sku", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const today = businessDate(c.env);
@@ -389,7 +388,7 @@ r.post("/stock/desk/:deskId/sku", async (c) => {
 });
 
 r.delete("/stock/desk/:deskId/sku/:skuId", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const today = businessDate(c.env);
   const date = requireDate(c.req.query("date"), today);

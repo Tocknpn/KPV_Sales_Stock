@@ -1,5 +1,5 @@
 // Login, session and the public data the login screen needs.
-import { newRouter, readBody, HttpError } from "../app";
+import { newRouter, readBody, HttpError, storeFor } from "../app";
 import { getStore } from "../store";
 import { verifyPin, signToken, requireAuth, authSecret, MAX_FAILED_PINS, LOCK_MINUTES } from "../auth";
 import { businessDate, isLive } from "../time";
@@ -20,7 +20,8 @@ r.get("/auth/accounts", async (c) => {
 });
 
 r.post("/auth/login", async (c) => {
-  const store = getStore(c.env);
+  // Nobody is logged in yet: the only writes here (lockouts) are the system's.
+  const store = getStore(c.env, { system: "login" });
   const body = await readBody(c);
   const account = (await store.staffAccounts()).find((a) => a.id === body.accountId);
   if (!account || !account.active) throw new HttpError(404, "Account not found", "NO_ACCOUNT");
@@ -60,7 +61,7 @@ r.get("/auth/me", requireAuth, async (c) => c.json({ user: c.get("user") }));
 r.post("/auth/logout", requireAuth, async (c) => c.json({ ok: true }));
 
 r.get("/meta", requireAuth, async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const [branches, desks, config] = await Promise.all([store.branches(), store.desks(), store.config()]);
   const mine = <T extends { branch_id: string }>(rows: T[]) => (user.role === "staff" ? rows.filter((x) => x.branch_id === user.branchId) : rows);

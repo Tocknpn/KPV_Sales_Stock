@@ -1,7 +1,6 @@
 // Dashboard and Report — both computed entirely from the ledger.
 // Mounted behind requireAuth in src/index.ts.
-import { newRouter, HttpError, scopeBranch } from "../app";
-import { getStore } from "../store";
+import { storeFor, newRouter, HttpError, scopeBranch } from "../app";
 import { assertBranchAccess } from "../auth";
 import { businessDate, addDays, isValidMonth, monthRange } from "../time";
 import { buildDashboard, buildReport, AGING_LOOKBACK_DAYS } from "../logic";
@@ -19,7 +18,7 @@ function scopeDesk(user: SessionUser, desks: Desk[], deskId: string | undefined)
 }
 
 r.get("/dashboard", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const today = businessDate(c.env);
   const period = c.req.query("period") === "mtd" ? "mtd" : "today";
@@ -59,7 +58,7 @@ r.get("/dashboard", async (c) => {
 });
 
 r.get("/report", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const period = c.req.query("period") || businessDate(c.env).slice(0, 7);
   if (!isValidMonth(period)) throw new HttpError(400, "Invalid period", "BAD_MONTH");

@@ -4,8 +4,7 @@
 // which credits that desk's transfer_in on its open day. Neither side's
 // closing is ever blocked by the other.
 // Mounted behind requireAuth in src/index.ts.
-import { newRouter, readBody, HttpError, scopeBranch, requireDesk, requireDate, requireOpenDay } from "../app";
-import { getStore } from "../store";
+import { storeFor, newRouter, readBody, HttpError, scopeBranch, requireDesk, requireDate, requireOpenDay } from "../app";
 import { assertBranchAccess } from "../auth";
 import { businessDate } from "../time";
 import { computeClosing, parseQty } from "../logic";
@@ -15,7 +14,7 @@ const r = newRouter();
 // Every active desk in the company — the destination picker. Desk names are
 // not sensitive, and staff must be able to send to another branch.
 r.get("/transfers/destinations", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const [desks, branches] = await Promise.all([store.desks(), store.branches()]);
   const branchName = new Map(branches.map((b) => [b.branch_id, b]));
   return c.json({
@@ -32,7 +31,7 @@ r.get("/transfers/destinations", async (c) => {
 });
 
 r.get("/transfers", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const branchId = scopeBranch(user, c.req.query("branchId") || undefined);
   const status = c.req.query("status");
@@ -45,7 +44,7 @@ r.get("/transfers", async (c) => {
 });
 
 r.post("/transfers", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const today = businessDate(c.env);
@@ -92,7 +91,7 @@ r.post("/transfers", async (c) => {
 
 // Sender takes back a transfer that has not been received yet.
 r.post("/transfers/:id/cancel", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const today = businessDate(c.env);
   const transfer = await store.getTransfer((c.req.param("id") ?? ""));
@@ -116,7 +115,7 @@ r.post("/transfers/:id/cancel", async (c) => {
 
 // Receiving desk confirms the gold arrived. It lands on the desk's open day.
 r.post("/transfers/:id/receive", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const today = businessDate(c.env);

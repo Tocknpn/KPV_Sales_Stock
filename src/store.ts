@@ -26,8 +26,10 @@ import type {
 import { buildDemoData, type DemoData } from "./demoData";
 import { businessDate, isLive } from "./time";
 import { computeClosing } from "./logic";
+import { actorHeaders, type Actor } from "./actor";
+import { auditEntry, type AuditOp } from "./audit";
 
-export type StoreErrorCode = "DAY_LOCKED" | "CONFLICT" | "INVALID" | "UNAVAILABLE" | "NEGATIVE";
+export type StoreErrorCode = "DAY_LOCKED" | "CONFLICT" | "INVALID" | "UNAVAILABLE" | "NEGATIVE" | "AUDIT_ACTOR_MISSING";
 
 // Errors the routes can turn into a meaningful HTTP status.
 export class StoreError extends Error {
@@ -177,7 +179,33 @@ const SKU_DEFAULTS = {
 // ============================================================================
 export class DemoStore implements Store {
   private idSeq = 0;
-  constructor(public db: DemoData) {}
+  constructor(public db: DemoData, private actor?: Actor) {}
+
+  // A thin view over the same data that attributes its writes to `actor`.
+  withActor(actor: Actor | undefined): DemoStore {
+    const view = new DemoStore(this.db, actor);
+    view.idSeq = this.idSeq;
+    return view;
+  }
+
+  // Every mutator calls this first (like the trigger refusing an anonymous
+  // service-role write) so nothing changes when the actor is missing.
+  private guard() {
+    if (!this.actor) throw new StoreError("AUDIT_ACTOR_MISSING", "A write needs an acting user or system tag");
+  }
+
+  // The DemoStore equivalent of the audit_row_change() trigger.
+  private log(table: string, op: AuditOp, oldRow: object | null, newRow: object | null) {
+    const strip = (r: object | null) => {
+      if (!r || table !== "documents") return r;
+      const { rows: _rows, ...rest } = r as Record<string, unknown>;
+      return rest;
+    };
+    const actorId = this.actor && "id" in this.actor ? this.actor.id : null;
+    const account = actorId ? this.db.staffAccounts.find((a) => a.id === actorId) : undefined;
+    const entry = auditEntry(table, op, strip(oldRow), strip(newRow), { actor: this.actor, name: account?.display_name, role: account?.role });
+    if (entry) this.db.audit.unshift({ id: crypto.randomUUID(), created_at: this.now(), ...entry });
+  }
 
   private newId(prefix: string) {
     return `${prefix}-${++this.idSeq}-${Math.random().toString(36).slice(2, 8)}`;
@@ -201,6 +229,7 @@ export class DemoStore implements Store {
     return this.db.desks;
   }
   async createDesk(input: { branch_id: string; display_name: string }) {
+    this.guard();
     const sameBranch = this.db.desks.filter((d) => d.branch_id === input.branch_id);
     const desk: Desk = {
       desk_id: nextDeskId(input.branch_id, sameBranch.map((d) => d.desk_id)),
@@ -211,6 +240,7 @@ export class DemoStore implements Store {
       created_at: this.now(),
     };
     this.db.desks.push(desk);
+    this.log("desks", "INSERT", null, desk);
     return desk;
   }
 
@@ -218,6 +248,7 @@ export class DemoStore implements Store {
     return this.db.staffAccounts;
   }
   async createStaffAccount(account: NewStaffAccount) {
+    this.guard();
     const row: StaffAccount = {
       id: crypto.randomUUID(),
       active: true,
@@ -228,12 +259,16 @@ export class DemoStore implements Store {
       ...account,
     };
     this.db.staffAccounts.push(row);
+    this.log("staff_accounts", "INSERT", null, row);
     return row;
   }
   async updateStaffAccount(id: string, patch: Partial<StaffAccount>) {
+    this.guard();
     const row = this.db.staffAccounts.find((a) => a.id === id);
     if (!row) return null;
+    const before = { ...row };
     Object.assign(row, patch);
+    this.log("staff_accounts", "UPDATE", before, row);
     return row;
   }
 
@@ -241,6 +276,7 @@ export class DemoStore implements Store {
     return this.db.skus;
   }
   async createSkus(skus: NewSku[]) {
+    this.guard();
     const ids = new Set(this.db.skus.map((s) => s.sku_id));
     for (const s of skus) {
       if (ids.has(s.sku_id)) throw new StoreError("CONFLICT", `SKU ${s.sku_id} already exists`);
@@ -248,42 +284,56 @@ export class DemoStore implements Store {
     }
     const rows = skus.map((s) => ({ ...SKU_DEFAULTS, ...s } as MasterSku));
     this.db.skus.push(...rows);
+    for (const r of rows) this.log("master_sku", "INSERT", null, r);
     return rows;
   }
   async updateSku(skuId: string, patch: Partial<MasterSku>) {
+    this.guard();
     const row = this.db.skus.find((s) => s.sku_id === skuId);
     if (!row) return null;
+    const before = { ...row };
     Object.assign(row, patch);
+    this.log("master_sku", "UPDATE", before, row);
     return row;
   }
   async skuTypes() {
     return this.db.skuTypes;
   }
   async createSkuType(type: Partial<SkuType> & Pick<SkuType, "type_id" | "name_en">) {
+    this.guard();
     if (this.db.skuTypes.some((t) => t.type_id === type.type_id)) throw new StoreError("CONFLICT", "Type already exists");
     const row: SkuType = { name_lo: null, icon: "ring", active: true, sort_order: this.db.skuTypes.length + 1, ...type };
     this.db.skuTypes.push(row);
+    this.log("sku_type", "INSERT", null, row);
     return row;
   }
   async updateSkuType(typeId: string, patch: Partial<SkuType>) {
+    this.guard();
     const row = this.db.skuTypes.find((t) => t.type_id === typeId);
     if (!row) return null;
+    const before = { ...row };
     Object.assign(row, patch);
+    this.log("sku_type", "UPDATE", before, row);
     return row;
   }
   async skuWeights() {
     return this.db.skuWeights;
   }
   async createSkuWeight(weight: Partial<SkuWeight> & Pick<SkuWeight, "weight_id" | "name_en" | "gram_value">) {
+    this.guard();
     if (this.db.skuWeights.some((w) => w.weight_id === weight.weight_id)) throw new StoreError("CONFLICT", "Weight already exists");
     const row: SkuWeight = { active: true, sort_order: this.db.skuWeights.length + 1, ...weight };
     this.db.skuWeights.push(row);
+    this.log("sku_weight", "INSERT", null, row);
     return row;
   }
   async updateSkuWeight(weightId: string, patch: Partial<SkuWeight>) {
+    this.guard();
     const row = this.db.skuWeights.find((w) => w.weight_id === weightId);
     if (!row) return null;
+    const before = { ...row };
     Object.assign(row, patch);
+    this.log("sku_weight", "UPDATE", before, row);
     return row;
   }
 
@@ -315,17 +365,22 @@ export class DemoStore implements Store {
     return [...latest.values()];
   }
   async insertDeskDay(day: Pick<DeskDay, "desk_id" | "ledger_date" | "branch_id" | "checked_in_by">) {
+    this.guard();
     if (this.dayStatus(day.desk_id, day.ledger_date) !== null) return null;
     const now = this.now();
     const row: DeskDay = { ...day, status: "check_in", safe_drop_note: null, done_by: null, done_at: null, created_at: now, updated_at: now };
     this.db.deskDays.push(row);
+    this.log("desk_days", "INSERT", null, row);
     return row;
   }
   async updateDeskDay(deskId: string, date: string, patch: Partial<DeskDay>, expectedStatus?: DeskStatus) {
+    this.guard();
     const row = this.db.deskDays.find((d) => d.desk_id === deskId && d.ledger_date === date);
     if (!row) return null;
     if (expectedStatus && row.status !== expectedStatus) return null;
+    const before = { ...row };
     Object.assign(row, patch, { updated_at: this.now() });
+    this.log("desk_days", "UPDATE", before, row);
     return row;
   }
 
@@ -348,6 +403,7 @@ export class DemoStore implements Store {
     return this.db.ledger.find((r) => r.ledger_date === key.ledger_date && r.desk_id === key.desk_id && r.sku_id === key.sku_id);
   }
   async insertLedgerRows(rows: NewLedgerRow[]) {
+    this.guard();
     const out: LedgerRow[] = [];
     for (const r of rows) {
       this.assertUnlocked(r.desk_id, r.ledger_date);
@@ -373,11 +429,13 @@ export class DemoStore implements Store {
         updated_at: now,
       };
       this.db.ledger.push(row);
+      this.log("daily_stock_ledger", "INSERT", null, row);
       out.push(row);
     }
     return out;
   }
   async patchLedgerRows(patches: LedgerRowPatch[]) {
+    this.guard();
     for (const p of patches) this.assertUnlocked(p.desk_id, p.ledger_date);
     // Same rule as the database trigger: refuse a write that leaves closing
     // below zero unless the row was already that low (closing does not drop).
@@ -393,24 +451,29 @@ export class DemoStore implements Store {
     for (const p of patches) {
       const row = this.findRow(p);
       if (!row) continue;
+      const before = { ...row };
       Object.assign(row, p, { updated_at: this.now() });
       row.closing_qty = computeClosing(row);
+      this.log("daily_stock_ledger", "UPDATE", before, row);
       out.push(row);
     }
     return out;
   }
   async ledgerAdd(key: LedgerKey, field: "transfer_in" | "transfer_out" | "move", delta: number, actor: string | null) {
+    this.guard();
     const row = this.findRow(key);
     if (!row) return null;
     this.assertUnlocked(key.desk_id, key.ledger_date);
     if (row[field] + delta < 0) throw new StoreError("INVALID", `${field} cannot go below zero`);
     const next = computeClosing({ ...row, [field]: row[field] + delta });
     if (next < 0 && next < row.closing_qty) throw new StoreError("NEGATIVE", `${row.desk_id} ${row.sku_id}: only ${Math.max(row.closing_qty, 0)} available`);
+    const before = { ...row };
     row[field] += delta;
     row.excluded = false;
     if (actor) row.performed_by = actor;
     row.closing_qty = computeClosing(row);
     row.updated_at = this.now();
+    this.log("daily_stock_ledger", "UPDATE", before, row);
     return row[field];
   }
 
@@ -432,6 +495,7 @@ export class DemoStore implements Store {
     return this.db.documents.find((d) => d.id === id) ?? null;
   }
   async createDocument(doc: NewDocument, rows: NewDocumentRow[]) {
+    this.guard();
     const year = doc.doc_date.slice(0, 4);
     const counterKey = `${doc.branch_id}/${year}`;
     const seq = (this.db.docCounters[counterKey] ?? 0) + 1;
@@ -445,19 +509,28 @@ export class DemoStore implements Store {
       rows: rows.map((r, i) => ({ ...r, id: `${id}-${i}`, document_id: id })),
     };
     this.db.documents.unshift(created);
+    this.log("documents", "INSERT", null, created);
+    for (const r of created.rows ?? []) this.log("document_rows", "INSERT", null, r);
     return created;
   }
   async updateDocument(id: string, patch: Partial<DocumentRecord>, expectedStatus?: ProposalStatus) {
+    this.guard();
     const row = this.db.documents.find((d) => d.id === id);
     if (!row) return null;
     if (expectedStatus && row.status !== expectedStatus) return null;
+    const before = { ...row };
     Object.assign(row, patch);
+    this.log("documents", "UPDATE", before, row);
     return row;
   }
   async deleteDocument(id: string) {
+    this.guard();
     const idx = this.db.documents.findIndex((d) => d.id === id);
     if (idx < 0) return false;
-    this.db.documents.splice(idx, 1);
+    const [removed] = this.db.documents.splice(idx, 1);
+    this.log("documents", "DELETE", removed, null);
+    // document_rows cascade with their document, and the trigger sees each row.
+    for (const r of removed.rows ?? []) this.log("document_rows", "DELETE", r, null);
     return true;
   }
 
@@ -465,7 +538,10 @@ export class DemoStore implements Store {
     return this.db.config;
   }
   async updateConfig(patch: Partial<SystemConfig>) {
+    this.guard();
+    const before = { ...this.db.config };
     Object.assign(this.db.config, patch, { updated_at: this.now() });
+    this.log("system_config", "UPDATE", before, this.db.config);
     return this.db.config;
   }
 
@@ -485,15 +561,20 @@ export class DemoStore implements Store {
     return this.db.transfers.find((t) => t.id === id) ?? null;
   }
   async createTransfer(transfer: NewTransfer) {
+    this.guard();
     const now = this.now();
     const row: Transfer = { id: crypto.randomUUID(), status: "in_transit", received_date: null, received_by: null, created_at: now, updated_at: now, ...transfer };
     this.db.transfers.push(row);
+    this.log("transfers", "INSERT", null, row);
     return row;
   }
   async updateTransfer(id: string, patch: Partial<Transfer>, expectedStatus: TransferStatus) {
+    this.guard();
     const row = this.db.transfers.find((t) => t.id === id);
     if (!row || row.status !== expectedStatus) return null;
+    const before = { ...row };
     Object.assign(row, patch, { updated_at: this.now() });
+    this.log("transfers", "UPDATE", before, row);
     return row;
   }
 
@@ -514,7 +595,7 @@ const enc = encodeURIComponent;
 class SupabaseStore implements Store {
   private url: string;
   private key: string;
-  constructor(url: string, key: string) {
+  constructor(url: string, key: string, private actor?: Actor) {
     this.url = url.replace(/\/+$/, "");
     this.key = key;
   }
@@ -529,6 +610,7 @@ class SupabaseStore implements Store {
           Authorization: `Bearer ${this.key}`,
           "Content-Type": "application/json",
           Prefer: "return=representation",
+          ...actorHeaders(this.actor),
           ...(init?.headers ?? {}),
         },
       });
@@ -539,6 +621,7 @@ class SupabaseStore implements Store {
       const body = await res.text();
       if (body.includes("DAY_LOCKED")) throw new StoreError("DAY_LOCKED", "This day is Done and locked");
       if (body.includes("NEGATIVE_CLOSING")) throw new StoreError("NEGATIVE", "This would make the stock negative");
+      if (body.includes("AUDIT_ACTOR_MISSING")) throw new StoreError("AUDIT_ACTOR_MISSING", "A write needs an acting user or system tag");
       if (body.includes("FUTURE_DATE")) throw new StoreError("INVALID", "That date is after today");
       const pgCode = /"code"\s*:\s*"([A-Za-z0-9]+)"/.exec(body)?.[1] ?? "";
       if (res.status === 409 || pgCode === "23505") throw new StoreError("CONFLICT", body);
@@ -816,10 +899,11 @@ class SupabaseStore implements Store {
 
 let cachedDemoStore: DemoStore | null = null;
 
-export function getStore(env: Env): Store {
-  if (isLive(env)) return new SupabaseStore(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!);
+// `actor` attributes every write. Reads need none.
+export function getStore(env: Env, actor?: Actor): Store {
+  if (isLive(env)) return new SupabaseStore(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, actor);
   if (!cachedDemoStore) cachedDemoStore = new DemoStore(buildDemoData(businessDate(env)));
-  return cachedDemoStore;
+  return cachedDemoStore.withActor(actor);
 }
 
 // Tests only: start the next request from a fresh demo dataset.

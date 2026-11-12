@@ -1,8 +1,7 @@
 // Documents (free-form records) and purchase proposals (documents that carry
 // an approval status: pending -> approved / rejected, decided by an admin).
 // Mounted behind requireAuth in src/index.ts.
-import { newRouter, readBody, HttpError, scopeBranch, requireDate, audit } from "../app";
-import { getStore } from "../store";
+import { storeFor, newRouter, readBody, HttpError, scopeBranch, requireDate, audit } from "../app";
 import { requireAdmin, assertBranchAccess } from "../auth";
 import { businessDate, isValidDate } from "../time";
 import { enrichDocuments } from "../logic";
@@ -10,7 +9,7 @@ import { enrichDocuments } from "../logic";
 const r = newRouter();
 
 r.get("/documents", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const kind = c.req.query("kind");
   const status = c.req.query("status");
@@ -40,7 +39,7 @@ function cleanNumber(value: unknown): number | null {
 }
 
 r.post("/documents", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const branchId = String(body.branchId ?? "");
@@ -83,7 +82,7 @@ r.post("/documents", async (c) => {
 
 // Admin approves or rejects a pending purchase proposal.
 r.post("/documents/:id/decision", requireAdmin, async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const decision = body.decision;
@@ -98,7 +97,7 @@ r.post("/documents/:id/decision", requireAdmin, async (c) => {
 });
 
 r.delete("/documents/:id", requireAdmin, async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const doc = await store.getDocument((c.req.param("id") ?? ""));
   if (!doc) throw new HttpError(404, "Document not found", "NOT_FOUND");
@@ -118,7 +117,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 r.get("/documents/:id/print", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const raw = await store.getDocument((c.req.param("id") ?? ""));
   if (!raw) return c.text("Document not found", 404);

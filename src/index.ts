@@ -22,7 +22,7 @@ app.route("/api", documentRoutes);
 app.route("/api", insightRoutes);
 app.route("/api", settingsRoutes);
 
-const STORE_STATUS = { DAY_LOCKED: 423, CONFLICT: 409, INVALID: 400, UNAVAILABLE: 503, NEGATIVE: 409 } as const;
+const STORE_STATUS = { DAY_LOCKED: 423, CONFLICT: 409, INVALID: 400, UNAVAILABLE: 503, NEGATIVE: 409, AUDIT_ACTOR_MISSING: 500 } as const;
 
 app.onError((err, c) => {
   if (err instanceof HttpError) {

@@ -202,6 +202,20 @@ export interface AuditEntry {
   target: string;
   detail: Record<string, unknown> | null;
   created_at: string;
+  // Row-level fields written by the database audit trigger (and mirrored by DemoStore).
+  table_name?: string | null;
+  op?: "INSERT" | "UPDATE" | "DELETE" | null;
+  row_key?: Record<string, unknown> | null;
+  desk_id?: string | null;
+  branch_id?: string | null;
+  to_desk_id?: string | null;
+  to_branch_id?: string | null;
+  context?: Record<string, unknown> | null;
+  actor_role?: string | null;
+  source?: string | null;
+  old_values?: Record<string, unknown> | null;
+  new_values?: Record<string, unknown> | null;
+  is_seed?: boolean;
 }
 
 export interface Env {
