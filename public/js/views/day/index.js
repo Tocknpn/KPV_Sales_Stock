@@ -151,7 +151,10 @@ export async function unmountDay() {
   const screen = S;
   S = null;
   document.getElementById("day-footer")?.remove();
-  if (screen) await screen.queue.flushAll().catch(() => {});
+  if (screen) {
+    await screen.queue.flushAll().catch(() => {});
+    screen.queue.dispose();
+  }
 }
 
 // ---------------------------------------------------------------------------

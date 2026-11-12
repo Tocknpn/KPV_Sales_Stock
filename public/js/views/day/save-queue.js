@@ -38,6 +38,7 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
   const unsynced = new Set();
   let busy = 0;
   let offline = false;
+  let disposed = false;
   const RETRY_MS = 5000;
 
   const begin = () => {
@@ -61,6 +62,7 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
 
   // Put unsent changes back in the queue (keeping anything newer) and retry later.
   function requeue(skuId, entries) {
+    if (disposed) return;
     unsynced.add(skuId);
     offline = true;
     onStatus?.("offline");
@@ -161,8 +163,18 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
           await resync(skuId);
           unsynced.delete(skuId);
           offline = unsynced.size > 0;
-        } catch {
-          requeue(skuId, queued);
+        } catch (e) {
+          if (isNetworkError(e)) {
+            requeue(skuId, queued);
+            return;
+          }
+          // A real HTTP error (403, 5xx; a 401 already sent the app to login) will
+          // not fix itself by retrying: give up on this SKU's unsent changes,
+          // show what the server holds, and tell the user why.
+          unsynced.delete(skuId);
+          offline = unsynced.size > 0;
+          onStored(skuId, getStored(skuId));
+          queued.forEach(([field, q]) => report(q.cb, { ok: false, code: e.code ?? "ERROR", skuId, field, message: e.message }));
           return;
         }
       }
@@ -224,6 +236,15 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
     /** True while anything is unsent, in flight, or waiting for the network. */
     hasUnsaved() {
       return pending.size > 0 || inflight.size > 0 || unsynced.size > 0;
+    },
+
+    /** Stops all timers; call when the screen goes away. Unsent changes are dropped. */
+    dispose() {
+      disposed = true;
+      for (const entry of pending.values()) clearTimeout(entry.timer);
+      pending.clear();
+      unsynced.clear();
+      offline = false;
     },
 
     /** Sends everything buffered and waits for all requests to finish. */
