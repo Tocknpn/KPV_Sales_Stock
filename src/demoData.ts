@@ -15,6 +15,8 @@ import type {
   StaffAccount,
   Transfer,
   AuditEntry,
+  ClosedDay,
+  DeskAssignment,
 } from "./types";
 
 export interface DemoData {
@@ -31,6 +33,8 @@ export interface DemoData {
   config: SystemConfig;
   transfers: Transfer[];
   audit: AuditEntry[];
+  closedDays: ClosedDay[];
+  assignments: DeskAssignment[];
 }
 
 export const DEMO_ADMIN_ID = "11111111-0000-0000-0000-000000000001";
@@ -41,6 +45,8 @@ export const DEMO_STAFF = {
   "B-VT": "11111111-0000-0000-0000-000000000005",
 } as const;
 // One branch manager (Morning Market), PIN 5678.
+// A second Morning Market staff member, so handovers have somebody to hand to. PIN 1234.
+export const DEMO_STAFF_MM2 = "11111111-0000-0000-0000-000000000007";
 export const DEMO_MANAGER = { "B-MM": "11111111-0000-0000-0000-000000000006" } as const;
 
 function shiftDate(dateStr: string, days: number) {
@@ -148,6 +154,7 @@ export function buildDemoData(today: string): DemoData {
     account(DEMO_STAFF["B-IT"], "B-IT", "Vilayphone N.", "pbkdf2$100000$25cc26e71c8f12edb467d813fabcb081$91c5af05b41c76bcd563d587af00a4ce04b4fdf87c468333b1f812c7a391984a", startedAt),
     account(DEMO_STAFF["B-VT"], "B-VT", "Khamla P.", "pbkdf2$100000$fc5f0bc2c09393ef3814d8fbff21b477$7246099325f4a7e9d7003bbb43f2a351b4d6908e9f04fef2ced496dc309aee88", startedAt),
     account(DEMO_MANAGER["B-MM"], "B-MM", "Manivone M.", "pbkdf2$100000$a1b2c3d4e5f60718293a4b5c6d7e8f90$2efde50c6cbd8c79669882d0346318c69b15af97db7c12a05f6909d105efdfb6", startedAt, "manager"),
+    account(DEMO_STAFF_MM2, "B-MM", "Noy P.", "pbkdf2$100000$f9a0b9935d5ed4f141b351308c396b6f$322d97255131fbbb277ca489bfbf0e7fcc8e6c1ac24e632256dc0ae5a8706edd", startedAt),
   ];
 
   const T = {
@@ -326,5 +333,7 @@ export function buildDemoData(today: string): DemoData {
     config: { id: 1, safety_buffer_days: 2, spot_lak_per_baht: 32500000, usd_to_lak_rate: 20800, updated_at: startedAt },
     transfers: [],
     audit: [],
+    closedDays: [],
+    assignments: [],
   };
 }

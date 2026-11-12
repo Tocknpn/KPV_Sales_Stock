@@ -235,3 +235,27 @@ export interface Env {
   APP_VERSION?: string;
   BUILD_DATE?: string;
 }
+
+// A date a branch is shut (holiday). Mirrors branch_closed_day.
+export interface ClosedDay {
+  branch_id: string;
+  closed_date: string;
+  reason: string;
+  created_by: string | null;
+  created_at: string;
+  is_seed: boolean;
+}
+
+// Who is responsible for a case, with handover history. The active row has
+// ended_at = null. Mirrors desk_assignment.
+export interface DeskAssignment {
+  id: string;
+  desk_id: string;
+  staff_id: string;
+  started_at: string;
+  started_by: string | null;
+  ended_at: string | null;
+  ended_by: string | null;
+  note: string | null;
+  is_seed: boolean;
+}

@@ -23,6 +23,8 @@ const PRIMARY_KEYS: Record<string, string[]> = {
   documents: ["id"],
   document_rows: ["id"],
   system_config: ["id"],
+  branch_closed_day: ["branch_id", "closed_date"],
+  desk_assignment: ["id"],
 };
 
 const CONTEXT_KEYS = [

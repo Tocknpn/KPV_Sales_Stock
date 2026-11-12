@@ -145,6 +145,78 @@ create trigger trg_guard_desk_day_reopen before update on desk_days
   for each row when (old.status = 'done' and new.status <> 'done')
   execute function guard_desk_day_reopen();
 
+-- Closed days: a manager of that branch, or an admin.
+create or replace function guard_branch_closed_day() returns trigger
+language plpgsql as $$
+begin
+  perform kpv_require('{admin,manager}', coalesce(new.branch_id, old.branch_id));
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
+end $$;
+
+-- Case assignment. Staff may take a case for themselves, or hand over / release
+-- a case they hold (the RPC ends the holder's row before inserting the
+-- successor, so "holds" also means "ended it by me in this transaction").
+-- Taking over someone else's case needs a manager of the branch or an admin.
+-- Rows are never rewritten: only ended_* and note may change.
+create or replace function guard_desk_assignment() returns trigger
+language plpgsql as $$
+declare
+  v_row desk_assignment := case when tg_op = 'DELETE' then old else new end;
+  v_branch text;
+  a record;
+  v_held boolean;
+begin
+  select branch_id into v_branch from desks where desk_id = v_row.desk_id;
+
+  if tg_op = 'DELETE' then
+    perform kpv_require('{admin}');
+    return old;
+  end if;
+
+  if tg_op = 'UPDATE' and (new.desk_id <> old.desk_id or new.staff_id <> old.staff_id
+      or new.started_at <> old.started_at or new.started_by is distinct from old.started_by) then
+    raise exception 'ASSIGNMENT_IMMUTABLE: only ended_at, ended_by and note may change' using errcode = 'P0001';
+  end if;
+
+  if kpv_actor_id() is null then
+    perform kpv_require('{admin,manager}', v_branch);
+    return new;
+  end if;
+  select * into a from kpv_actor();
+  if not found then
+    perform kpv_require('{admin,manager}', v_branch);
+    return new;
+  end if;
+  if a.role in ('admin', 'manager') then
+    perform kpv_require('{admin,manager}', v_branch);
+    return new;
+  end if;
+
+  -- staff
+  perform kpv_require('{staff}', v_branch);
+  if tg_op = 'UPDATE' then
+    if old.staff_id = a.id then return new; end if;
+    raise exception 'ROLE_DENIED: only the holder or a manager can end an assignment' using errcode = 'P0001';
+  end if;
+  if new.staff_id = a.id then return new; end if;
+  select exists (
+    select 1 from desk_assignment d
+     where d.desk_id = new.desk_id and d.staff_id = a.id
+       and (d.ended_at is null or (d.ended_by = a.id and d.ended_at = now()))
+  ) into v_held;
+  if v_held then return new; end if;
+  raise exception 'ROLE_DENIED: staff may only take a case for themselves or hand over their own' using errcode = 'P0001';
+end $$;
+
+drop trigger if exists trg_guard_branch_closed_day on branch_closed_day;
+create trigger trg_guard_branch_closed_day before insert or update or delete on branch_closed_day
+  for each row execute function guard_branch_closed_day();
+
+drop trigger if exists trg_guard_desk_assignment on desk_assignment;
+create trigger trg_guard_desk_assignment before insert or update or delete on desk_assignment
+  for each row execute function guard_desk_assignment();
+
 -- ---------------------------------------------------------------------------
 -- 4. Lockdown: RLS on every table (no policies = no access for anon and
 --    authenticated; service_role bypasses RLS) and no grants to the public API.

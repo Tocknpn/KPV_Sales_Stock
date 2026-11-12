@@ -8,6 +8,7 @@ import moveRoutes from "./routes/moves";
 import documentRoutes from "./routes/documents";
 import insightRoutes from "./routes/insights";
 import settingsRoutes from "./routes/settings";
+import caseRoutes from "./routes/cases";
 
 // The SPA and the API are served from the same origin, so no CORS headers are
 // sent: other websites cannot call this API from a browser.
@@ -23,6 +24,7 @@ app.route("/api", moveRoutes);
 app.route("/api", documentRoutes);
 app.route("/api", insightRoutes);
 app.route("/api", settingsRoutes);
+app.route("/api", caseRoutes);
 
 const STORE_STATUS = { DAY_LOCKED: 423, CONFLICT: 409, INVALID: 400, UNAVAILABLE: 503, NEGATIVE: 409, AUDIT_ACTOR_MISSING: 500 } as const;
 

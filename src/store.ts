@@ -21,6 +21,8 @@ import type {
   Transfer,
   TransferStatus,
   AuditEntry,
+  ClosedDay,
+  DeskAssignment,
   Env,
 } from "./types";
 import { buildDemoData, type DemoData } from "./demoData";
@@ -113,6 +115,12 @@ export type MoveResult =
 export type NewStaffAccount = Pick<StaffAccount, "branch_id" | "display_name" | "pin_hash" | "role">;
 export type NewSku = Omit<MasterSku, "active"> & { active?: boolean };
 
+export interface ClosedDayFilter {
+  branchId?: string;
+  from?: string;
+  to?: string;
+}
+
 export interface Store {
   branches(): Promise<Branch[]>;
   desks(): Promise<Desk[]>;
@@ -175,6 +183,19 @@ export interface Store {
   moveStock(input: MoveInput): Promise<MoveResult>;
   // Reverses a whole ticket on its original date (the undo_move RPC).
   undoMove(ticketId: string, clientRef: string): Promise<MoveResult>;
+
+  // Branch closed days (holidays). addClosedDays skips dates that already exist
+  // and returns only the rows it added.
+  closedDays(filter: ClosedDayFilter): Promise<ClosedDay[]>;
+  addClosedDays(rows: ClosedDay[]): Promise<ClosedDay[]>;
+  removeClosedDay(branchId: string, date: string): Promise<boolean>;
+
+  // Case assignment. activeAssignments = the current holder of each case.
+  // assignDesk ends the current holder and starts the new one atomically (no-op
+  // when already the holder); releaseDesk ends without a successor.
+  activeAssignments(filter: { branchId?: string }): Promise<DeskAssignment[]>;
+  assignDesk(deskId: string, staffId: string, note?: string): Promise<DeskAssignment>;
+  releaseDesk(deskId: string): Promise<void>;
 
   audit(entry: Omit<AuditEntry, "id" | "created_at">): Promise<void>;
   auditLog(limit: number): Promise<AuditEntry[]>;
@@ -303,6 +324,10 @@ export class DemoStore implements Store {
     const before = { ...row };
     Object.assign(row, patch);
     this.log("staff_accounts", "UPDATE", before, row);
+    // Mirrors trg_staff_end_assignments: deactivated or moved staff hold no case.
+    if ((before.active && !row.active) || before.branch_id !== row.branch_id) {
+      for (const a of this.db.assignments.filter((x) => x.staff_id === id && x.ended_at === null)) this.endAssignment(a);
+    }
     return row;
   }
 
@@ -792,6 +817,78 @@ export class DemoStore implements Store {
     );
   }
 
+  async closedDays(filter: ClosedDayFilter) {
+    return this.db.closedDays
+      .filter((d) => (!filter.branchId || d.branch_id === filter.branchId) && (!filter.from || d.closed_date >= filter.from) && (!filter.to || d.closed_date <= filter.to))
+      .sort((a, b) => a.closed_date.localeCompare(b.closed_date) || a.branch_id.localeCompare(b.branch_id));
+  }
+  async addClosedDays(rows: ClosedDay[]) {
+    this.guard();
+    const added: ClosedDay[] = [];
+    for (const r of rows) {
+      if (this.db.closedDays.some((d) => d.branch_id === r.branch_id && d.closed_date === r.closed_date)) continue;
+      const row = { ...r };
+      this.db.closedDays.push(row);
+      this.log("branch_closed_day", "INSERT", null, row);
+      added.push(row);
+    }
+    return added;
+  }
+  async removeClosedDay(branchId: string, date: string) {
+    this.guard();
+    const i = this.db.closedDays.findIndex((d) => d.branch_id === branchId && d.closed_date === date);
+    if (i < 0) return false;
+    const [row] = this.db.closedDays.splice(i, 1);
+    this.log("branch_closed_day", "DELETE", row, null);
+    return true;
+  }
+
+  private actorId() {
+    return this.actor && "id" in this.actor ? this.actor.id : null;
+  }
+  private endAssignment(a: DeskAssignment) {
+    const before = { ...a };
+    a.ended_at = this.now();
+    a.ended_by = this.actorId();
+    this.log("desk_assignment", "UPDATE", before, a);
+  }
+  async activeAssignments(filter: { branchId?: string }) {
+    const deskIds = new Set(this.db.desks.filter((d) => !filter.branchId || d.branch_id === filter.branchId).map((d) => d.desk_id));
+    return this.db.assignments.filter((a) => a.ended_at === null && deskIds.has(a.desk_id));
+  }
+  async assignDesk(deskId: string, staffId: string, note?: string) {
+    this.guard();
+    const desk = this.db.desks.find((d) => d.desk_id === deskId);
+    if (!desk) throw new StoreError("INVALID", "DESK_NOT_FOUND");
+    const staff = this.db.staffAccounts.find((a) => a.id === staffId);
+    if (!staff || !staff.active) throw new StoreError("INVALID", "ASSIGN_INACTIVE");
+    if (staff.branch_id !== desk.branch_id) throw new StoreError("INVALID", "ASSIGN_OTHER_BRANCH");
+    const current = this.db.assignments.find((a) => a.desk_id === deskId && a.ended_at === null);
+    if (current) {
+      if (current.staff_id === staffId) return current;
+      this.endAssignment(current);
+    }
+    const row: DeskAssignment = {
+      id: crypto.randomUUID(),
+      desk_id: deskId,
+      staff_id: staffId,
+      started_at: this.now(),
+      started_by: this.actorId(),
+      ended_at: null,
+      ended_by: null,
+      note: note ?? null,
+      is_seed: false,
+    };
+    this.db.assignments.push(row);
+    this.log("desk_assignment", "INSERT", null, row);
+    return row;
+  }
+  async releaseDesk(deskId: string) {
+    this.guard();
+    const current = this.db.assignments.find((a) => a.desk_id === deskId && a.ended_at === null);
+    if (current) this.endAssignment(current);
+  }
+
   async audit(entry: Omit<AuditEntry, "id" | "created_at">) {
     this.db.audit.unshift({ id: crypto.randomUUID(), created_at: this.now(), ...entry });
   }
@@ -839,6 +936,7 @@ class SupabaseStore implements Store {
         throw new StoreError("NEGATIVE", "This would make the stock negative", Number.isFinite(available) ? Math.max(available, 0) : undefined);
       }
       if (body.includes("AUDIT_ACTOR_MISSING")) throw new StoreError("AUDIT_ACTOR_MISSING", "A write needs an acting user or system tag");
+      if (/ASSIGN_(INACTIVE|OTHER_BRANCH)|DESK_NOT_FOUND/.test(body)) throw new StoreError("INVALID", body);
       if (body.includes("FUTURE_DATE")) throw new StoreError("INVALID", "That date is after today");
       const pgCode = /"code"\s*:\s*"([A-Za-z0-9]+)"/.exec(body)?.[1] ?? "";
       if (res.status === 409 || pgCode === "23505") throw new StoreError("CONFLICT", body);
@@ -1134,6 +1232,42 @@ class SupabaseStore implements Store {
   }
   async undoMove(ticketId: string, clientRef: string) {
     return this.moveResult(await this.rpc("undo_move", { p_ticket: ticketId, p_client_ref: clientRef }));
+  }
+
+  async closedDays(filter: ClosedDayFilter) {
+    const q = [
+      filter.branchId ? `branch_id=eq.${enc(filter.branchId)}` : "",
+      filter.from ? `closed_date=gte.${enc(filter.from)}` : "",
+      filter.to ? `closed_date=lte.${enc(filter.to)}` : "",
+    ].filter(Boolean);
+    return this.restAll<ClosedDay>(`branch_closed_day?select=*${q.length ? "&" + q.join("&") : ""}&order=closed_date,branch_id`);
+  }
+  async addClosedDays(rows: ClosedDay[]) {
+    if (rows.length === 0) return [];
+    // Existing dates are skipped; created_at / is_seed / created_by default in the database.
+    const body = rows.map((r) => ({ branch_id: r.branch_id, closed_date: r.closed_date, reason: r.reason }));
+    return this.rest<ClosedDay[]>("branch_closed_day?on_conflict=branch_id,closed_date", {
+      method: "POST",
+      headers: { Prefer: "return=representation,resolution=ignore-duplicates" },
+      body: JSON.stringify(body),
+    });
+  }
+  async removeClosedDay(branchId: string, date: string) {
+    const rows = await this.rest<ClosedDay[]>(`branch_closed_day?branch_id=eq.${enc(branchId)}&closed_date=eq.${enc(date)}`, { method: "DELETE" });
+    return rows.length > 0;
+  }
+
+  async activeAssignments(filter: { branchId?: string }) {
+    if (!filter.branchId) return this.restAll<DeskAssignment>("desk_assignment?select=*&ended_at=is.null&order=started_at");
+    const desks = await this.rest<{ desk_id: string }[]>(`desks?branch_id=eq.${enc(filter.branchId)}&select=desk_id`);
+    if (desks.length === 0) return [];
+    return this.restAll<DeskAssignment>(`desk_assignment?select=*&ended_at=is.null&desk_id=in.(${desks.map((d) => enc(d.desk_id)).join(",")})&order=started_at`);
+  }
+  async assignDesk(deskId: string, staffId: string, note?: string) {
+    return this.rpc<DeskAssignment>("assign_desk", { p_desk: deskId, p_staff: staffId, p_note: note ?? null });
+  }
+  async releaseDesk(deskId: string) {
+    await this.rpc("release_desk", { p_desk: deskId });
   }
 
   async audit(entry: Omit<AuditEntry, "id" | "created_at">) {
