@@ -212,4 +212,39 @@ describe("desk cards and dashboard", () => {
     expect(dash.watchlist.lowCount).toBeGreaterThan(0);
     expect(dash.branchCards[0].criticalCount).toBeGreaterThan(0);
   });
+
+  it("a rule edit flips the day-detail row status in step with the card's criticalCount", async () => {
+    const admin = await asAdmin();
+    const detailRow = async () => (await call(admin, "GET", `/stock/desk/MM-D01?date=${TODAY}`)).json.rows.find((r: any) => r.sku_id === "GB-001");
+    const before = await detailRow();
+    expect(before.branch_status).not.toBe("critical");
+    expect(before.threshold).toBeUndefined();
+    expect(before.low_stock).toBeUndefined();
+    const cards0 = (await cardOf(admin, "MM-D01")).criticalCount;
+    await putRule(admin, { branchId: "B-MM", avgDailySell: 5000, leadTimeDays: 7 });
+    const after = await detailRow();
+    expect(after).toMatchObject({ branch_status: "critical", runway_days: 0 });
+    expect((await cardOf(admin, "MM-D01")).criticalCount).toBe(cards0 + 1);
+    const detail = (await call(admin, "GET", `/stock/desk/MM-D01?date=${TODAY}`)).json;
+    expect(detail.criticalItems).toBe(detail.rows.filter((r: any) => r.branch_status === "critical").length);
+  });
+
+  it("an inbound-only SKU appears in the dashboard watchlist", async () => {
+    const admin = await asAdmin();
+    expect((await call(admin, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "TS-D01", skuId: "GB-001", qty: 3 })).status).toBe(200);
+    await putRule(admin, { branchId: "B-TS", avgDailySell: 100, leadTimeDays: 7 });
+    const dash = (await call(admin, "GET", "/dashboard?branchId=B-TS")).json;
+    const item = dash.watchlist.topLow.find((i: any) => i.sku_id === "GB-001");
+    expect(item).toMatchObject({ branch_id: "B-TS", status: "critical", closing: 3, desk_id: "TS-D01" });
+  });
+
+  it("a fixed-level warning compares on-hand with the fixed level", async () => {
+    const admin = await asAdmin();
+    // BR-021 at Talat Sao has no rules; raise its fixed level above what is on hand.
+    await call(admin, "PATCH", "/skus/BR-021", { reorder_level: 500 });
+    const row = rowFor(await rowsOf(admin, "B-TS"), "BR-021");
+    expect(row).toMatchObject({ status: "warning", fixedLevel: true });
+    const dash = (await call(admin, "GET", "/dashboard?branchId=B-TS")).json;
+    expect(dash.watchlist.topLow.find((i: any) => i.sku_id === "BR-021")).toMatchObject({ closing: row.onHand, reorder_level: 500 });
+  });
 });

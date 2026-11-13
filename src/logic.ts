@@ -148,7 +148,7 @@ function lastActor(rows: LedgerRow[], day: DeskDay | undefined, staffById: Map<s
 
 // Branch-wide replenishment status of a SKU, keyed "branchId|skuId". Structural
 // so logic.ts does not depend on replenishment.ts (which depends on it).
-export type BranchStatuses = Map<string, { status: "critical" | "warning" | "ok" | "no_data"; position: number; avg: { value: number | null }; lead: { value: number }; runwayDays: number | null }>;
+export type BranchStatuses = Map<string, { status: "critical" | "warning" | "ok" | "no_data"; position: number; onHand: number; fixedLevel: boolean; avg: { value: number | null }; lead: { value: number }; runwayDays: number | null }>;
 
 export function buildDeskCards(
   desks: Desk[],
@@ -207,7 +207,9 @@ export function buildDeskDetail(
   ledgerRows: LedgerRow[],
   staffAccounts: StaffAccount[],
   config: SystemConfig,
-  weights: SkuWeight[] = []
+  weights: SkuWeight[] = [],
+  // Branch-wide status per "branchId|skuId"; the only source of low-stock alerts.
+  statuses: BranchStatuses = new Map()
 ) {
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
   const staffById = new Map(staffAccounts.map((s) => [s.id, s]));
@@ -217,10 +219,11 @@ export function buildDeskDetail(
   const rows = visibleRows.map((r) => {
     const sku = skuById.get(r.sku_id);
     const closing = computeClosing(r);
-    const threshold = reorderPoint(sku, config);
+    const branchRow = statuses.get(`${desk.branch_id}|${r.sku_id}`);
+    const avg = branchRow?.avg.value ?? null;
     const variance = r.counted_qty != null ? r.counted_qty - closing : null;
-    const lifetime = estLifetimeDays(sku, closing);
-    const leadTime = sku?.order_lead_time_days ?? null;
+    const lifetime = avg != null && avg > 0 ? round1(closing / avg) : null;
+    const leadTime = avg != null ? branchRow?.lead.value ?? null : null;
     return {
       sku_id: r.sku_id,
       name_en: sku?.name_en ?? r.sku_id,
@@ -248,9 +251,9 @@ export function buildDeskDetail(
       baht_weight_each: sku?.baht_weight ?? 0,
       gram_weight_each: sku?.std_gram_weight ?? 0,
       value_lak: round2(valueLak(sku, closing, config)),
-      low_stock: isLowStock(closing, threshold),
-      threshold,
-      avg_daily_sales: sku?.avg_daily_sales ?? null,
+      branch_status: branchRow?.status ?? "no_data",
+      runway_days: branchRow?.runwayDays ?? null,
+      avg_daily_sales: avg,
       order_lead_time_days: leadTime,
       est_lifetime_days: lifetime,
       lifetime_alert: lifetime !== null && leadTime !== null && lifetime < leadTime,
@@ -293,7 +296,7 @@ export function buildDeskDetail(
       valueLak: round2(totals.valueLak),
       valueUsd: config.usd_to_lak_rate > 0 ? round2(totals.valueLak / config.usd_to_lak_rate) : 0,
     },
-    lowStockItems: rows.filter((r) => r.low_stock).length,
+    criticalItems: rows.filter((r) => r.branch_status === "critical").length,
     stockHealth: {
       avgLifetimeDays: withLifetime.length ? round1(withLifetime.reduce((s, r) => s + (r.est_lifetime_days ?? 0), 0) / withLifetime.length) : null,
       alertSkus: rows
@@ -378,6 +381,13 @@ export interface DashboardInput {
   statuses?: BranchStatuses;
 }
 
+interface LowItem {
+  sku: MasterSku;
+  branchId: string;
+  deskId: string;
+  st: BranchStatuses extends Map<string, infer V> ? V : never;
+}
+
 interface Position {
   desk_id: string;
   branch_id: string;
@@ -414,27 +424,39 @@ export function buildDashboard(input: DashboardInput) {
   }
 
   const low = positions.filter(isLow);
-  // One watchlist line per branch and SKU (not per case), worst runway first.
-  const lowItems = [
-    ...new Map(
-      [...low].sort((a, b) => b.qty - a.qty).map((p) => [`${p.branch_id}|${p.sku.sku_id}`, p] as const)
-    ).values(),
-  ].sort((a, b) => {
-    const sa = branchStatus(a)!;
-    const sb = branchStatus(b)!;
-    return (sa.status === "critical" ? 0 : 1) - (sb.status === "critical" ? 0 : 1) || (sa.runwayDays ?? 0) - (sb.runwayDays ?? 0);
-  });
+  // Watchlist: one line per branch and SKU, built from the branch statuses so a SKU that
+  // is only on a truck (nothing on hand anywhere) still shows. Worst runway first.
+  const deskBranch = filter.deskId ? desks.find((d) => d.desk_id === filter.deskId)?.branch_id : undefined;
+  const lowItems: LowItem[] = [];
+  for (const [key, st] of statuses) {
+    if (st.status !== "critical" && st.status !== "warning") continue;
+    const [branchId, skuId] = key.split("|");
+    const sku = skuById.get(skuId);
+    if (!sku || !categoryOk(sku)) continue;
+    if (filter.branchId && branchId !== filter.branchId) continue;
+    const held = positions.filter((p) => p.branch_id === branchId && p.sku.sku_id === skuId).sort((a, b) => b.qty - a.qty);
+    if (filter.deskId && (branchId !== deskBranch || !held.some((p) => p.desk_id === filter.deskId))) continue;
+    const deskId = filter.deskId ?? held[0]?.desk_id ?? inTransit.find((t) => t.sku_id === skuId && t.to_branch_id === branchId)?.to_desk_id ?? "";
+    lowItems.push({ sku, branchId, deskId, st });
+  }
+  lowItems.sort((a, b) => (a.st.status === "critical" ? 0 : 1) - (b.st.status === "critical" ? 0 : 1) || (a.st.runwayDays ?? 0) - (b.st.runwayDays ?? 0));
   const over = positions
     .filter((p) => p.point > 0 && p.qty > p.point * OVERSTOCK_MULTIPLIER)
     .sort((a, b) => b.qty - b.point * OVERSTOCK_MULTIPLIER - (a.qty - a.point * OVERSTOCK_MULTIPLIER));
-  const lowItem = (p: Position) => {
-    const st = branchStatus(p)!;
+  const lowItem = ({ sku, branchId, deskId, st }: LowItem) => {
     const avg = st.avg.value;
+    const fixed = st.fixedLevel || avg == null;
     return {
-      ...watchItem(p),
-      closing: st.position,
-      // The level that clears the warning; the SKU's fixed level when there is no average.
-      reorder_level: avg != null && avg > 0 ? Math.ceil(avg * (st.lead.value + config.warning_margin_days)) : p.sku.reorder_level,
+      sku_id: sku.sku_id,
+      name_en: sku.name_en,
+      name_lo: sku.name_lo,
+      category: sku.category,
+      desk_id: deskId,
+      branch_id: branchId,
+      // Runway items compare the branch position with the level that clears the warning;
+      // a fixed-level warning compares what is on hand with the SKU's fixed level.
+      closing: fixed ? st.onHand : st.position,
+      reorder_level: fixed ? sku.reorder_level : Math.ceil((avg as number) * (st.lead.value + config.warning_margin_days)),
       status: st.status,
       runway_days: st.runwayDays,
     };

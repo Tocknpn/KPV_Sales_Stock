@@ -229,7 +229,8 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
     store.desks(),
   ]);
   const day = days[0];
-  const detail = buildDeskDetail(desk, branches.find((b) => b.branch_id === desk.branch_id), day, skus, ledgerRows, staffAccounts, config, weights);
+  const statuses = await loadBranchStatuses(store, [desk.branch_id], businessDate(c.env));
+  const detail = buildDeskDetail(desk, branches.find((b) => b.branch_id === desk.branch_id), day, skus, ledgerRows, staffAccounts, config, weights, statuses);
   const skuName = (id: string) => skus.find((s) => s.sku_id === id)?.name_en ?? id;
   const deskName = (id: string) => {
     const d = allDesks.find((x) => x.desk_id === id);

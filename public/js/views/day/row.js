@@ -77,7 +77,7 @@ export function renderRow(r, view) {
   const closing = closingOf(r);
   const out = outOf(r);
   const net = netMoveOf(r);
-  const low = closing < Number(r.threshold ?? 0);
+  const low = r.branch_status === "critical" || r.branch_status === "warning";
   const sub = [r.weight_name, r.purity].filter(Boolean).join(" · ");
   const bad = problems && problems.size > 0;
   return `

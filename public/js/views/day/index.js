@@ -170,7 +170,7 @@ function totals() {
     const closing = closingOf(r);
     pcs += closing;
     baht += closing * (r.baht_weight_each || 0);
-    if (closing < Number(r.threshold ?? 0)) low++;
+    if (r.branch_status === "critical") low++;
   }
   return { pcs, baht, low };
 }

@@ -385,14 +385,11 @@ describe("numbers agree across screens", () => {
     expect(after.usd_value).toBe(after.lak_value / 20000);
   });
 
-  it("low stock uses the computed reorder point everywhere", async () => {
+  it("low stock follows the branch status everywhere", async () => {
     const admin = await asAdmin();
-    // GB-001: avg 2.5/day, lead 3 days, buffer 2 days -> reorder point 13.
     const row = rowOf(await detailOf(admin, "IT-D01", TODAY), "GB-001");
-    expect(row.threshold).toBe(13);
-    expect(row.low_stock).toBe(row.closing_qty < 13);
-    await call(admin, "POST", "/settings/config", { safetyBufferDays: 0 });
-    expect(rowOf(await detailOf(admin, "IT-D01", TODAY), "GB-001").threshold).toBe(8);
+    expect(row.threshold).toBeUndefined();
+    expect(["critical", "warning", "ok", "no_data"]).toContain(row.branch_status);
     const low = (await call(admin, "GET", "/dashboard?deskId=IT-D01")).json.watchlist.topLow;
     for (const item of low) expect(item.closing).toBeLessThanOrEqual(item.reorder_level);
   });
