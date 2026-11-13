@@ -333,7 +333,7 @@ r.post("/users", requireAdmin, async (c) => {
   if (!isValidPin(body.pin)) throw new HttpError(400, "PIN must be exactly 4 digits", "BAD_PIN");
   if (role !== "admin" && !(await store.branches()).some((b) => b.branch_id === branch_id)) throw new HttpError(400, "Choose a branch", "BAD_BRANCH");
   const account = await store.createStaffAccount({ display_name: display_name.slice(0, 60), role, branch_id, pin_hash: await hashPin(body.pin) });
-  await audit(store, c.get("user"), "user.create", account.display_name, { id: account.id, role, branch_id });
+  await audit(store, c.get("user"), "user.create", account.display_name, { id: account.id, role, branch_id }, { branchId: account.branch_id });
   return c.json({ id: account.id });
 });
 
@@ -392,7 +392,7 @@ r.patch("/users/:id", requireManager, async (c) => {
   if (changes.length === 0) return c.json({ ok: true });
 
   await store.updateStaffAccount(account.id, patch);
-  await audit(store, me, "user.update", account.display_name, { id: account.id, changes });
+  await audit(store, me, "user.update", account.display_name, { id: account.id, changes }, { branchId: account.branch_id });
   return c.json({ ok: true });
 });
 

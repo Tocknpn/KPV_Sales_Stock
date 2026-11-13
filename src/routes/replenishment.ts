@@ -87,7 +87,7 @@ r.put("/replenishment/rules", requireManager, async (c) => {
   const avg = parseValue(body.avgDailySell, "avgDailySell", MAX_AVG, 3);
   const lead = parseValue(body.leadTimeDays, "leadTimeDays", MAX_LEAD, 1);
   const rule = await store.upsertRule({ scope, scope_key: key, branch_id: branchId, avg_daily_sell: avg, lead_time_days: lead });
-  await audit(store, user, rule ? "replenishment.rule" : "replenishment.rule_clear", `${scope}:${key}`, { branchId, avg_daily_sell: avg, lead_time_days: lead });
+  await audit(store, user, rule ? "replenishment.rule" : "replenishment.rule_clear", `${scope}:${key}`, { branchId, avg_daily_sell: avg, lead_time_days: lead }, { branchId });
   return c.json({ rule });
 });
 
@@ -142,7 +142,7 @@ r.post("/replenishment/rules/bulk", requireManager, async (c) => {
     const targets: RuleTarget[] = narrower.map((x) => ({ scope: x.scope, scope_key: x.scope_key, branch_id: x.branch_id }));
     cleared = await store.deleteRules(targets);
   }
-  await audit(store, user, "replenishment.bulk", `${scope}:${key}`, { branchId, avg_daily_sell: avg, lead_time_days: lead, clearOverrides, cleared, affected: preview.affected });
+  await audit(store, user, "replenishment.bulk", `${scope}:${key}`, { branchId, avg_daily_sell: avg, lead_time_days: lead, clearOverrides, cleared, affected: preview.affected }, { branchId });
   return c.json({ ...preview, rule, cleared });
 });
 

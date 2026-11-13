@@ -148,12 +148,12 @@ describe("GET /api/audit", () => {
     const admin = await asAdmin(today);
     const first = (await call(admin, "GET", "/audit?limit=2", undefined, today)).json;
     expect(first.entries).toHaveLength(2);
-    expect(first.next).toBe(first.entries[1].created_at);
+    expect(first.next).toBe(`${first.entries[1].created_at}|${first.entries[1].id}`);
     const second = (await call(admin, "GET", `/audit?limit=2&before=${encodeURIComponent(first.next)}`, undefined, today)).json;
     expect(second.entries.length).toBeGreaterThan(0);
-    for (const e of second.entries) expect(e.created_at < first.next).toBe(true);
     const ids = new Set(first.entries.map((e: any) => e.id));
     for (const e of second.entries) expect(ids.has(e.id)).toBe(false);
+    expect((await call(admin, "GET", "/audit?before=nope", undefined, today)).status).toBe(400);
     // the last page has no cursor
     const all = (await call(admin, "GET", "/audit?limit=500", undefined, today)).json;
     expect(all.next).toBeNull();
@@ -165,5 +165,60 @@ describe("GET /api/audit", () => {
       expect((await call(admin, method, "/audit/x", {}, today)).status, method).toBe(404);
     }
     expect((await call(admin, "DELETE", "/audit", undefined, today)).status).toBe(404);
+  });
+});
+
+describe("audit paging cursor", () => {
+  it("rows with identical created_at page correctly: every row exactly once", async () => {
+    const store: any = getStore({ DEMO_DATE: TODAY } as any, { id: DEMO_STAFF["B-MM"] });
+    const stamp = "2026-11-12T03:00:00.000Z";
+    const ids = ["a", "d", "b", "e", "c"].map((c) => `${c}0000000-0000-4000-8000-000000000000`);
+    for (const id of ids) store.db.audit.push({ id, created_at: stamp, actor_id: null, actor_name: "x", action: "t", target: "t", detail: null });
+    store.db.audit.push({ id: "z0000000-0000-4000-8000-000000000000", created_at: "2026-11-12T02:00:00.000Z", actor_id: null, actor_name: "x", action: "t", target: "t", detail: null });
+
+    const seen: string[] = [];
+    let before: { createdAt: string; id: string } | undefined;
+    for (let i = 0; i < 10; i++) {
+      const page = await store.auditLog({ limit: 2, before });
+      if (page.length === 0) break;
+      seen.push(...page.map((e: any) => e.id));
+      before = { createdAt: page[page.length - 1].created_at, id: page[page.length - 1].id };
+    }
+    expect(seen).toHaveLength(6);
+    expect(new Set(seen).size).toBe(6);
+    expect(seen.slice(0, 5)).toEqual([...ids].sort().reverse());
+  });
+
+  it("SupabaseStore sends a keyset query with an encoded timestamp", async () => {
+    const urls: string[] = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (url: any) => {
+      urls.push(String(url));
+      return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as any;
+    try {
+      const store = getStore({ SUPABASE_URL: "https://x.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "k" } as any);
+      await store.auditLog({ deskId: "MM-D01", limit: 51, before: { createdAt: "2026-11-12T10:00:00.123456+00:00", id: "abc" } });
+    } finally {
+      globalThis.fetch = real;
+    }
+    const q = decodeURIComponent(urls[0].split("?")[1].replace(/%2B/g, "%252B"));
+    expect(urls[0]).toContain("order=created_at.desc,id.desc");
+    expect(urls[0]).toContain("limit=51");
+    expect(urls[0]).toContain("2026-11-12T10%3A00%3A00.123456%2B00%3A00");
+    expect(urls[0]).not.toContain("+");
+    expect(q).toContain("and=(or(created_at.lt.2026-11-12T10:00:00.123456%2B00:00,and(created_at.eq.2026-11-12T10:00:00.123456%2B00:00,id.lt.abc)),or(desk_id.eq.MM-D01,to_desk_id.eq.MM-D01))");
+  });
+});
+
+describe("semantic entries carry their branch", () => {
+  it("a manager sees the reopen entry for their branch; another branch's manager does not", async () => {
+    const today = laosDate();
+    const manager = await asManager("B-MM", today);
+    expect((await call(manager, "POST", "/stock/desk/MM-D02/reopen", { date: addDays(today, -1), reason: "wrong count" }, today)).status).toBe(200);
+    const seen = (await call(manager, "GET", "/audit", undefined, today)).json.entries;
+    expect(seen.find((e: any) => e.action === "desk_day.reopen")).toMatchObject({ branch_id: "B-MM", desk_id: "MM-D02", detail: { reason: "wrong count" } });
+    const admin = await asAdmin(today);
+    expect((await call(admin, "GET", "/audit?branchId=B-IT", undefined, today)).json.entries.some((e: any) => e.action === "desk_day.reopen")).toBe(false);
   });
 });

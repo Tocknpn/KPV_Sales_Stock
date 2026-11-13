@@ -95,7 +95,9 @@ function entryRow(e) {
 }
 
 // host: element to fill. detail: the desk detail (moves). onUndone: reload the day.
-export async function renderHistory(host, { deskId, date, detail, onUndone }) {
+// entriesTodayOnly: staff are served today's entries whatever date is on screen
+// (spec 4.8), so on a past date the list is replaced by a note.
+export async function renderHistory(host, { deskId, date, detail, onUndone, entriesTodayOnly = false }) {
   const moves = detail.moves ?? [];
   host.innerHTML = `
     <section aria-labelledby="hist-moves">
@@ -148,5 +150,10 @@ export async function renderHistory(host, { deskId, date, detail, onUndone }) {
     }
   }
   more.addEventListener("click", load);
+  if (entriesTodayOnly) {
+    list.classList.add("hidden");
+    status.textContent = t("history.todayOnly");
+    return;
+  }
   await load();
 }

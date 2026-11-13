@@ -205,7 +205,7 @@ r.post("/desks", async (c) => {
       performed_by: user.accountId,
     }))
   );
-  await audit(store, user, "desk.create", desk.desk_id, { display_name: displayName, opening: Object.fromEntries(opening) });
+  await audit(store, user, "desk.create", desk.desk_id, { display_name: displayName, opening: Object.fromEntries(opening) }, { branchId: desk.branch_id, deskId: desk.desk_id });
   return c.json({ desk, rows });
 });
 
@@ -523,7 +523,7 @@ r.post("/stock/desk/:deskId/reopen", requireManager, async (c) => {
   }
   const updated = await store.updateDeskDay(desk.desk_id, date, { status: "check_in", done_by: null, done_at: null }, "done");
   if (!updated) throw new HttpError(409, "This desk was changed on another device — reload", "STALE");
-  await audit(store, user, "desk_day.reopen", `${desk.desk_id}/${date}`, { reason });
+  await audit(store, user, "desk_day.reopen", `${desk.desk_id}/${date}`, { reason }, { branchId: desk.branch_id, deskId: desk.desk_id });
   return c.json({ ok: true });
 });
 

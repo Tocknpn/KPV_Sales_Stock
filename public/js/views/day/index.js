@@ -266,6 +266,7 @@ function showHistory() {
     deskId: screen.deskCard.desk_id,
     date: screen.date,
     detail: screen.detail,
+    entriesTodayOnly: state.user?.role === "staff" && screen.date !== state.meta.today,
     onUndone: async () => {
       resumeTab = "history";
       await screen.hooks.reload?.();

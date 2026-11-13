@@ -78,6 +78,23 @@ export async function requireOpenDay(store: Store, user: SessionUser, deskId: st
   return day;
 }
 
-export async function audit(store: Store, user: SessionUser, action: string, target: string, detail: Record<string, unknown> | null = null) {
-  await store.audit({ actor_id: user.accountId, actor_name: user.displayName, action, target, detail });
+// `scope` says which branch (and case) the entry is about, so a manager's
+// branch view of the audit log includes it. Company-wide entries omit it.
+export async function audit(
+  store: Store,
+  user: SessionUser,
+  action: string,
+  target: string,
+  detail: Record<string, unknown> | null = null,
+  scope: { branchId?: string | null; deskId?: string | null } = {}
+) {
+  await store.audit({
+    actor_id: user.accountId,
+    actor_name: user.displayName,
+    action,
+    target,
+    detail,
+    branch_id: scope.branchId ?? null,
+    desk_id: scope.deskId ?? null,
+  });
 }

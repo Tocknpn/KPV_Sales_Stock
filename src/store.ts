@@ -223,7 +223,7 @@ export interface Store {
   audit(entry: Omit<AuditEntry, "id" | "created_at">): Promise<void>;
   // Newest first. deskId matches either end of a transfer or move (desk_id or
   // to_desk_id), branchId likewise. from is inclusive and to exclusive, both
-  // ISO timestamps; before is a created_at cursor (strictly older).
+  // ISO timestamps; before is a keyset cursor (created_at, id): rows strictly after it in the newest-first order (created_at desc, id desc).
   auditLog(filter: AuditFilter): Promise<AuditEntry[]>;
 }
 
@@ -233,7 +233,7 @@ export interface AuditFilter {
   from?: string;
   to?: string;
   actorId?: string;
-  before?: string;
+  before?: { createdAt: string; id: string };
   limit: number;
 }
 
@@ -296,18 +296,11 @@ export class DemoStore implements Store {
     const actorId = this.actor && "id" in this.actor ? this.actor.id : null;
     const account = actorId ? this.db.staffAccounts.find((a) => a.id === actorId) : undefined;
     const entry = auditEntry(table, op, strip(oldRow), strip(newRow), { actor: this.actor, name: account?.display_name, role: account?.role });
-    if (entry) this.db.audit.unshift({ id: crypto.randomUUID(), created_at: this.auditStamp(), ...entry });
+    if (entry) this.db.audit.unshift({ id: crypto.randomUUID(), created_at: this.now(), ...entry });
   }
 
   private newId(prefix: string) {
     return `${prefix}-${++this.idSeq}-${Math.random().toString(36).slice(2, 8)}`;
-  }
-  // Audit rows get strictly increasing stamps so a created_at cursor never
-  // skips or repeats a row written in the same millisecond.
-  private auditStamp() {
-    const now = Date.now();
-    const last = this.db.audit[0] ? Date.parse(this.db.audit[0].created_at) : 0;
-    return new Date(Math.max(now, last + 1)).toISOString();
   }
   private now() {
     return new Date().toISOString();
@@ -1022,7 +1015,7 @@ export class DemoStore implements Store {
   }
 
   async audit(entry: Omit<AuditEntry, "id" | "created_at">) {
-    this.db.audit.unshift({ id: crypto.randomUUID(), created_at: this.auditStamp(), ...entry });
+    this.db.audit.unshift({ id: crypto.randomUUID(), created_at: this.now(), ...entry });
   }
   async auditLog(f: AuditFilter) {
     return this.db.audit
@@ -1032,9 +1025,10 @@ export class DemoStore implements Store {
         if (f.actorId && e.actor_id !== f.actorId) return false;
         if (f.from && e.created_at < f.from) return false;
         if (f.to && e.created_at >= f.to) return false;
-        if (f.before && e.created_at >= f.before) return false;
+        if (f.before && !(e.created_at < f.before.createdAt || (e.created_at === f.before.createdAt && e.id < f.before.id))) return false;
         return true;
       })
+      .sort((a, b) => (a.created_at === b.created_at ? (a.id < b.id ? 1 : -1) : a.created_at < b.created_at ? 1 : -1))
       .slice(0, f.limit);
   }
 }
@@ -1452,10 +1446,12 @@ class SupabaseStore implements Store {
     await this.rest("audit_log", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(entry) });
   }
   async auditLog(f: AuditFilter) {
-    const q = ["select=*", "order=created_at.desc", `limit=${f.limit}`];
+    // id breaks ties: one transaction stamps every row it writes with the same created_at.
+    const q = ["select=*", "order=created_at.desc,id.desc", `limit=${f.limit}`];
     // A case or branch matches either end of a transfer or move. Two "or"
     // groups cannot share one query key, so they go inside and=(...).
     const groups: string[] = [];
+    if (f.before) groups.push(`or(created_at.lt.${enc(f.before.createdAt)},and(created_at.eq.${enc(f.before.createdAt)},id.lt.${enc(f.before.id)}))`);
     if (f.deskId) groups.push(`or(desk_id.eq.${enc(f.deskId)},to_desk_id.eq.${enc(f.deskId)})`);
     if (f.branchId) groups.push(`or(branch_id.eq.${enc(f.branchId)},to_branch_id.eq.${enc(f.branchId)})`);
     if (groups.length === 1) q.push(`or=${groups[0].slice(2)}`);
@@ -1463,7 +1459,6 @@ class SupabaseStore implements Store {
     if (f.actorId) q.push(`actor_id=eq.${enc(f.actorId)}`);
     if (f.from) q.push(`created_at=gte.${enc(f.from)}`);
     if (f.to) q.push(`created_at=lt.${enc(f.to)}`);
-    if (f.before) q.push(`created_at=lt.${enc(f.before)}`);
     return this.rest<AuditEntry[]>(`audit_log?${q.join("&")}`);
   }
 }

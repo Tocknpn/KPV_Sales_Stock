@@ -92,7 +92,7 @@ r.post("/documents/:id/decision", requireAdmin, async (c) => {
   if (doc.kind !== "proposal") throw new HttpError(409, "Only purchase proposals are approved", "NOT_A_PROPOSAL");
   const updated = await store.updateDocument(doc.id, { status: decision, decided_by: user.displayName, decided_at: new Date().toISOString() }, "pending");
   if (!updated) throw new HttpError(409, `This proposal is already ${doc.status}`, "ALREADY_DECIDED");
-  await audit(store, user, `proposal.${decision}`, doc.doc_no, null);
+  await audit(store, user, `proposal.${decision}`, doc.doc_no, null, { branchId: doc.branch_id, deskId: doc.desk_id });
   return c.json({ ok: true, status: decision });
 });
 
@@ -102,7 +102,7 @@ r.delete("/documents/:id", requireAdmin, async (c) => {
   const doc = await store.getDocument((c.req.param("id") ?? ""));
   if (!doc) throw new HttpError(404, "Document not found", "NOT_FOUND");
   await store.deleteDocument(doc.id);
-  await audit(store, user, "document.delete", doc.doc_no, { title: doc.title, kind: doc.kind, rows: doc.rows?.length ?? 0 });
+  await audit(store, user, "document.delete", doc.doc_no, { title: doc.title, kind: doc.kind, rows: doc.rows?.length ?? 0 }, { branchId: doc.branch_id, deskId: doc.desk_id });
   return c.json({ ok: true });
 });
 

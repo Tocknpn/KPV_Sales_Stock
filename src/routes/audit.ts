@@ -27,12 +27,20 @@ r.get("/audit", async (c) => {
   const actorId = q("actorId");
   let from = q("from");
   let to = q("to");
-  const before = q("before");
+  // Cursor "<created_at>|<id>": rows written in one transaction share created_at, so id breaks the tie.
+  const cursor = q("before");
+  let before: { createdAt: string; id: string } | undefined;
+  if (cursor !== undefined) {
+    const at = cursor.lastIndexOf("|");
+    const createdAt = cursor.slice(0, at);
+    const id = cursor.slice(at + 1);
+    if (at < 1 || !id || Number.isNaN(Date.parse(createdAt))) throw new HttpError(400, "Invalid cursor", "BAD_CURSOR");
+    before = { createdAt, id };
+  }
 
   for (const d of [from, to]) {
     if (d !== undefined && !isValidDate(d)) throw new HttpError(400, "Invalid date", "BAD_DATE");
   }
-  if (before !== undefined && Number.isNaN(Date.parse(before))) throw new HttpError(400, "Invalid cursor", "BAD_CURSOR");
 
   if (user.role === "staff") {
     if (!deskId) throw new HttpError(403, "Choose a case to see its history", "AUDIT_DENIED");
@@ -59,7 +67,8 @@ r.get("/audit", async (c) => {
   });
   const more = rows.length > limit;
   const entries = more ? rows.slice(0, limit) : rows;
-  return c.json({ entries, next: more ? entries[entries.length - 1].created_at : null });
+  const last = entries[entries.length - 1];
+  return c.json({ entries, next: more ? `${last.created_at}|${last.id}` : null });
 });
 
 export default r;
