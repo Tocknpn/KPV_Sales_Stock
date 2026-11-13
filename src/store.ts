@@ -847,14 +847,15 @@ export class DemoStore implements Store {
     return this.actor && "id" in this.actor ? this.actor.id : null;
   }
   // Mirrors guard_desk_assignment for staff: a case may be taken for oneself when
-  // free, and handed over or released only by its holder (or by anyone once stale).
+  // free, and handed over or released only by its holder (or taken over for oneself once stale).
   private assertMayChangeAssignment(current: DeskAssignment | undefined, newStaffId: string | null) {
     const id = this.actorId();
     const me = id ? this.db.staffAccounts.find((a) => a.id === id) : undefined;
     if (me?.role !== "staff") return;
-    // A holder from an earlier Laos day is stale: staff may take over or end it.
+    // A holder from an earlier Laos day is stale: staff may take it over for themselves.
     const stale = current ? laosDate(new Date(current.started_at)) < laosDate() : false;
-    const ok = current ? current.staff_id === me.id || stale : newStaffId === me.id;
+    // Stale: only a self-take (newStaffId is me), never a plain release or a hand-on.
+    const ok = current ? current.staff_id === me.id || (stale && newStaffId === me.id) : newStaffId === me.id;
     if (!ok) throw new StoreError("DENIED", "ROLE_DENIED");
   }
   private endAssignment(a: DeskAssignment) {

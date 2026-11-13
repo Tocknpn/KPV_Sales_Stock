@@ -90,7 +90,7 @@ r.post("/desks/:id/assign", async (c) => {
   // Staff may take a free case for themselves, or hand over a case they hold.
   if (user.role === "staff") {
     const current = await holderOf(store, desk.desk_id, desk.branch_id);
-    const mayAct = current ? current.staff_id === user.accountId || isStale(current, businessDate(c.env)) : staffId === user.accountId;
+    const mayAct = current ? current.staff_id === user.accountId || (staffId === user.accountId && isStale(current, businessDate(c.env))) : staffId === user.accountId;
     if (!mayAct) throw new HttpError(403, "Only the person holding this case can hand it over", "NOT_HOLDER");
   }
   const note = body.note ? String(body.note).trim().slice(0, 200) || undefined : undefined;
@@ -105,7 +105,7 @@ r.post("/desks/:id/release", async (c) => {
   const desk = await requireDesk(store, user, c.req.param("id"));
   if (user.role === "staff") {
     const current = await holderOf(store, desk.desk_id, desk.branch_id);
-    if (current && current.staff_id !== user.accountId && !isStale(current, businessDate(c.env))) throw new HttpError(403, "Only the person holding this case can release it", "NOT_HOLDER");
+    if (current && current.staff_id !== user.accountId) throw new HttpError(403, "Only the person holding this case can release it", "NOT_HOLDER");
   }
   await store.releaseDesk(desk.desk_id).catch(notHolder);
   return c.json({ ok: true });

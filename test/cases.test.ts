@@ -235,6 +235,23 @@ describe("database refusals", () => {
     expect(taken.status).toBe(200);
   });
 
+  it("on a stale case staff may only take it for themselves: no hand-on, no bare release", async () => {
+    await assign(await asManager("B-MM"), "MM-D01", NOY);
+    const stale = () => ((getStore({} as any) as any).db.assignments.find((a: any) => a.desk_id === "MM-D01" && a.ended_at === null).started_at = "2020-01-01T00:00:00.000Z");
+    stale();
+    const staff = await asStaff("B-MM");
+    const other = await assign(staff, "MM-D01", DEMO_MANAGER["B-MM"]);
+    expect(other.status).toBe(403);
+    expect(other.json.code).toBe("NOT_HOLDER");
+    const rel = await call(staff, "POST", "/desks/MM-D01/release");
+    expect(rel.status).toBe(403);
+    expect(rel.json.code).toBe("NOT_HOLDER");
+    const store = getStore({} as any, { id: SOMCHAI });
+    await expect(store.releaseDesk("MM-D01")).rejects.toMatchObject({ code: "DENIED" });
+    await expect(store.assignDesk("MM-D01", DEMO_MANAGER["B-MM"])).rejects.toMatchObject({ code: "DENIED" });
+    expect((await store.activeAssignments({ branchId: "B-MM" }))[0].staff_id).toBe(NOY);
+  });
+
   it("cards carry openedAt once the day is opened", async () => {
     const staff = await asStaff("B-MM");
     const before = (await call(staff, "GET", "/stock/desks")).json.desks.find((d: any) => d.desk_id === "MM-D02");

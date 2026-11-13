@@ -215,7 +215,8 @@ begin
   perform kpv_require('{staff}', v_branch);
   if tg_op = 'UPDATE' then
     if old.staff_id = a.id then return new; end if;
-    -- A holder from an earlier Laos day is stale (spec 4.14): staff may end it.
+    -- A holder from an earlier Laos day is stale (spec 4.14): staff may end it. Only assign_desk
+    -- does this (end + insert for oneself in one transaction); the routes refuse a bare release.
     if (old.started_at at time zone 'Asia/Vientiane')::date < kpv_today() then return new; end if;
     raise exception 'ROLE_DENIED: only the holder or a manager can end an assignment' using errcode = 'P0001';
   end if;

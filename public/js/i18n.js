@@ -1149,7 +1149,7 @@ export function t(key) {
 // t() with {placeholders}.
 export function tf(key, vars) {
   // One pass over the template: values are inserted literally and never re-scanned.
-  return t(key).replace(/{(w+)}/g, (m, k) => (Object.hasOwn(vars, k) ? String(vars[k]) : m));
+  return t(key).replace(/\{(\w+)\}/g, (m, k) => (Object.hasOwn(vars, k) ? String(vars[k]) : m));
 }
 
 export function pickName(nameEn, nameLo) {
