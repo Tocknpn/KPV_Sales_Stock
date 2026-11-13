@@ -5,7 +5,7 @@
 // Mounted behind requireAuth in src/index.ts.
 import { storeFor, newRouter, readBody, HttpError, scopeBranch, requireDesk } from "../app";
 import { requireManager, isManagerOf } from "../auth";
-import { isValidDate } from "../time";
+import { isValidDate, laosDate, businessDate } from "../time";
 import { StoreError } from "../store";
 import type { ClosedDay } from "../types";
 
@@ -73,6 +73,9 @@ function notHolder(err: unknown): never {
 const holderOf = async (store: ReturnType<typeof storeFor>, deskId: string, branchId: string) =>
   (await store.activeAssignments({ branchId })).find((a) => a.desk_id === deskId);
 
+// A holder who took the case on an earlier Laos day is stale (spec 4.14): staff may take it over.
+const isStale = (a: { started_at: string }, today: string) => laosDate(new Date(a.started_at)) < today;
+
 r.post("/desks/:id/assign", async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
@@ -87,7 +90,7 @@ r.post("/desks/:id/assign", async (c) => {
   // Staff may take a free case for themselves, or hand over a case they hold.
   if (user.role === "staff") {
     const current = await holderOf(store, desk.desk_id, desk.branch_id);
-    const mayAct = current ? current.staff_id === user.accountId : staffId === user.accountId;
+    const mayAct = current ? current.staff_id === user.accountId || isStale(current, businessDate(c.env)) : staffId === user.accountId;
     if (!mayAct) throw new HttpError(403, "Only the person holding this case can hand it over", "NOT_HOLDER");
   }
   const note = body.note ? String(body.note).trim().slice(0, 200) || undefined : undefined;
@@ -102,7 +105,7 @@ r.post("/desks/:id/release", async (c) => {
   const desk = await requireDesk(store, user, c.req.param("id"));
   if (user.role === "staff") {
     const current = await holderOf(store, desk.desk_id, desk.branch_id);
-    if (current && current.staff_id !== user.accountId) throw new HttpError(403, "Only the person holding this case can release it", "NOT_HOLDER");
+    if (current && current.staff_id !== user.accountId && !isStale(current, businessDate(c.env))) throw new HttpError(403, "Only the person holding this case can release it", "NOT_HOLDER");
   }
   await store.releaseDesk(desk.desk_id).catch(notHolder);
   return c.json({ ok: true });

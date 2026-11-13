@@ -5,7 +5,7 @@ import { api } from "../api.js";
 import { state } from "../state.js";
 import { openSheet, closeSheet, toast } from "../ui.js";
 import { t, tf } from "../i18n.js";
-import { escapeHtml, fmtClock } from "../util.js";
+import { escapeHtml, fmtClock, laosDateOf } from "../util.js";
 import { isManager, isAdmin } from "../session.js";
 
 // The admin has no cases of their own; the chip is for staff and managers.
@@ -32,15 +32,18 @@ export function wireCasesChip(getBranchId, onChange) {
 function holderLine(c, me) {
   if (!c.holder) return `<span class="text-gray-500">${t("cases.free")}</span>`;
   const who = c.holder.staffId === me ? t("cases.you") : escapeHtml(c.holder.name);
-  return `<span class="font-semibold text-gray-700">👤 ${tf("cases.heldBy", { name: who, time: fmtClock(c.holder.since) })}</span>`;
+  return `<span class="break-words font-semibold text-gray-700">👤 ${tf("cases.heldBy", { name: who, time: fmtClock(c.holder.since) })}</span>`;
 }
 
-function actionsFor(c, me, manager) {
+function actionsFor(c, me, manager, today) {
+  const stale = !!c.holder && !!today && laosDateOf(c.holder.since) < today;
   const mine = c.holder?.staffId === me;
   const btn = (act, label, cls = "btn-secondary") => `<button data-act="${act}" data-desk="${escapeHtml(c.desk_id)}" class="${cls} px-3 py-2 text-xs">${label}</button>`;
   if (!c.holder) return btn("take", t("cases.take"), "btn-primary") + (manager ? btn("hand", t("cases.handTo")) : "");
   if (mine) return btn("release", t("cases.release")) + btn("hand", t("cases.handTo"));
   if (manager) return btn("takeover", t("cases.takeOver")) + btn("hand", t("cases.handTo"));
+  // A holder from an earlier day is stale: staff may take the case over (not hand it on).
+  if (stale) return btn("takeover", t("stock.takeCase"));
   // Staff cannot take over a colleague's case (the server refuses with NOT_HOLDER).
   return `<span class="text-[11px] text-gray-500">${tf("cases.onlyHolder", { name: escapeHtml(c.holder.name) })}</span>`;
 }
@@ -60,6 +63,7 @@ export async function openCasesSheet(branchId, onChange) {
       return;
     }
     const { cases } = data;
+    const today = state.meta.today;
     const body = document.getElementById("sheet-body");
     if (!body) return;
     body.innerHTML = cases.length
@@ -69,7 +73,7 @@ export async function openCasesSheet(branchId, onChange) {
         <div class="card flex flex-col gap-2 p-3.5" data-case="${escapeHtml(c.desk_id)}">
           <div class="text-sm font-extrabold text-gray-900">${escapeHtml(c.display_name)}</div>
           <div class="text-[11px]">${holderLine(c, me)}</div>
-          <div class="flex flex-wrap items-center gap-2">${actionsFor(c, me, manager)}</div>
+          <div class="flex flex-wrap items-center gap-2">${actionsFor(c, me, manager, today)}</div>
         </div>`
           )
           .join("")}</div>`

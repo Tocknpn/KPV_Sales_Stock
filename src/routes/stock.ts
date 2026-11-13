@@ -134,6 +134,7 @@ r.get("/stock/desks", async (c) => {
     return {
       ...card,
       openEarlierDate: blockedBy.get(card.desk_id) ?? null,
+      openedAt: days.find((x) => x.desk_id === card.desk_id)?.created_at ?? null,
       streak: status.streak,
       lastDoneDate: status.lastDoneDate,
       lastDoneAt: status.lastDoneAt,

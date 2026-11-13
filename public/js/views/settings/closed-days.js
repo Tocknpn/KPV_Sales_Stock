@@ -2,14 +2,14 @@
 // day is not a required check day and does not break a case streak. An admin can
 // close every branch at once; a manager only their own.
 import { api } from "../../api.js";
-import { t, tf } from "../../i18n.js";
+import { t, tf, getLang } from "../../i18n.js";
 import { escapeHtml, fmtDate } from "../../util.js";
 import { state, branchName } from "../../state.js";
 import { isAdmin } from "../../session.js";
 import { toast } from "../../ui.js";
 
 function monthLabel(ym) {
-  return new Date(`${ym}-01T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  return new Date(`${ym}-01T00:00:00`).toLocaleDateString(getLang() === "lo" ? "lo-LA" : "en-US", { month: "long", year: "numeric" });
 }
 
 export async function renderClosedDays(root) {
@@ -57,7 +57,7 @@ export async function renderClosedDays(root) {
                 (r) => `
               <div class="flex items-center gap-3 px-4 py-2.5">
                 <div class="min-w-0 flex-1">
-                  <div class="text-sm font-bold text-gray-900">${escapeHtml(fmtDate(r.closed_date))} · ${escapeHtml(r.reason)}</div>
+                  <div class="break-words text-sm font-bold text-gray-900">${escapeHtml(fmtDate(r.closed_date))} · ${escapeHtml(r.reason)}</div>
                   <div class="truncate text-[11px] text-gray-500">${escapeHtml(branchName(r.branch_id))}</div>
                 </div>
                 <button data-remove data-branch="${escapeHtml(r.branch_id)}" data-date="${escapeHtml(r.closed_date)}" class="tap-target shrink-0 rounded-full px-3 text-xs font-bold text-danger active:bg-danger-bg">${t("closed.remove")}</button>

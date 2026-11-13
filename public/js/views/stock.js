@@ -244,16 +244,16 @@ function tierText(d) {
     case "overdue":
       return last ? tf("stock.tierOverdue", { n: d.daysBehind, date: last }) : tf("stock.tierOverdueNever", { n: d.daysBehind });
     default:
-      return d.status === "not_started" ? t("stock.tierOnTrackIdle") : t("stock.tierOnTrackOpen");
+      return d.openedAt ? tf("stock.tierOnTrackOpen", { time: fmtClock(d.openedAt) }) : t("stock.tierOnTrackIdle");
   }
 }
 
-// Staff cannot take over a colleague's case (the server answers NOT_HOLDER),
-// so a stale holder's "Take" is offered to managers; a free case to staff and managers.
+// A free case, or one whose holder is stale (took it on an earlier day), can be taken.
+// A same-day holder needs a manager (the server answers NOT_HOLDER).
 function canTake(d) {
   if (isAdmin(state.user)) return false;
   if (!d.assignee) return true;
-  return d.assignee.stale && d.assignee.staffId !== state.user.accountId && state.user.role === "manager";
+  return d.assignee.stale && d.assignee.staffId !== state.user.accountId;
 }
 
 function holderLine(d) {

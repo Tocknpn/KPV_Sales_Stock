@@ -84,6 +84,18 @@ describe('desk_assignment', () => {
     expect(await active('MM-D01')).toEqual([{ staff_id: ann }]);
   });
 
+  it('staff take over a stale holder (earlier Laos day) but not a same-day holder', async () => {
+    await asActor(db, null, { jwtRole: 'postgres' });
+    await db.query(`insert into desk_assignment (desk_id, staff_id, started_at) values ('MM-D01', $1, now() - interval '2 days')`, [noy]);
+    await asActor(db, ann);
+    await assign('MM-D01', ann);
+    expect(await active('MM-D01')).toEqual([{ staff_id: ann }]);
+    // ann's row is from today: noy cannot take it over
+    await asActor(db, noy);
+    await expectPgError(assign('MM-D01', noy), 'ROLE_DENIED');
+    expect(await active('MM-D01')).toEqual([{ staff_id: ann }]);
+  });
+
   it('staff cannot assign someone else to a free case', async () => {
     await asActor(db, noy);
     await expectPgError(assign('MM-D02', ann), 'ROLE_DENIED');

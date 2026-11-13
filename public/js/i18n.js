@@ -501,7 +501,7 @@ const DICT = {
     "stock.tierDoneToday": "✓ ກວດແລ້ວ {time} · {name}",
     "stock.tierDoneTodayNoName": "✓ ກວດແລ້ວ {time}",
     "stock.tierOnTrackIdle": "ຍັງບໍ່ໄດ້ເປີດ",
-    "stock.tierOnTrackOpen": "ກຳລັງກວດມື້ນີ້",
+    "stock.tierOnTrackOpen": "ເປີດຕັ້ງແຕ່ {time}",
     "stock.tierBehind1": "ຊ້າ 1 ມື້ · ຄັ້ງສຸດທ້າຍ {date}",
     "stock.tierOverdue": "ບໍ່ໄດ້ກວດ {n} ມື້ · ຄັ້ງສຸດທ້າຍ {date}",
     "stock.tierOverdueNever": "ບໍ່ໄດ້ກວດ {n} ມື້ · ຍັງບໍ່ເຄີຍກວດ",
@@ -1063,7 +1063,7 @@ const DICT = {
     "stock.tierDoneToday": "✓ Checked {time} · {name}",
     "stock.tierDoneTodayNoName": "✓ Checked {time}",
     "stock.tierOnTrackIdle": "Not opened yet",
-    "stock.tierOnTrackOpen": "In progress today",
+    "stock.tierOnTrackOpen": "Open since {time}",
     "stock.tierBehind1": "1 day behind · last {date}",
     "stock.tierOverdue": "Not checked {n} days · last {date}",
     "stock.tierOverdueNever": "Not checked {n} days · never checked",
@@ -1148,7 +1148,8 @@ export function t(key) {
 
 // t() with {placeholders}.
 export function tf(key, vars) {
-  return Object.entries(vars).reduce((text, [k, v]) => text.replaceAll("{" + k + "}", v), t(key));
+  // One pass over the template: values are inserted literally and never re-scanned.
+  return t(key).replace(/{(w+)}/g, (m, k) => (Object.hasOwn(vars, k) ? String(vars[k]) : m));
 }
 
 export function pickName(nameEn, nameLo) {

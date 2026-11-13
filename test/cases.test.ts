@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEMO_STAFF, DEMO_STAFF_MM2, DEMO_MANAGER } from "../src/demoData";
 import { DemoStore, StoreError, getStore } from "../src/store";
-import { freshApp, call, asAdmin, asStaff, asManager } from "./helpers";
+import { freshApp, call, asAdmin, asStaff, asManager, TODAY } from "./helpers";
 
 beforeEach(freshApp);
 afterEach(() => {
@@ -214,6 +214,34 @@ describe("database refusals", () => {
     await expect(store.assignDesk("MM-D01", SOMCHAI)).rejects.toMatchObject({ code: "DENIED" });
     await expect(store.releaseDesk("MM-D01")).rejects.toMatchObject({ code: "DENIED" });
     expect(await store.activeAssignments({ branchId: "B-MM" })).toHaveLength(1);
+  });
+
+  it("staff take over a stale assignment through the API and DemoStore; same-day still needs a manager", async () => {
+    await assign(await asManager("B-MM"), "MM-D01", NOY);
+    const staff = await asStaff("B-MM");
+    const same = await assign(staff, "MM-D01", SOMCHAI);
+    expect(same.status).toBe(403);
+    expect(same.json.code).toBe("NOT_HOLDER");
+    const store = getStore({} as any, { id: SOMCHAI });
+    (store as any).db.assignments.find((a: any) => a.desk_id === "MM-D01" && a.ended_at === null).started_at = "2020-01-01T00:00:00.000Z";
+    await expect(store.assignDesk("MM-D01", SOMCHAI)).resolves.toMatchObject({ staff_id: SOMCHAI });
+    expect(await store.activeAssignments({ branchId: "B-MM" })).toHaveLength(1);
+    // and through the route, with a fresh stale row held by Noy
+    (store as any).db.assignments.find((a: any) => a.desk_id === "MM-D01" && a.ended_at === null).started_at = "2020-01-01T00:00:00.000Z";
+    const viaRoute = await assign(await asManager("B-MM"), "MM-D01", NOY);
+    expect(viaRoute.status).toBe(200);
+    (store as any).db.assignments.find((a: any) => a.desk_id === "MM-D01" && a.ended_at === null).started_at = "2020-01-01T00:00:00.000Z";
+    const taken = await assign(staff, "MM-D01", SOMCHAI);
+    expect(taken.status).toBe(200);
+  });
+
+  it("cards carry openedAt once the day is opened", async () => {
+    const staff = await asStaff("B-MM");
+    const before = (await call(staff, "GET", "/stock/desks")).json.desks.find((d: any) => d.desk_id === "MM-D02");
+    expect(before).toHaveProperty("openedAt");
+    await call(staff, "POST", "/stock/desk/MM-D02/checkin", { date: TODAY });
+    const after = (await call(staff, "GET", "/stock/desks")).json.desks.find((d: any) => d.desk_id === "MM-D02");
+    expect(typeof after.openedAt).toBe("string");
   });
 
   it("any other route maps DENIED to 403 ROLE_DENIED and IMMUTABLE to 409, with a clean message", async () => {

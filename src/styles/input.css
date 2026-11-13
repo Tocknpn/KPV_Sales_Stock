@@ -44,7 +44,7 @@
     @apply focus-ring inline-flex items-center justify-center gap-2 rounded-xl bg-white border border-hairline px-4 py-3 text-sm font-semibold text-gray-700 tap-target active:scale-[0.98] transition;
   }
   .input-filled {
-    @apply w-full rounded-xl border border-hairline bg-gray-50 px-3.5 py-3 text-sm font-semibold text-gray-900 tap-target focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100;
+    @apply w-full rounded-xl border border-hairline bg-gray-50 px-3.5 py-3 text-base font-semibold text-gray-900 tap-target focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100;
   }
   .chip {
     /* Chips are interactive filter/selector controls (branch, date, status,
