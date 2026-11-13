@@ -19,8 +19,10 @@ skip to section 2.)
    2. `supabase/migrations/20261112_01_foundation.sql` to `20261112_07_seed_tools.sql`, in name order
    3. `supabase/users_roles.sql`
    4. `supabase/base.sql`
-   5. `supabase/seed_mock_data.sql` (mock data; every row is tagged `is_seed`)
-   6. `supabase/tests/verify_v2.sql` (read-only; must end by printing `VERIFY_V2 OK`)
+   5. `supabase/real_skus.sql` (the real product list; real rows, kept by the purge;
+      safe to run again, also after the mock data)
+   6. `supabase/seed_mock_data.sql` (mock data; every row is tagged `is_seed`)
+   7. `supabase/tests/verify_v2.sql` (read-only; must end by printing `VERIFY_V2 OK`)
 2. Copy `.dev.vars.example` to `.dev.vars`. Fill in `SUPABASE_SERVICE_ROLE_KEY`
    (Project Settings, API, service_role) and a long random `AUTH_SECRET`
    (`openssl rand -hex 32`). Leave `KPV_DATA_MODE=test`. A yellow "TEST DATA"
@@ -144,9 +146,10 @@ is configured.
    the purge again.
 5. Log in as the admin and load real data:
    - **Settings, Gold price**: gold price per Baht and the USD rate.
-   - **Settings, SKU**: check types and sizes, then **Import CSV** (template
-     button in the import sheet). One bad row imports nothing and lists the
-     lines to fix.
+   - **Settings, SKU**: the real products are already there from
+     `supabase/real_skus.sql`. Check them; add new ones by hand or with
+     **Import CSV** (template button in the import sheet). One bad row imports
+     nothing and lists the lines to fix.
    - **Settings, Replenishment**: avg sold per day and lead time per SKU or
      group, company-wide or per branch.
    - **Settings, Users**: add every staff member and branch manager, with branch and PIN.
