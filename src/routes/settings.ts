@@ -1,4 +1,4 @@
-// Settings: SKU master data (incl. CSV import), run rates, system config,
+// Settings: SKU master data (incl. CSV import), system config,
 // user management and the audit log. Reads are open to every logged-in user;
 // every change is admin only.
 // Mounted behind requireAuth in src/index.ts.
@@ -13,6 +13,23 @@ const r = newRouter();
 
 const PURITIES = ["96.5%", "99.99%"];
 const MAX_IMPORT_ROWS = 500;
+// Same limits as replenishment rules (the engine reads only rules).
+const MAX_RULE_AVG = 9_999_999;
+const MAX_RULE_LEAD = 9999.9;
+
+// A SKU created with avg/day or lead time gets a company-wide SKU rule.
+async function writeSkuRules(store: Store, skus: MasterSku[]) {
+  for (const s of skus) {
+    if (s.avg_daily_sales == null && s.order_lead_time_days == null) continue;
+    await store.upsertRule({
+      scope: "sku",
+      scope_key: s.sku_id,
+      branch_id: null,
+      avg_daily_sell: s.avg_daily_sales == null ? null : Math.round(s.avg_daily_sales * 1000) / 1000,
+      lead_time_days: s.order_lead_time_days == null ? null : Math.round(s.order_lead_time_days * 10) / 10,
+    });
+  }
+}
 
 function slug(name: string) {
   return name.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "");
@@ -76,6 +93,8 @@ function buildSku(input: Record<string, any>, types: SkuType[], weights: SkuWeig
   };
   for (const [field, value] of Object.entries(numbers)) if (Number.isNaN(value)) return `${field} must be a number, 0 or more`;
   if (numbers.reorder_level !== null && !Number.isInteger(numbers.reorder_level)) return "reorder_level must be a whole number";
+  if (numbers.avg_daily_sales !== null && numbers.avg_daily_sales > MAX_RULE_AVG) return `avg_daily_sales must be at most ${MAX_RULE_AVG}`;
+  if (numbers.order_lead_time_days !== null && numbers.order_lead_time_days > MAX_RULE_LEAD) return `order_lead_time_days must be at most ${MAX_RULE_LEAD}`;
   const sku_id = String(input.sku_id ?? "").trim();
   if (sku_id && !/^[A-Za-z0-9_-]{1,40}$/.test(sku_id)) return "sku_id may only contain letters, digits, - and _";
   return {
@@ -106,6 +125,7 @@ r.post("/skus", requireAdmin, async (c) => {
   const sku = buildSku(body, types, weights);
   if (typeof sku === "string") throw new HttpError(400, sku, "BAD_SKU");
   const [created] = await store.createSkus([sku]);
+  await writeSkuRules(store, [created]);
   await audit(store, c.get("user"), "sku.create", created.sku_id, { name_en: created.name_en });
   return c.json(created);
 });
@@ -135,6 +155,7 @@ r.post("/skus/import", requireAdmin, async (c) => {
   if (errors.length > 0) throw new HttpError(422, "Nothing was imported — fix these rows and try again", "IMPORT_INVALID", { errors });
 
   const created = await store.createSkus(skus);
+  await writeSkuRules(store, created);
   await audit(store, c.get("user"), "sku.import", `${created.length} SKUs`, { sku_ids: created.map((s) => s.sku_id).slice(0, 50) });
   return c.json({ imported: created.length });
 });
@@ -295,49 +316,6 @@ r.post("/settings/config", requireAdmin, async (c) => {
   const updated = await store.updateConfig(patch);
   await audit(store, c.get("user"), "config.update", "system_config", patch);
   return c.json(updated);
-});
-
-// ---------------------------------------------------------------------------
-// Per-SKU run rate (avg sold per day + order lead time)
-// ---------------------------------------------------------------------------
-r.get("/settings/run-rate", async (c) => {
-  const store = storeFor(c);
-  const [skus, types, weights] = await Promise.all([store.skus(), store.skuTypes(), store.skuWeights()]);
-  const typeById = new Map(types.map((t) => [t.type_id, t]));
-  const weightById = new Map(weights.map((w) => [w.weight_id, w]));
-  const items = skus
-    .filter((s) => s.active)
-    .map((s) => ({
-      sku_id: s.sku_id,
-      name_en: s.name_en,
-      icon: s.icon,
-      type_name: s.type_id ? typeById.get(s.type_id)?.name_en ?? null : null,
-      weight_name: s.weight_id ? weightById.get(s.weight_id)?.name_en ?? null : null,
-      avg_daily_sales: s.avg_daily_sales,
-      order_lead_time_days: s.order_lead_time_days,
-    }));
-  return c.json({
-    items,
-    summary: {
-      total: items.length,
-      filledSales: items.filter((i) => i.avg_daily_sales != null).length,
-      filledLeadTime: items.filter((i) => i.order_lead_time_days != null).length,
-    },
-  });
-});
-
-r.post("/settings/run-rate/:skuId", requireAdmin, async (c) => {
-  const store = storeFor(c);
-  const body = await readBody(c);
-  const avg = nonNegative(body.avgDailySales);
-  const lead = nonNegative(body.orderLeadTimeDays);
-  if (Number.isNaN(avg) || Number.isNaN(lead)) throw new HttpError(400, "Values must be numbers, 0 or more", "BAD_RUN_RATE");
-  const sku = await store.updateSku((c.req.param("skuId") ?? ""), { avg_daily_sales: avg, order_lead_time_days: lead });
-  if (!sku) throw new HttpError(404, "SKU not found", "NOT_FOUND");
-  // The planning engine reads rules, so keep the company-wide SKU rule in step until Task 15 retires this screen.
-  await store.upsertRule({ scope: "sku", scope_key: sku.sku_id, branch_id: null, avg_daily_sell: avg, lead_time_days: lead });
-  await audit(store, c.get("user"), "sku.run_rate", sku.sku_id, { avg_daily_sales: avg, order_lead_time_days: lead });
-  return c.json(sku);
 });
 
 r.get("/settings/about", async (c) => c.json({ version: c.env.APP_VERSION || "dev", buildDate: c.env.BUILD_DATE || null }));

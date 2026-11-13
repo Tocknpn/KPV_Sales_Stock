@@ -1,3 +1,5 @@
+import { t, tf } from "./i18n.js";
+
 export function fmtInt(n) {
   return Math.round(n).toLocaleString("en-US");
 }
@@ -53,6 +55,13 @@ export function debounce(fn, ms = 250) {
     clearTimeout(t);
     t = setTimeout(() => fn(...args), ms);
   };
+}
+
+// "≈ 3.5 d" for a runway in days; "Out of stock" at zero; null when unknown.
+export function fmtRunway(days) {
+  if (days == null) return null;
+  if (days <= 0) return t("replen.outOfStock");
+  return tf("replen.runway", { n: (Math.round(days * 10) / 10).toFixed(1) });
 }
 
 export function clamp(n, min, max) {

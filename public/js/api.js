@@ -109,8 +109,9 @@ export const api = {
 
   settingsSummary: () => request("/settings/summary"),
   saveConfig: (payload) => post("/settings/config", payload),
-  runRate: () => request("/settings/run-rate"),
-  saveRunRate: (skuId, payload) => post(`/settings/run-rate/${encodeURIComponent(skuId)}`, payload),
+  replenishment: (branchId) => request(`/replenishment?${query({ branchId })}`),
+  saveRule: (payload) => request("/replenishment/rules", { method: "PUT", body: JSON.stringify(payload) }),
+  bulkRule: (payload) => post("/replenishment/rules/bulk", payload),
   about: () => request("/settings/about"),
 
   createUser: (payload) => post(`/users`, payload),

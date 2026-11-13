@@ -3,13 +3,13 @@ import { api } from "../../api.js";
 import { state } from "../../state.js";
 import { isAdmin, isManager, clearSession } from "../../session.js";
 import { renderSku } from "./sku.js";
-import { renderLeadtime } from "./leadtime.js";
+import { renderReplenishment } from "./replenishment.js";
 import { renderUsers } from "./users.js";
 import { renderClosedDays } from "./closed-days.js";
 
 const MENU = [
   { id: "sku", labelKey: "settings.menuSku", render: renderSku, icon: `<path stroke-linecap="round" stroke-linejoin="round" d="M3 8l9-4 9 4-9 4-9-4z"/><path stroke-linecap="round" stroke-linejoin="round" d="M3 8v9l9 4 9-4V8M12 12v9"/>` },
-  { id: "leadtime", labelKey: "settings.menuLeadtime", render: renderLeadtime, icon: `<circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M12 7v5l3.5 2"/>` },
+  { id: "replenishment", labelKey: "settings.menuReplen", render: renderReplenishment, icon: `<circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M12 7v5l3.5 2"/>` },
   { id: "users", labelKey: "settings.menuUsers", render: renderUsers, icon: `<circle cx="9" cy="8" r="3"/><path stroke-linecap="round" d="M3 20c1-3.5 3.3-5.5 6-5.5s5 2 6 5.5"/><circle cx="17.5" cy="9" r="2.3"/><path stroke-linecap="round" d="M15.8 14.3c2 .2 3.6 2 4.2 4.2"/>` },
   { id: "closed", labelKey: "closed.menu", render: renderClosedDays, managerOnly: true, icon: `<rect x="4" y="5" width="16" height="15" rx="2"/><path stroke-linecap="round" d="M4 10h16M9 3v4M15 3v4"/>` },
 ];

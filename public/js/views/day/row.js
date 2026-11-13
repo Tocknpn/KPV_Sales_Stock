@@ -5,7 +5,7 @@
 // Everything is `min-w-0` / `truncate` / `grid-cols-4`: there is no fixed pixel
 // width, so five-digit values shrink the text box, never widen the page.
 import { t, pickName } from "../../i18n.js";
-import { escapeHtml } from "../../util.js";
+import { escapeHtml, fmtRunway } from "../../util.js";
 
 export const closingOf = (r) =>
   r.opening_qty + r.stock_in + r.transfer_in - r.retail_sale - r.wholesale - r.transfer_out - r.destock - r.move;
@@ -69,7 +69,15 @@ function countBlock(r, closing, { readOnly, countMode }) {
     }`;
 }
 
-const RULE_TEXT = (rule) => t(`stock.rule.${rule}`);
+// Critical / Warning rows: status in words plus the branch-wide runway ("Critical ≈ 3.5 d").
+function runwayChip(r) {
+  const critical = r.branch_status === "critical";
+  const runway = fmtRunway(r.runway_days);
+  const text = [t(`replen.status.${r.branch_status}`), runway].filter(Boolean).join(" ");
+  return `<span class="status-pill shrink-0 px-1.5 py-0.5 text-[11px] ${critical ? "bg-danger-bg text-danger" : "bg-warning-bg text-warning"}">${escapeHtml(text)}</span>`;
+}
+
+const RULE_TEXT =(rule) => t(`stock.rule.${rule}`);
 
 /** @param {{readOnly:boolean, countMode:boolean, problems?:Set<string>}} view */
 export function renderRow(r, view) {
@@ -87,7 +95,7 @@ export function renderRow(r, view) {
         <div class="truncate text-sm font-extrabold text-gray-900">${escapeHtml(skuName(r))}</div>
         <div class="flex min-w-0 items-center gap-1.5 text-xs text-gray-600">
           <span class="truncate">${escapeHtml(sub || r.sku_id)}</span>
-          ${low ? `<span class="status-pill shrink-0 bg-danger-bg px-1.5 py-0.5 text-[11px] text-danger">${t("stock.lowShort")}</span>` : ""}
+          ${low ? runwayChip(r) : ""}
         </div>
       </div>
       <div class="shrink-0 text-right">
