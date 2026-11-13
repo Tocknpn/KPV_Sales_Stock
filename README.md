@@ -1,20 +1,29 @@
 # KPV Goldsmith & Retail Inventory
 
-Mobile-first stock app for KPV's gold desks: daily desk counts, linked
-transfers between desks, documents and purchase proposals, dashboard and
-movement report. **The Lao user manual (`ຄູ່ມືນຳໃຊ້ — KPV ສະຕັອກ.html`) is the
-specification**; `app.md` is the original brief and is kept for history only.
+Mobile-first stock app for KPV's gold desks: daily desk counts, instant moves
+between cases, linked transfers between branches, documents and purchase
+proposals, replenishment runway, dashboard, movement report and an audit
+history. **The Lao user manual (`ຄູ່ມືນຳໃຊ້ — KPV ສະຕັອກ.html`) is the
+specification** for everything v2 does not change; where the v2 design
+(`docs/superpowers/specs/2026-11-12-khamphouvong-stock-v2-design.md`) differs
+(moves, the day flow, roles), v2 wins. `app.md` is the original brief and is
+kept for history only.
 
 ## Stack
 
-- **Cloudflare Workers** — one Worker serves the SPA (`/public`) and the JSON
-  API (`/api/*`), built with [Hono](https://hono.dev). Same origin, no CORS.
-- **Supabase (Postgres)** — accessed only by the Worker with the service-role
-  key. Row Level Security is on with no policies, so the public key reaches
-  nothing.
-- **Vanilla ES modules + Tailwind** on the frontend (`npm run build:css`).
-- **Demo store** — without Supabase credentials the Worker runs on an
-  in-memory demo dataset (`src/demoData.ts`) with exactly the same rules.
+- **Cloudflare Worker, not Pages; no browser Supabase key.** One Worker serves
+  the SPA (`/public`, as Static Assets) and the JSON API (`/api/*`), built with
+  [Hono](https://hono.dev). Same origin, no CORS. The browser only ever talks
+  to the Worker, which checks the session on every request.
+- **Supabase (Postgres)**, reached only by the Worker with the service-role key.
+  Row Level Security is on with no permissive policies and `anon` /
+  `authenticated` are revoked, so a public key would reach nothing (and none is
+  shipped). Business rules are checked in the Worker with friendly errors and
+  again in Postgres (triggers, RPCs) as hard guarantees.
+- **Vanilla ES modules + Tailwind 3** on the frontend (`npm run build:css`).
+  No React, no Vite, no `VITE_*` variables.
+- **Demo store**: without Supabase credentials the Worker runs on an in-memory
+  dataset (`src/demoData.ts`) with the same rules.
 
 ## Layout
 
@@ -22,60 +31,135 @@ specification**; `app.md` is the original brief and is kept for history only.
 src/
   index.ts            mounts the route modules, maps errors to HTTP
   app.ts              shared route helpers: access scoping, the date rule, day locks
-  routes/             auth · stock · transfers · documents · insights · settings
-  logic.ts            every computation: closing, reorder point, value, dashboard, report
-  store.ts            Store interface — SupabaseStore (PostgREST) and DemoStore
-  time.ts             Laos business date (UTC+7), month ranges
-  auth.ts             PIN hashing, session tokens, lockout constants
+  routes/             auth · meta · stock · moves · transfers · documents · insights
+                      · settings · cases · replenishment · audit
+  dataMode.ts         test / production / demo, and the seed-account rule
+  logic.ts            closing, value, dashboard, report
+  replenishment.ts    velocity, runway, alert rules
+  store.ts            Store interface: SupabaseStore (PostgREST) and DemoStore
+  time.ts             Laos business date (UTC+7)
+  auth.ts             PIN hashing, session tokens, role guards
   demoData.ts         demo dataset (relative to today)
 supabase/
-  schema.sql          tables, Done-day lock trigger, counters, views
-  base.sql            production starting data: branches, config, types, sizes
-  seed.sql            demo data for testing a Supabase project (wipes app data)
-scripts/gen-sql.ts    regenerates base.sql / seed.sql; prints first-admin SQL
-test/                 vitest — rule tests and end-to-end API tests
-public/               SPA
+  schema.sql                       v1 baseline (never edited; its header comment
+                                   still mentions seed.sql, which no longer exists)
+  migrations/20261112_01 … _07     v2 changes, additive and idempotent
+  users_roles.sql                  roles, role guard triggers, RLS lockdown
+  base.sql                         production starting data (generated)
+  seed_mock_data.sql               tagged mock data for test projects (optional)
+  purge_seed_data.sql              removes every is_seed row, nothing else
+  tests/verify_v2.sql              self-check for a real test project
+scripts/gen-sql.ts                 generates base.sql; prints first-admin SQL
+test/                              vitest: rule tests, API tests, test/sql (PGlite)
+public/                            the SPA
+docs/GO-LIVE.md                    setup, deploy, switch to production
 ```
 
 ## Commands
 
 ```bash
 npm install
-npm run dev          # local, demo data unless .dev.vars has Supabase keys
-npm test             # 49 tests: logic + every API rule end to end
+npm run dev          # local; demo data unless .dev.vars holds Supabase values
+npm test             # everything: logic, API end to end, and the SQL suite
+npm run test:sql     # only test/sql: the real SQL files on in-process Postgres (PGlite)
 npm run typecheck
-npm run db:sql       # regenerate supabase/base.sql and seed.sql
+npm run deploy       # build CSS, then wrangler deploy
+npm run db:sql       # regenerate supabase/base.sql (and only that)
 npm run db:admin -- "Owner name" 1234   # print SQL that creates the first admin
-npm run deploy
+npm run db:pin -- 1234                  # print one PIN hash
 ```
 
-## The rules (as the manual describes them)
+## SQL files and run order
 
-- **Two roles.** Staff see and change only their own branch. Admin sees every
-  branch and alone can: delete documents, approve/reject purchase proposals,
-  change SKUs / types / sizes, run rates, gold price, manage users, reopen a
-  Done day.
-- **Login.** Branch → name → 4-digit PIN; session lasts 30 days. 5 wrong PINs
-  lock the account for 15 minutes (admin can unlock). Resetting a PIN, moving
-  a branch or deactivating ends that person's sessions.
-- **Desk day:** not started → check-in → final stock → ✓ done, forward only.
-  - Check-in is refused while an earlier day of that desk is not Done.
-  - Next day's opening = the physical count of the last Done day.
-  - Done is refused unless every row is counted, every difference has a note,
-    every destock has a reason, and no closing is below zero.
-  - A Done day is locked in the database itself. Admin can reopen only the
-    desk's latest Done day, with a reason (written to the audit log); the next
-    day's openings follow the correction.
-- **Dates** are Laos dates. Staff record today (or finish an unfinished day);
-  admin may record past dates; nobody records the future.
-- **Out / Move** pick a destination desk (Out = another branch, Move = same
-  branch). The gold is *in transit* until the receiving desk confirms; it
-  stays in the company total meanwhile and never blocks anyone's closing.
-- **Reorder point** per desk = avg/day × (lead time + safety buffer); SKUs
-  without avg/day use their fixed reorder level.
-- **Value** = Baht weight × gold price (admin enters it in Settings); items
-  without gold weight use their unit price.
-- **Dashboard** is computed from each desk's latest recorded day — no stored
-  snapshot. Report: opening + in − out + count adjustments = closing.
+Fresh Supabase project, in the SQL editor:
+
+1. `supabase/schema.sql`
+2. `supabase/migrations/20261112_01_foundation.sql` … `20261112_07_seed_tools.sql`, in name order
+3. `supabase/users_roles.sql`
+4. `supabase/base.sql`
+5. Test projects only: `supabase/seed_mock_data.sql`, then `supabase/tests/verify_v2.sql` (prints `VERIFY_V2 OK`)
+
+Re-run `users_roles.sql` after any future migration so new tables are locked
+down too. `supabase/purge_seed_data.sql` deletes only rows tagged `is_seed`.
+`schema.sql` is the v1 baseline and is never edited; changes go in new
+migration files. Step by step: [docs/GO-LIVE.md](docs/GO-LIVE.md).
+
+## Environment
+
+There is no `.env` / `VITE_*` file. Locally the Worker reads `.dev.vars`
+(copy `.dev.vars.example`); in Cloudflare the same names are Variables and
+Secrets. Do not add a `VITE_` file: nothing in the browser reads one.
+
+| Name | Value | Local | Cloudflare |
+|---|---|---|---|
+| `SUPABASE_URL` | `https://tpekfhbjbosbeikawkys.supabase.co` (was `VITE_SUPABASE_URL`) | `.dev.vars` | Variable (text) |
+| `SUPABASE_SERVICE_ROLE_KEY` | service-role key, server side only. There is no anon key (was `VITE_SUPABASE_ANON_KEY`) | `.dev.vars` | Secret |
+| `AUTH_SECRET` | 32+ random bytes; signs sessions | `.dev.vars` | Secret |
+| `KPV_DATA_MODE` | `test` or `production`; default `production` when Supabase is set, `demo` otherwise | `.dev.vars` | Variable (text) |
+
+Never commit `.dev.vars` (it is git-ignored) or paste the key or `AUTH_SECRET`
+anywhere.
+
+### Data mode
+
+- `test`: a "TEST DATA" strip on every screen. Mock accounts can log in.
+- `production`: accounts tagged `is_seed` cannot log in (`403
+  SEED_ACCOUNT_DISABLED`), are hidden from the login list, and any session they
+  already hold stops working. If mock rows are still in the database, admins
+  see a strip saying how many.
+- `GET /api/meta` (public) returns `{ dataMode, seedRows }`. `seedRows` is the
+  total from the `kpv_seed_counts()` RPC and is shown only to a signed-in admin;
+  everyone else gets 0. The signed-in screen data (branches, desks, config,
+  today, user) moved to `GET /api/app-meta`.
+
+## Roles
+
+Three roles. Staff and managers see only their own branch; admin sees all.
+
+| Action | staff | manager | admin |
+|---|---|---|---|
+| Day entries, counts, close, moves, receive transfers (own branch) | yes | yes | yes, all branches |
+| Take / hand over cases | self / own | own branch | all |
+| Reopen a Done day | no | own branch, latest, within 3 days | latest |
+| Replenishment rules | read | own branch rules | all |
+| Closed days | read | own branch | all |
+| Unlock a locked PIN | no | own branch staff | yes |
+| Users (create, role, branch, PIN reset) | no | no | yes |
+| SKUs, types, sizes, gold price, config | no (gold price is readable) | no (gold price is readable) | yes |
+| Approve / reject proposals, delete documents | no | no | yes |
+| Audit history | own case, today | own branch | all |
+
+The Worker returns friendly errors; the database refuses the same actions
+through triggers keyed on the acting staff member (the Worker sends
+`X-KPV-Actor-Id` on every write).
+
+## The rules
+
+- **Login.** Branch, name, 4-digit PIN; the session lasts 30 days. 5 wrong PINs
+  lock the account for 15 minutes. Resetting a PIN, moving a branch or
+  deactivating ends that person's sessions.
+- **Desk day** (a "case"): not started, check-in, final stock, done, forward
+  only. Check-in is refused while an earlier day of that case is not Done. The
+  next opening is the physical count of the last Done day. Done needs every row
+  counted, a note on every difference and a reason on every destock. A Done day
+  is locked in the database; reopening is limited as in the table above and is
+  written to the audit log.
+- **Dates** are Laos dates (UTC+7). The server decides "today"; a phone's clock
+  cannot shift a day. Nobody records the future.
+- **Moves** inside a branch are instant, with an Undo for a few seconds.
+  **Transfers** to another branch are *in transit* until the receiving case
+  confirms; the gold stays in the company total meanwhile.
+- **Quantities** are whole pieces, 0 to 99 999. Stock can never go negative.
+- **Replenishment.** Avg/day and lead time come from rules (SKU, group or type,
+  company-wide or per branch) or are measured from the ledger. The runway tells
+  how many days of stock are left; alerts fire inside the lead time plus margin.
+- **Value** = Baht weight x gold price (Settings, Gold price; admin edits, others
+  read); items without gold weight use their unit price.
+- **Dashboard** is computed from each case's latest recorded day. Report:
+  opening + in - out + count adjustments = closing.
+- **Audit history.** Every change is written by a database trigger and cannot
+  be edited. `GET /api/audit` pages newest first with a `before` cursor of the
+  form `<created_at>|<id>`: pass the `next` value of the previous page as
+  `before`. (The v2 spec calls this parameter `cursor`; the code uses `before`.)
 
 Going live: see [docs/GO-LIVE.md](docs/GO-LIVE.md).

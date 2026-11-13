@@ -95,7 +95,7 @@ describe("user level", () => {
     const created = await call(admin, "POST", "/users", { displayName: "Noy", branchId: "B-VT", pin: "2468" });
     expect(created.status).toBe(200);
     const noy = await login(created.json.id, "2468");
-    expect((await call(noy, "GET", "/meta")).json.branches.map((b: any) => b.branch_id)).toEqual(["B-VT"]);
+    expect((await call(noy, "GET", "/app-meta")).json.branches.map((b: any) => b.branch_id)).toEqual(["B-VT"]);
     const me = (await call(admin, "GET", "/auth/me")).json.user.accountId;
     expect((await call(admin, "PATCH", `/users/${me}`, { active: false })).status).toBe(409);
   });
@@ -482,7 +482,7 @@ describe("branch manager", () => {
     const cards = (await call(manager, "GET", "/stock/desks?branchId=B-TS")).json.desks;
     expect(new Set(cards.map((d: any) => d.branch_id))).toEqual(new Set(["B-MM"]));
     expect((await call(manager, "GET", `/stock/desk/TS-D01?date=${TODAY}`)).status).toBe(403);
-    const meta = (await call(manager, "GET", "/meta")).json;
+    const meta = (await call(manager, "GET", "/app-meta")).json;
     expect(new Set(meta.desks.map((d: any) => d.branch_id))).toEqual(new Set(["B-MM"]));
     expect(meta.user.role).toBe("manager");
   });
@@ -671,5 +671,55 @@ describe("cards: streak, tier, holder and branch summary (CR3)", () => {
     const cards = (await call(m, "GET", "/stock/desks?branchId=B-MM")).json.desks;
     expect(cards.find((d: any) => d.desk_id === "MM-D01").assignee).toMatchObject({ staffId: DEMO_STAFF["B-MM"], name: "Somchai S.", stale: true });
     expect(cards.find((d: any) => d.desk_id === "MM-D02").assignee.stale).toBe(false);
+  });
+});
+
+describe("data mode and /api/meta (Task 18)", () => {
+  const db = () => (getStore({} as any) as any).db;
+  const seedStaff = () => {
+    db().staffAccounts.find((a: any) => a.id === DEMO_STAFF["B-MM"]).is_seed = true;
+  };
+
+  it("production mode refuses a seed account login", async () => {
+    seedStaff();
+    const res = await call(null, "POST", "/auth/login", { accountId: DEMO_STAFF["B-MM"], pin: "1234" }, TODAY, { KPV_DATA_MODE: "production" });
+    expect(res.status).toBe(403);
+    expect(res.json.code).toBe("SEED_ACCOUNT_DISABLED");
+    const list = await call(null, "GET", "/auth/accounts?branchId=B-MM", undefined, TODAY, { KPV_DATA_MODE: "production" });
+    expect(list.json.accounts.map((a: any) => a.id)).not.toContain(DEMO_STAFF["B-MM"]);
+  });
+
+  it("test mode allows it and meta says test", async () => {
+    seedStaff();
+    const res = await call(null, "POST", "/auth/login", { accountId: DEMO_STAFF["B-MM"], pin: "1234" }, TODAY, { KPV_DATA_MODE: "test" });
+    expect(res.status).toBe(200);
+    const list = await call(null, "GET", "/auth/accounts?branchId=B-MM", undefined, TODAY, { KPV_DATA_MODE: "test" });
+    expect(list.json.accounts.map((a: any) => a.id)).toContain(DEMO_STAFF["B-MM"]);
+    const meta = await call(null, "GET", "/meta", undefined, TODAY, { KPV_DATA_MODE: "test" });
+    expect(meta.status).toBe(200);
+    expect(meta.json).toEqual({ dataMode: "test", seedRows: 0 });
+  });
+
+  it("defaults to demo without Supabase", async () => {
+    expect((await call(null, "GET", "/meta")).json.dataMode).toBe("demo");
+  });
+
+  it("admin meta reports seedRows > 0 when seed rows exist; others see 0", async () => {
+    seedStaff();
+    const admin = await asAdmin();
+    const staff = await asStaff("B-TS");
+    const env = { KPV_DATA_MODE: "test" };
+    const a = await call(admin, "GET", "/meta", undefined, TODAY, env);
+    expect(a.json.dataMode).toBe("test");
+    expect(a.json.seedRows).toBeGreaterThan(0);
+    expect((await call(staff, "GET", "/meta", undefined, TODAY, env)).json.seedRows).toBe(0);
+  });
+
+  it("the signed-in screen data moved to /app-meta", async () => {
+    const admin = await asAdmin();
+    const res = await call(admin, "GET", "/app-meta");
+    expect(res.status).toBe(200);
+    expect(res.json).toHaveProperty("branches");
+    expect(res.json).toHaveProperty("today");
   });
 });

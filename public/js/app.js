@@ -1,7 +1,7 @@
 import { api } from "./api.js";
 import { state } from "./state.js";
 import { toast } from "./ui.js";
-import { t, getLang } from "./i18n.js";
+import { t, tf, getLang } from "./i18n.js";
 import { getToken, getCachedUser, clearSession, isAdmin } from "./session.js";
 import { mountLogin } from "./views/login.js";
 import { mountStock, unmountStock } from "./views/stock.js";
@@ -26,8 +26,30 @@ const NAV_LABEL_KEYS = {
   settings: "nav.settings",
 };
 
+// Strip above the top bar: "test data" in test mode; for an admin in production, a
+// reminder while mock rows are still loaded. Plain text, never colour alone.
+let dataMeta = { dataMode: "production", seedRows: 0 };
+
+function paintBanner() {
+  const el = document.getElementById("mode-banner");
+  let text = "";
+  if (dataMeta.dataMode === "test") text = t("mode.test");
+  else if (dataMeta.dataMode === "production" && dataMeta.seedRows > 0) text = tf("mode.seedLeft", { n: dataMeta.seedRows });
+  el.textContent = text;
+  const tone = dataMeta.dataMode === "test" ? "bg-warning-bg text-warning" : "bg-danger-bg text-danger";
+  el.className = text ? `${tone} border-b border-hairline px-4 py-2 text-center text-xs font-bold` : "hidden";
+}
+
+async function loadDataMeta() {
+  try {
+    dataMeta = await api.dataMeta();
+  } catch {}
+  paintBanner();
+}
+
 export function refreshNav() {
   document.documentElement.lang = getLang() === "lo" ? "lo" : "en";
+  paintBanner();
   document.querySelectorAll("#bottom-nav [data-view]").forEach((btn) => {
     btn.querySelector("[data-nav-label]").textContent = t(NAV_LABEL_KEYS[btn.dataset.view]);
   });
@@ -78,6 +100,7 @@ document.getElementById("bottom-nav").addEventListener("click", (e) => {
 
 async function loadMetaAndEnter() {
   try {
+    await loadDataMeta();
     state.meta = await api.meta();
     state.user = state.meta.user;
     state.stock.date = state.meta.today;
@@ -111,6 +134,7 @@ async function boot() {
       clearSession();
     }
   }
+  await loadDataMeta();
   // No valid session — show the login gate. It needs the branch list, which
   // is public (no auth) since you haven't logged in yet.
   const { branches } = await api.branches();

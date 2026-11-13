@@ -1,7 +1,7 @@
 // In-memory demo dataset, built relative to a given business date so the demo
 // always has a few finished days behind "today". Used whenever Supabase is not
-// configured (local development and tests). scripts/gen-seed.ts turns the same
-// dataset into supabase/seed.sql.
+// configured (local development and tests). Test data for a real Supabase project
+// is supabase/seed_mock_data.sql (hand-written, tagged is_seed).
 import type {
   Branch,
   Desk,

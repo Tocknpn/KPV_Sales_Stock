@@ -141,6 +141,8 @@ export interface StaffAccount {
   failed_attempts: number;
   locked_until: string | null;
   created_at: string;
+  // Mock-data account (removed by the purge). Production mode refuses it.
+  is_seed?: boolean;
 }
 
 // Verified-session identity, set on the Hono context by the auth middleware.
@@ -253,6 +255,9 @@ export interface Env {
   // Demo/test only: pins "today" so the demo dataset and tests are stable.
   // Ignored when Supabase is configured.
   DEMO_DATE?: string;
+  // "test": Supabase holds mock data (banner shown). "production": real data; seed accounts refused.
+  // Default: production when Supabase is set, demo otherwise.
+  KPV_DATA_MODE?: "test" | "production";
   APP_VERSION?: string;
   BUILD_DATE?: string;
 }

@@ -19,7 +19,6 @@ let branchId = null;
 let filter = "all"; // all | critical | warning | review
 let query = "";
 let data = null; // { rows, config, skus: Map }
-let priceConfig = {};
 
 const num = (n) => String(Math.round(Number(n) * 1000) / 1000);
 
@@ -34,7 +33,6 @@ export async function renderReplenishment(root) {
   filter = "all";
   query = "";
   data = null;
-  if (isAdmin(u)) priceConfig = (await api.settingsSummary()).config;
   await load(root);
 }
 
@@ -95,7 +93,6 @@ function paint(root) {
       ${mayEdit() ? "" : `<p class="mt-1 text-[11px] font-bold text-gray-600">${t("replen.readOnly")}</p>`}
     </div>
     <div id="rp-list"></div>
-    ${isAdmin(state.user) ? priceCard() : ""}
     <div class="h-4"></div>
   `;
   root.querySelector("#rp-branch")?.addEventListener("change", async (e) => {
@@ -116,7 +113,6 @@ function paint(root) {
       paintList(root);
     }, 250)
   );
-  wirePriceCard(root);
   paintList(root);
 }
 
@@ -330,30 +326,4 @@ function openBulkSheet(root, group, full) {
       },
     }
   );
-}
-
-// ---- gold price (kept from the old Lead time screen; admin only) ----
-
-function priceCard() {
-  const c = priceConfig;
-  return `
-    <h2 class="mb-2.5 mt-6 text-[11px] font-extrabold uppercase tracking-wide text-gray-600">${t("settings.priceSection")}</h2>
-    <div class="card p-4">
-      <label for="spot-price" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.spotPriceLabel")}</label>
-      <input id="spot-price" type="number" min="0" step="1000" inputmode="numeric" value="${Number(c.spot_lak_per_baht) || ""}" class="input-filled text-center font-extrabold" />
-      <label for="usd-rate" class="mb-1.5 mt-3 block text-xs font-bold text-gray-600">${t("settings.usdRateLabel")}</label>
-      <input id="usd-rate" type="number" min="0" step="1" inputmode="numeric" value="${Number(c.usd_to_lak_rate) || ""}" class="input-filled text-center font-extrabold" />
-      <p class="mt-2 text-[11px] text-gray-500">${t("settings.priceHint")}</p>
-      <button id="save-config" class="btn-primary mt-4 w-full">${t("settings.save")}</button>
-    </div>`;
-}
-
-function wirePriceCard(root) {
-  root.querySelector("#save-config")?.addEventListener("click", async () => {
-    const spot = Number(root.querySelector("#spot-price").value);
-    const usd = Number(root.querySelector("#usd-rate").value);
-    if (!(spot > 0)) return toast(t("settings.needSpotPrice"), "error");
-    priceConfig = state.meta.config = await api.saveConfig({ spotLakPerBaht: spot, usdToLakRate: usd > 0 ? usd : 0 });
-    toast(t("settings.savedToast"), "success");
-  });
 }

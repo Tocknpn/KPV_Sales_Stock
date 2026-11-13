@@ -115,6 +115,12 @@ export interface MoveInput {
 export type MoveResult =
   | { ok: true; ticketId: string; moves: Transfer[]; replayed?: boolean }
   | { ok: false; code: string; skuId?: string; available?: number };
+export interface SeedCount {
+  table_name: string;
+  seed_rows: number;
+  real_rows: number;
+}
+
 export type NewStaffAccount = Pick<StaffAccount, "branch_id" | "display_name" | "pin_hash" | "role">;
 export type NewSku = Omit<MasterSku, "active"> & { active?: boolean };
 
@@ -140,6 +146,8 @@ export interface Store {
   createDesk(input: { branch_id: string; display_name: string }): Promise<Desk>;
 
   staffAccounts(): Promise<StaffAccount[]>;
+  // Seed vs real row counts per table (the kpv_seed_counts() RPC).
+  seedCounts(): Promise<SeedCount[]>;
   createStaffAccount(account: NewStaffAccount): Promise<StaffAccount>;
   updateStaffAccount(id: string, patch: Partial<Omit<StaffAccount, "id" | "created_at">>): Promise<StaffAccount | null>;
 
@@ -336,6 +344,15 @@ export class DemoStore implements Store {
     return desk;
   }
 
+  async seedCounts() {
+    const out: SeedCount[] = [];
+    for (const [table_name, value] of Object.entries(this.db)) {
+      if (!Array.isArray(value)) continue;
+      const seed_rows = value.filter((row) => row && row.is_seed === true).length;
+      out.push({ table_name, seed_rows, real_rows: value.length - seed_rows });
+    }
+    return out;
+  }
   async staffAccounts() {
     return this.db.staffAccounts;
   }
@@ -1132,6 +1149,10 @@ class SupabaseStore implements Store {
     return desk;
   }
 
+  async seedCounts() {
+    const rows = await this.rpc<SeedCount[]>("kpv_seed_counts", {});
+    return rows.map((r) => ({ table_name: r.table_name, seed_rows: Number(r.seed_rows), real_rows: Number(r.real_rows) }));
+  }
   async staffAccounts() {
     return this.rest<StaffAccount[]>("staff_accounts?select=*&order=created_at");
   }

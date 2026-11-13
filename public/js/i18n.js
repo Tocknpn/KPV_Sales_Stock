@@ -275,6 +275,8 @@ const DICT = {
 
     // --- production phase ---
     "app.demoMode": "ໂໝດທົດລອງ — ຂໍ້ມູນຕົວຢ່າງ, ບໍ່ໄດ້ບັນທຶກແທ້",
+    "mode.test": "ຂໍ້ມູນທົດສອບ — ບໍ່ແມ່ນຂໍ້ມູນຈິງ",
+    "mode.seedLeft": "ຍັງມີຂໍ້ມູນທົດສອບ {n} ແຖວ — ລຶບກ່ອນໃຊ້ງານຈິງ",
     "app.loadFailed": "ໂຫຼດຂໍ້ມູນບໍ່ໄດ້. ກວດອິນເຕີເນັດ ແລ້ວລອງໃໝ່.",
     "dashboard.loading": "ກຳລັງຄິດໄລ່…",
     "dashboard.totalGold": "ທອງທັງໝົດທີ່ມີ",
@@ -606,6 +608,7 @@ const DICT = {
     "err.ROLE_DENIED": "ທ່ານບໍ່ມີສິດປ່ຽນຄ່ານີ້",
 
     "settings.menuReplen": "ເຕີມສະຕັອກ",
+    "settings.menuGoldPrice": "ລາຄາທອງ",
     "settings.groupLabel": "ກຸ່ມສິນຄ້າ",
     "settings.groupHint": "ເຊັ່ນ Snake Necklace — ໃຊ້ຕັ້ງຄ່າທຸກຂະໜາດພ້ອມກັນ",
     "stock.criticalShort": "ວິກິດ",
@@ -928,6 +931,8 @@ const DICT = {
 
     // --- production phase ---
     "app.demoMode": "Demo mode — sample data, nothing is saved for real",
+    "mode.test": "TEST DATA — nothing here is real",
+    "mode.seedLeft": "{n} test-data rows are still loaded — purge them before real use",
     "app.loadFailed": "Could not load the app. Check the connection and try again.",
     "dashboard.loading": "Calculating…",
     "dashboard.totalGold": "Total gold in stock",
@@ -1259,6 +1264,7 @@ const DICT = {
     "err.ROLE_DENIED": "You are not allowed to change these",
 
     "settings.menuReplen": "Replenishment",
+    "settings.menuGoldPrice": "Gold price",
     "settings.groupLabel": "Group",
     "settings.groupHint": "e.g. Snake Necklace — lets one rule cover every size",
     "stock.criticalShort": "critical",

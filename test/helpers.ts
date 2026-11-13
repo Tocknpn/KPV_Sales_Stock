@@ -17,7 +17,7 @@ export function freshApp() {
   resetDemoStore();
 }
 
-export async function call(session: Session | null, method: string, path: string, body?: unknown, date = session?.date ?? TODAY) {
+export async function call(session: Session | null, method: string, path: string, body?: unknown, date = session?.date ?? TODAY, env: Record<string, string> = {}) {
   const res = await app.request(
     `/api${path}`,
     {
@@ -25,7 +25,7 @@ export async function call(session: Session | null, method: string, path: string
       headers: { "Content-Type": "application/json", ...(session ? { Authorization: `Bearer ${session.token}` } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
     },
-    { DEMO_DATE: date }
+    { DEMO_DATE: date, ...env }
   );
   const text = await res.text();
   let json: any = null;

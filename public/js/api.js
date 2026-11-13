@@ -55,7 +55,8 @@ const patch = (path, payload) => request(path, { method: "PATCH", body: JSON.str
 const query = (params) => new URLSearchParams(Object.entries(params).filter(([, v]) => v !== null && v !== undefined && v !== "")).toString();
 
 export const api = {
-  meta: () => request("/meta"),
+  meta: () => request("/app-meta"),
+  dataMeta: () => request("/meta"),
   branches: () => request("/branches"),
 
   authAccounts: (branchId) => request(`/auth/accounts${branchId ? `?branchId=${branchId}` : ""}`),

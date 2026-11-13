@@ -1,6 +1,7 @@
 import { HttpError, newRouter } from "./app";
 import { StoreError } from "./store";
 import { requireAuth } from "./auth";
+import metaRoutes from "./routes/meta";
 import authRoutes from "./routes/auth";
 import stockRoutes from "./routes/stock";
 import transferRoutes from "./routes/transfers";
@@ -19,6 +20,7 @@ const app = newRouter();
 // Public + login routes first (each guards itself), then everything else
 // sits behind one requireAuth.
 app.route("/api", authRoutes);
+app.route("/api", metaRoutes);
 app.use("/api/*", requireAuth);
 app.route("/api", stockRoutes);
 app.route("/api", transferRoutes);

@@ -4,6 +4,7 @@
 import type { Context, Next } from "hono";
 import type { Env, SessionUser, StaffAccount, StaffRole } from "./types";
 import { getStore } from "./store";
+import { seedBlocked } from "./dataMode";
 import { isLive } from "./time";
 
 // The token-signing secret. A live deployment must set AUTH_SECRET; only the
@@ -138,7 +139,7 @@ export async function requireAuth(c: Context<{ Bindings: Env; Variables: { user:
   const store = getStore(c.env);
   const accounts = await store.staffAccounts();
   const account = accounts.find((a) => a.id === payload.sub);
-  if (!account || !account.active || account.token_version !== payload.tokenVersion) {
+  if (!account || !account.active || account.token_version !== payload.tokenVersion || seedBlocked(c.env, account)) {
     return c.json({ error: "Session expired, please log in again" }, 401);
   }
 
