@@ -159,7 +159,11 @@ export async function unmountDay() {
   document.getElementById("day-footer")?.remove();
   if (screen) {
     await screen.queue.flushAll().catch(() => {});
+    // Still unsent after the last try (offline, or a failing server): leaving
+    // drops them, so say so clearly instead of losing them silently.
+    const left = screen.queue.hasUnsaved() ? Math.max(1, screen.queue.unsavedCount()) : 0;
     screen.queue.dispose();
+    if (left > 0) toast(tf("day.unsavedLeft", { n: left }), "error", 9000);
   }
 }
 
@@ -215,7 +219,7 @@ function refreshTotals() {
   el.innerHTML = `
     <span class="min-w-0 truncate font-extrabold tabular-nums text-gray-900">${fmtInt(pcs)} pcs · ${fmtBaht(baht, 2)} Baht</span>
     <span class="flex shrink-0 items-center gap-2 text-xs font-semibold">
-      ${S.saveState ? `<span class="text-gray-600" role="status">${S.saveState === "saving" ? t("day.saving") : S.saveState === "offline" ? `<b class="text-danger">${t("day.offline")}</b>` : t("day.saved")}</span>` : ""}
+      ${S.saveState ? `<span class="text-gray-600" role="status">${S.saveState === "saving" ? t("day.saving") : S.saveState === "offline" ? `<b class="text-danger">${t("day.offline")}</b>` : S.saveState === "error" ? `<b class="text-danger">${t("day.saveFailed")}</b>` : t("day.saved")}</span>` : ""}
       ${low ? `<span class="font-extrabold text-danger">■ ${tf("day.lowCount", { n: low })}</span>` : ""}
     </span>`;
 }

@@ -1,4 +1,4 @@
-export function toast(message, tone = "default") {
+export function toast(message, tone = "default", ms = 2200) {
   const host = document.getElementById("toast");
   const toneCls =
     tone === "success"
@@ -14,7 +14,7 @@ export function toast(message, tone = "default") {
   setTimeout(() => {
     el.classList.add("opacity-0");
     setTimeout(() => el.remove(), 300);
-  }, 2200);
+  }, ms);
 }
 
 const sheetHost = () => document.getElementById("sheet-host");

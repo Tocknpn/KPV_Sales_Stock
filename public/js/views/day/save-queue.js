@@ -25,7 +25,7 @@ export function clampQty(n) {
  * @param {(skuId: string) => object} opts.getStored  last server-confirmed row for a SKU
  * @param {(skuId: string, row: object) => void} opts.onStored  a server row arrived; show it
  * @param {(res: object) => void} opts.onResult  fallback handler for failures nobody else handled
- * @param {(state: "saving" | "saved") => void} [opts.onStatus]
+ * @param {(state: "saving" | "saved" | "offline" | "error") => void} [opts.onStatus]
  */
 export function createSaveQueue({ deskId, date, getStored, onStored, onResult, onStatus }) {
   /** skuId -> { timer, fields: Map<field, {from, to, kind, cb}> } */
@@ -39,15 +39,19 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
   let busy = 0;
   let offline = false;
   let disposed = false;
+  // True once any request of the current burst of saving failed for good, so the
+  // burst ends as "error", never "saved".
+  let failed = false;
   const RETRY_MS = 5000;
 
   const begin = () => {
+    if (busy === 0) failed = false;
     busy++;
     onStatus?.("saving");
   };
   const end = () => {
     busy--;
-    if (busy === 0 && pending.size === 0 && !offline) onStatus?.("saved");
+    if (busy === 0 && pending.size === 0 && !offline) onStatus?.(failed ? "error" : "saved");
   };
   const fly = (skuId, fields, d) =>
     fields.forEach((f) => {
@@ -121,6 +125,7 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
         } else {
           typed.push(...steppers);
         }
+        if (typed.length > 0) failed = true;
         for (const [field, e] of typed) {
           report(e.cb, {
             ok: false,
@@ -136,11 +141,13 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
           });
         }
       } else if (err.code === "NEGATIVE_CLOSING") {
+        failed = true;
         onStored(skuId, getStored(skuId));
         entries.forEach(([field, e]) =>
           report(e.cb, { ok: false, code: "NEGATIVE_CLOSING", skuId, field, available: Number(err.data?.available ?? 0) })
         );
       } else {
+        failed = true;
         onStored(skuId, getStored(skuId));
         entries.forEach(([field, e]) => report(e.cb, { ok: false, code: err.code ?? "ERROR", skuId, field, message: err.message }));
       }
@@ -171,6 +178,7 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
           // A real HTTP error (403, 5xx; a 401 already sent the app to login) will
           // not fix itself by retrying: give up on this SKU's unsent changes,
           // show what the server holds, and tell the user why.
+          failed = true;
           unsynced.delete(skuId);
           offline = unsynced.size > 0;
           onStored(skuId, getStored(skuId));
@@ -236,6 +244,13 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
     /** True while anything is unsent, in flight, or waiting for the network. */
     hasUnsaved() {
       return pending.size > 0 || inflight.size > 0 || unsynced.size > 0;
+    },
+
+    /** How many field changes are still waiting to be sent (queued for retry). */
+    unsavedCount() {
+      let n = 0;
+      for (const entry of pending.values()) n += entry.fields.size;
+      return n;
     },
 
     /** Stops all timers; call when the screen goes away. Unsent changes are dropped. */
