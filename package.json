@@ -15,6 +15,8 @@
     "typecheck": "tsc --noEmit",
     "db:sql": "node .wrangler/gen-sql.mjs",
     "db:admin": "node .wrangler/gen-sql.mjs admin",
+    "db:pin": "node .wrangler/gen-sql.mjs pin-hash",
+    "predb:pin": "esbuild scripts/gen-sql.ts --bundle --platform=node --format=esm --log-level=warning --outfile=.wrangler/gen-sql.mjs",
     "predb:sql": "esbuild scripts/gen-sql.ts --bundle --platform=node --format=esm --log-level=warning --outfile=.wrangler/gen-sql.mjs",
     "predb:admin": "esbuild scripts/gen-sql.ts --bundle --platform=node --format=esm --log-level=warning --outfile=.wrangler/gen-sql.mjs"
   },
