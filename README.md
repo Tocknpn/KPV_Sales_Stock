@@ -79,8 +79,11 @@ Fresh Supabase project, in the SQL editor:
 4. `supabase/base.sql`
 5. Test projects only: `supabase/seed_mock_data.sql`, then `supabase/tests/verify_v2.sql` (prints `VERIFY_V2 OK`)
 
-Re-run `users_roles.sql` after any future migration so new tables are locked
-down too. `supabase/purge_seed_data.sql` deletes only rows tagged `is_seed`.
+On an existing project always re-run the whole sequence 01 to 07 and then
+`users_roles.sql`, never a single earlier migration file (migration 07
+redefines a function that migration 01 also defines, so a lone re-run of 01
+would put the older body back). Re-run `users_roles.sql` after any future
+migration so new tables are locked down too. `supabase/purge_seed_data.sql` deletes only rows tagged `is_seed`.
 `schema.sql` is the v1 baseline and is never edited; changes go in new
 migration files. Step by step: [docs/GO-LIVE.md](docs/GO-LIVE.md).
 

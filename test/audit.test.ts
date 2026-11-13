@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEMO_STAFF } from "../src/demoData";
 import { auditDiff } from "../src/audit";
+import { parseAuditCursor } from "../src/auditParams";
 import { actorHeaders } from "../src/actor";
 import { getStore } from "../src/store";
 import { addDays, laosDate } from "../src/time";
@@ -17,7 +18,7 @@ describe("audit trail", () => {
     const staff = await asStaff("B-MM");
     const admin = await asAdmin();
     const before = (await call(staff, "GET", `/stock/desk/MM-D01?date=${TODAY}`)).json.rows.find((r: any) => r.sku_id === "GB-001");
-    const res = await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, rows: [{ sku_id: "GB-001", retail_sale: 2 }] });
+    const res = await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, changes: [{ sku_id: "GB-001", field: "retail_sale", to: 2 }] });
     expect(res.status).toBe(200);
 
     const entry = (await rowAudit(admin)).find((e: any) => e.table_name === "daily_stock_ledger" && e.context?.sku_id === "GB-001" && e.context?.desk_id === "MM-D01");
@@ -84,7 +85,7 @@ describe("GET /api/audit", () => {
   const today = laosDate();
   // The demo store stamps audit rows with the real clock, so these tests run
   // on the real Laos date.
-  const write = (staff: any, sku = "GB-001", n = 1) => call(staff, "POST", "/stock/desk/MM-D01/entries", { date: today, rows: [{ sku_id: sku, retail_sale: n }] }, today);
+  const write = (staff: any, sku = "GB-001", n = 1) => call(staff, "POST", "/stock/desk/MM-D01/entries", { date: today, changes: [{ sku_id: sku, field: "retail_sale", to: n }] }, today);
 
   it("staff sees today's entries of a case in their branch only", async () => {
     const staff = await asStaff("B-MM", today);
@@ -99,7 +100,7 @@ describe("GET /api/audit", () => {
     expect((await call(staff, "GET", "/audit", undefined, today)).status).toBe(403);
     expect((await call(staff, "GET", "/audit?branchId=B-MM", undefined, today)).status).toBe(403);
     expect((await call(staff, "GET", "/audit?deskId=IT-D01", undefined, today)).status).toBe(403);
-    expect((await call(staff, "GET", "/audit?deskId=MM-D01&actorId=x", undefined, today)).status).toBe(403);
+    expect((await call(staff, "GET", "/audit?deskId=MM-D01&actorId=00000000-0000-4000-8000-0000000000aa", undefined, today)).status).toBe(403);
     const widened = await call(staff, "GET", "/audit?deskId=MM-D01&from=2000-01-01", undefined, today);
     expect(widened.json.entries.length).toBe(mine.json.entries.length);
 
@@ -165,6 +166,37 @@ describe("GET /api/audit", () => {
       expect((await call(admin, method, "/audit/x", {}, today)).status, method).toBe(404);
     }
     expect((await call(admin, "DELETE", "/audit", undefined, today)).status).toBe(404);
+  });
+});
+
+describe("audit parameter validation (F1)", () => {
+  const today = laosDate();
+  it("refuses a cursor or filter that could alter the PostgREST filter", async () => {
+    const admin = await asAdmin(today);
+    const uuid = "00000000-0000-4000-8000-0000000000aa";
+    const inject = encodeURIComponent(`2026-11-12T03:00:00.000Z),or(actor_id.not.is.null|${uuid}`);
+    const bad = await call(admin, "GET", `/audit?before=${inject}`, undefined, today);
+    expect(bad.status).toBe(400);
+    expect(bad.json.code).toBe("BAD_CURSOR");
+    const badId = await call(admin, "GET", `/audit?before=${encodeURIComponent("2026-11-12T03:00:00.000Z|x),or(a.eq.b")}`, undefined, today);
+    expect(badId.json.code).toBe("BAD_CURSOR");
+    const good = await call(admin, "GET", `/audit?before=${encodeURIComponent(`2026-11-12T03:00:00.000Z|${uuid}`)}`, undefined, today);
+    expect(good.status).toBe(200);
+    for (const q of [`actorId=${encodeURIComponent("x),or(a.eq.b")}`, "actorId=x", `deskId=${encodeURIComponent("MM-D01),or(a.eq.b")}`, `branchId=${encodeURIComponent("B-MM,x")}`]) {
+      const res = await call(admin, "GET", `/audit?${q}`, undefined, today);
+      expect(res.status, q).toBe(400);
+      expect(res.json.code, q).toBe("BAD_FILTER");
+    }
+  });
+
+  it("the cursor validator accepts PostgREST microseconds and +00:00 and round-trips them", () => {
+    const uuid = "00000000-0000-4000-8000-0000000000aa";
+    for (const at of ["2026-11-12T03:00:00.123456+00:00", "2026-11-12T03:00:00.123Z", "2026-11-12T03:00:00Z", "2026-11-12T10:00:00.5-07:00"]) {
+      expect(parseAuditCursor(`${at}|${uuid}`)).toEqual({ createdAt: at, id: uuid });
+    }
+    for (const bad of ["nope", `|${uuid}`, "2026-11-12T03:00:00Z|x", `2026-11-12 03:00:00Z|${uuid}`, `2026-11-12T03:00:00Z),or(a|${uuid}`]) {
+      expect(parseAuditCursor(bad), bad).toBeNull();
+    }
   });
 });
 

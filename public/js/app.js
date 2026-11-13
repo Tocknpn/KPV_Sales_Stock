@@ -28,13 +28,14 @@ const NAV_LABEL_KEYS = {
 
 // Strip above the top bar: "test data" in test mode; for an admin in production, a
 // reminder while mock rows are still loaded. Plain text, never colour alone.
-let dataMeta = { dataMode: "production", seedRows: 0 };
+// seedRows is null when unknown (anyone but a signed-in admin): never show a count then.
+let dataMeta = { dataMode: "production", seedRows: null };
 
 function paintBanner() {
   const el = document.getElementById("mode-banner");
   let text = "";
   if (dataMeta.dataMode === "test") text = t("mode.test");
-  else if (dataMeta.dataMode === "production" && dataMeta.seedRows > 0) text = tf("mode.seedLeft", { n: dataMeta.seedRows });
+  else if (dataMeta.dataMode === "production" && typeof dataMeta.seedRows === "number" && dataMeta.seedRows > 0) text = tf("mode.seedLeft", { n: dataMeta.seedRows });
   el.textContent = text;
   const tone = dataMeta.dataMode === "test" ? "bg-warning-bg text-warning" : "bg-danger-bg text-danger";
   el.className = text ? `${tone} border-b border-hairline px-4 py-2 text-center text-xs font-bold` : "hidden";

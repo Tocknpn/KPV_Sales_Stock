@@ -120,11 +120,11 @@ describe("daily cycle", () => {
   it("Done is refused until every row is counted and explained", async () => {
     const staff = await asStaff("B-MM");
     const desk = "MM-D01";
-    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, rows: [{ sku_id: "GB-001", destock: 1 }] });
+    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "GB-001", field: "destock", to: 1 }] });
     // Counts can be entered at any time, including at check-in.
-    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, rows: [{ sku_id: "GB-001", counted_qty: 1 }] });
+    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "GB-001", field: "counted_qty", to: 1 }] });
     expect(rowOf(await detailOf(staff, desk, TODAY), "GB-001").counted_qty).toBe(1);
-    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, rows: [{ sku_id: "GB-001", counted_qty: null }] });
+    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "GB-001", field: "counted_qty", to: null }] });
     expect((await call(staff, "POST", `/stock/desk/${desk}/transition`, { date: TODAY, toStatus: "done" })).status).toBe(409);
     expect((await call(staff, "POST", `/stock/desk/${desk}/transition`, { date: TODAY, toStatus: "final_stock" })).status).toBe(200);
 
@@ -136,7 +136,7 @@ describe("daily cycle", () => {
 
     await countEverything(staff, desk, TODAY);
     const gb = rowOf(await detailOf(staff, desk, TODAY), "GB-001");
-    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, rows: [{ sku_id: "GB-001", counted_qty: gb.closing_qty - 1 }] });
+    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "GB-001", field: "counted_qty", to: gb.closing_qty - 1 }] });
     res = await call(staff, "POST", `/stock/desk/${desk}/transition`, { date: TODAY, toStatus: "done" });
     expect(res.json.failures).toEqual([
       { sku_id: "GB-001", rule: "destock_note_missing" },
@@ -145,7 +145,10 @@ describe("daily cycle", () => {
 
     await call(staff, "POST", `/stock/desk/${desk}/entries`, {
       date: TODAY,
-      rows: [{ sku_id: "GB-001", destock_note: "damaged", counted_note: "one missing, reported" }],
+      changes: [
+        { sku_id: "GB-001", field: "destock_note", to: "damaged" },
+        { sku_id: "GB-001", field: "counted_note", to: "one missing, reported" },
+      ],
     });
     expect((await call(staff, "POST", `/stock/desk/${desk}/transition`, { date: TODAY, toStatus: "done" })).status).toBe(200);
 
@@ -163,7 +166,7 @@ describe("daily cycle", () => {
     const before = await detailOf(staff, desk, TODAY);
     expect(before.status).toBe("done");
     const writes = [
-      ["POST", `/stock/desk/${desk}/entries`, { date: TODAY, rows: [{ sku_id: "GB-001", retail_sale: 5 }] }],
+      ["POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "GB-001", field: "retail_sale", to: 5 }] }],
       ["POST", `/stock/desk/${desk}/sku`, { date: TODAY, sku_id: "NK-010" }],
       ["DELETE", `/stock/desk/${desk}/sku/GB-001?date=${TODAY}`, undefined],
       ["POST", `/stock/desk/${desk}/transition`, { date: TODAY, toStatus: "done" }],
@@ -178,8 +181,8 @@ describe("daily cycle", () => {
 
   it("saving one field does not overwrite the others", async () => {
     const staff = await asStaff("B-MM");
-    await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, rows: [{ sku_id: "NK-010", stock_in: 7 }] });
-    await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, rows: [{ sku_id: "NK-010", wholesale: 2 }] });
+    await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, changes: [{ sku_id: "NK-010", field: "stock_in", to: 7 }] });
+    await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, changes: [{ sku_id: "NK-010", field: "wholesale", to: 2 }] });
     const row = rowOf(await detailOf(staff, "MM-D01", TODAY), "NK-010");
     expect([row.stock_in, row.wholesale]).toEqual([7, 2]);
     expect(row.closing_qty).toBe(row.opening_qty + 7 - row.retail_sale - 2);
@@ -188,7 +191,7 @@ describe("daily cycle", () => {
   it("refuses a sale larger than the stock with NEGATIVE_CLOSING", async () => {
     const staff = await asStaff("B-MM");
     const row = rowOf(await detailOf(staff, "MM-D01", TODAY), "GB-001");
-    const res = await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, rows: [{ sku_id: "GB-001", retail_sale: row.closing_qty + row.retail_sale + 1 }] });
+    const res = await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, changes: [{ sku_id: "GB-001", field: "retail_sale", to: row.closing_qty + row.retail_sale + 1 }] });
     expect(res.status).toBe(409);
     expect(res.json.code).toBe("NEGATIVE_CLOSING");
   });
@@ -196,10 +199,10 @@ describe("daily cycle", () => {
   it("rejects bad quantities and unknown rows", async () => {
     const staff = await asStaff("B-MM");
     for (const bad of [-1, 1.5, "x"]) {
-      const res = await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, rows: [{ sku_id: "GB-001", retail_sale: bad }] });
+      const res = await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, changes: [{ sku_id: "GB-001", field: "retail_sale", to: bad }] });
       expect(res.status).toBe(400);
     }
-    expect((await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, rows: [{ sku_id: "SP-904", stock_in: 1 }] })).status).toBe(400);
+    expect((await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, changes: [{ sku_id: "SP-904", field: "stock_in", to: 1 }] })).status).toBe(400);
   });
 
   it("only an empty row can be removed from the day", async () => {
@@ -254,13 +257,58 @@ describe("admin reopen", () => {
     expect((await call(admin, "POST", `/stock/desk/${desk}/transition`, { date: YESTERDAY, toStatus: "final_stock" })).status).toBe(200);
     await call(admin, "POST", `/stock/desk/${desk}/entries`, {
       date: YESTERDAY,
-      rows: [{ sku_id: "BR-020", counted_qty: openingBefore - 2, counted_note: "recount" }],
+      changes: [
+        { sku_id: "BR-020", field: "counted_qty", to: openingBefore - 2 },
+        { sku_id: "BR-020", field: "counted_note", to: "recount" },
+      ],
     });
     expect((await call(admin, "POST", `/stock/desk/${desk}/transition`, { date: YESTERDAY, toStatus: "done" })).status).toBe(200);
     expect(rowOf(await detailOf(staff, desk, TODAY), "BR-020").opening_qty).toBe(openingBefore - 2);
 
     const log = (await call(admin, "GET", "/audit")).json.entries;
     expect(log.find((e: any) => e.action === "desk_day.reopen")).toMatchObject({ target: `${desk}/${YESTERDAY}`, detail: { reason: "wrong count" } });
+  });
+
+  // Re-closing yesterday with a lower count lowers today's opening. If today has
+  // already sold that stock, the close must be refused whole, not left half done.
+  const reopenAndRecount = async (admin: any, desk: string, sku: string, counted: number) => {
+    expect((await call(admin, "POST", `/stock/desk/${desk}/reopen`, { date: YESTERDAY, reason: "wrong count" })).status).toBe(200);
+    const res = await call(admin, "POST", `/stock/desk/${desk}/entries`, { date: YESTERDAY, changes: [{ sku_id: sku, field: "counted_qty", to: counted }, { sku_id: sku, field: "counted_note", to: "recount" }] });
+    expect(res.status).toBe(200);
+    return call(admin, "POST", `/stock/desk/${desk}/close`, { date: YESTERDAY });
+  };
+
+  it("refuses re-closing a day whose lower count would push the next day negative, and writes nothing", async () => {
+    const admin = await asAdmin();
+    const staff = await asStaff("B-MM");
+    const desk = "MM-D02";
+    await call(staff, "POST", `/stock/desk/${desk}/checkin`, { date: TODAY });
+    const open = rowOf(await detailOf(staff, desk, TODAY), "BR-020");
+    expect(open.opening_qty).toBeGreaterThanOrEqual(3);
+    // Today sells everything it opened with.
+    expect((await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "BR-020", field: "retail_sale", to: open.opening_qty }] })).status).toBe(200);
+
+    const res = await reopenAndRecount(admin, desk, "BR-020", open.opening_qty - 2);
+    expect(res.status).toBe(409);
+    expect(res.json.code).toBe("NEXT_DAY_NEGATIVE");
+    expect(res.json).toMatchObject({ sku_id: "BR-020", date: TODAY, available: 0 });
+    expect((await detailOf(admin, desk, YESTERDAY)).status).not.toBe("done");
+    expect(rowOf(await detailOf(staff, desk, TODAY), "BR-020").opening_qty).toBe(open.opening_qty);
+  });
+
+  it("closes fine when the lower count keeps the next day non-negative, and today's opening follows", async () => {
+    const admin = await asAdmin();
+    const staff = await asStaff("B-MM");
+    const desk = "MM-D02";
+    await call(staff, "POST", `/stock/desk/${desk}/checkin`, { date: TODAY });
+    const open = rowOf(await detailOf(staff, desk, TODAY), "BR-020");
+    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "BR-020", field: "stock_in", to: 5 }] });
+    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "BR-020", field: "retail_sale", to: open.opening_qty }] });
+
+    const res = await reopenAndRecount(admin, desk, "BR-020", open.opening_qty - 2);
+    expect(res.status).toBe(200);
+    expect((await detailOf(admin, desk, YESTERDAY)).status).toBe("done");
+    expect(rowOf(await detailOf(staff, desk, TODAY), "BR-020").opening_qty).toBe(open.opening_qty - 2);
   });
 });
 
@@ -585,9 +633,30 @@ describe("compare-and-set entries, counts any time, one-step close", () => {
     expect(res.status).toBe(409);
     expect(res.json.code).toBe("NEGATIVE_CLOSING");
     expect(res.json.available).toBe(row.closing_qty);
-    // the legacy body reports it the same way
-    const legacy = await entries(staff, { rows: [{ sku_id: "GB-001", retail_sale: row.retail_sale + row.closing_qty + 1 }] });
-    expect(legacy.json.available).toBe(row.closing_qty);
+  });
+
+  it("the legacy rows body is gone: USE_CHANGES", async () => {
+    const staff = await asStaff("B-MM");
+    const res = await entries(staff, { rows: [{ sku_id: "GB-001", retail_sale: 1 }] });
+    expect(res.status).toBe(400);
+    expect(res.json.code).toBe("USE_CHANGES");
+    // a body with neither form is refused the same way
+    expect((await entries(staff, {})).json.code).toBe("USE_CHANGES");
+  });
+
+  it("two changes to the same field of one SKU in one request get DUPLICATE_FIELD", async () => {
+    const staff = await asStaff("B-MM");
+    const before = rowOf(await detailOf(staff, "MM-D01", TODAY), "NK-010");
+    const res = await entries(staff, {
+      changes: [
+        { sku_id: "NK-010", field: "stock_in", to: 1 },
+        { sku_id: "NK-010", field: "stock_in", to: 2 },
+      ],
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.code).toBe("DUPLICATE_FIELD");
+    expect(res.json).toMatchObject({ sku_id: "NK-010", field: "stock_in" });
+    expect(rowOf(await detailOf(staff, "MM-D01", TODAY), "NK-010").stock_in).toBe(before.stock_in);
   });
 
   it("validates fields, quantities and rows of a change", async () => {
@@ -697,14 +766,14 @@ describe("data mode and /api/meta (Task 18)", () => {
     expect(list.json.accounts.map((a: any) => a.id)).toContain(DEMO_STAFF["B-MM"]);
     const meta = await call(null, "GET", "/meta", undefined, TODAY, { KPV_DATA_MODE: "test" });
     expect(meta.status).toBe(200);
-    expect(meta.json).toEqual({ dataMode: "test", seedRows: 0 });
+    expect(meta.json).toEqual({ dataMode: "test", seedRows: null });
   });
 
   it("defaults to demo without Supabase", async () => {
     expect((await call(null, "GET", "/meta")).json.dataMode).toBe("demo");
   });
 
-  it("admin meta reports seedRows > 0 when seed rows exist; others see 0", async () => {
+  it("admin meta reports seedRows > 0 when seed rows exist; others see null (unknown)", async () => {
     seedStaff();
     const admin = await asAdmin();
     const staff = await asStaff("B-TS");
@@ -712,7 +781,24 @@ describe("data mode and /api/meta (Task 18)", () => {
     const a = await call(admin, "GET", "/meta", undefined, TODAY, env);
     expect(a.json.dataMode).toBe("test");
     expect(a.json.seedRows).toBeGreaterThan(0);
-    expect((await call(staff, "GET", "/meta", undefined, TODAY, env)).json.seedRows).toBe(0);
+    expect((await call(staff, "GET", "/meta", undefined, TODAY, env)).json.seedRows).toBeNull();
+    expect((await call(null, "GET", "/meta", undefined, TODAY, env)).json.seedRows).toBeNull();
+  });
+
+  it("refuses a transfer or move between a real case and a mock case (MIXED_TEST_TRANSFER)", async () => {
+    const staff = await asStaff("B-MM"); // first request builds the demo store for TODAY
+    db().desks.find((d: any) => d.desk_id === "TS-D02").is_seed = true;
+    const sent = await call(staff, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "TS-D02", skuId: "GB-001", qty: 1 });
+    expect(sent.status).toBe(400);
+    expect(sent.json.code).toBe("MIXED_TEST_TRANSFER");
+    // nothing left the sender
+    expect(rowOf(await detailOf(staff, "MM-D01", TODAY), "GB-001").transfer_out).toBe(0);
+
+    // a real desk of the same branch marked as mock: a move is refused too
+    db().desks.find((d: any) => d.desk_id === "MM-D03").is_seed = true;
+    const moved = await call(staff, "POST", "/moves", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "MM-D03", lines: [{ skuId: "GB-001", qty: 1 }], clientRef: "00000000-0000-4000-8000-0000000000bb" });
+    expect(moved.status).toBe(400);
+    expect(moved.json.code).toBe("MIXED_TEST_TRANSFER");
   });
 
   it("the signed-in screen data moved to /app-meta", async () => {

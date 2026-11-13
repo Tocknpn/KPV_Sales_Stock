@@ -8,7 +8,7 @@ import { requireManager, assertBranchAccess, isManagerOf } from "../auth";
 import { addDays, businessDate, datesInMonth, isValidMonth, laosDate } from "../time";
 import { buildDayStatus } from "../dayStatus";
 import { loadBranchStatuses } from "../replenishment";
-import { buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, parseQty, validateDeskDay } from "../logic";
+import { buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, computeClosing, parseQty, validateDeskDay } from "../logic";
 import type { Desk, DeskDay, LedgerRow, MasterSku, SessionUser, StaffAccount, Transfer } from "../types";
 
 // Mounted behind requireAuth in src/index.ts.
@@ -38,7 +38,7 @@ function hasActivity(row: LedgerRow) {
 
 // Hands a closed day's stock to the following day: each SKU opens with what
 // was physically counted (or the calculated closing when there was no count).
-async function carryForward(store: Store, from: DeskDay, toDate: string, actor: string) {
+async function planCarry(store: Store, from: DeskDay, toDate: string, actor: string) {
   const [fromRows, toRows] = await Promise.all([
     store.ledger({ deskId: from.desk_id, date: from.ledger_date }),
     store.ledger({ deskId: from.desk_id, date: toDate }),
@@ -46,14 +46,24 @@ async function carryForward(store: Store, from: DeskDay, toDate: string, actor: 
   const existing = new Map(toRows.map((row) => [row.sku_id, row]));
   const inserts: NewLedgerRow[] = [];
   const patches: LedgerRowPatch[] = [];
+  // The next day's rows whose opening changes, with the closing they would get.
+  const reopenings: { row: LedgerRow; closing: number }[] = [];
   for (const row of fromRows) {
     if (row.excluded) continue;
     const opening = Math.max(0, carryQty(row));
     const target = existing.get(row.sku_id);
     const key = { ledger_date: toDate, desk_id: from.desk_id, sku_id: row.sku_id, branch_id: from.branch_id };
     if (!target) inserts.push({ ...key, opening_qty: opening, performed_by: actor });
-    else if (target.opening_qty !== opening) patches.push({ ...key, opening_qty: opening });
+    else if (target.opening_qty !== opening) {
+      patches.push({ ...key, opening_qty: opening });
+      reopenings.push({ row: target, closing: computeClosing({ ...target, opening_qty: opening }) });
+    }
   }
+  return { inserts, patches, reopenings };
+}
+
+async function carryForward(store: Store, from: DeskDay, toDate: string, actor: string) {
+  const { inserts, patches } = await planCarry(store, from, toDate, actor);
   await store.insertLedgerRows(inserts, { overwriteOpening: true });
   await store.patchLedgerRows(patches);
 }
@@ -73,6 +83,26 @@ async function closeDeskDay(store: Store, user: SessionUser, desk: Desk, date: s
   if (failures.length > 0) {
     throw new HttpError(422, "This desk cannot be closed yet", "DAY_INCOMPLETE", { failures });
   }
+  // If the following day is already open (this day was reopened and closed
+  // again), its opening balances follow the corrected count. Check that the new
+  // openings keep that day non-negative BEFORE marking this day Done, so a
+  // refusal leaves nothing half written. Same rule as the database's negative
+  // guard: a row may not end below 0, nor drop further when already below 0.
+  const [next] = await store.deskDays({ deskId: desk.desk_id, after: date, order: "asc", limit: 1 });
+  const nextOpen = next && next.status !== "done" ? next : undefined;
+  if (nextOpen) {
+    const plan = await planCarry(store, day, nextOpen.ledger_date, user.accountId);
+    for (const { row, closing } of plan.reopenings) {
+      if (closing < 0 && closing < row.closing_qty) {
+        throw new HttpError(409, `The next day (${nextOpen.ledger_date}) would go negative for ${row.sku_id}`, "NEXT_DAY_NEGATIVE", {
+          sku_id: row.sku_id,
+          date: nextOpen.ledger_date,
+          available: Math.max(row.closing_qty, 0),
+        });
+      }
+    }
+  }
+
   const updated = await store.updateDeskDay(
     desk.desk_id,
     date,
@@ -80,11 +110,7 @@ async function closeDeskDay(store: Store, user: SessionUser, desk: Desk, date: s
     day.status
   );
   if (!updated) throw new HttpError(409, "This desk was changed on another device — reload", "STALE");
-
-  // If the following day is already open (this day was reopened and closed
-  // again), its opening balances follow the corrected count.
-  const [next] = await store.deskDays({ deskId: desk.desk_id, after: date, order: "asc", limit: 1 });
-  if (next && next.status !== "done") await carryForward(store, updated, next.ledger_date, user.accountId);
+  if (nextOpen) await carryForward(store, updated, nextOpen.ledger_date, user.accountId);
 }
 
 // ---------------------------------------------------------------------------
@@ -360,8 +386,6 @@ r.post("/stock/desk/:deskId/checkin", async (c) => {
 // editing different things never overwrite each other. Transfer-out, Move and
 // incoming transfers are not typed here — see routes/transfers.ts.
 // ---------------------------------------------------------------------------
-const QTY_FIELDS = ["stock_in", "retail_sale", "wholesale", "destock"] as const;
-
 const parseCount = (v: unknown) => (v === null || v === "" ? null : parseQty(v));
 
 // One compare-and-set change: {sku_id, field, from?, to}. `from` omitted means
@@ -405,7 +429,12 @@ r.post("/stock/desk/:deskId/entries", async (c) => {
     for (const item of body.changes) {
       const { sku_id, change } = parseChange(item);
       if (!known.has(sku_id)) throw unknownSku(sku_id);
-      bySku.set(sku_id, [...(bySku.get(sku_id) ?? []), change]);
+      const list = bySku.get(sku_id) ?? [];
+      // Two assignments to one column would make the generated SQL repeat it (42601).
+      if (list.some((x) => x.field === change.field)) {
+        throw new HttpError(400, `Field ${change.field} appears twice for ${sku_id}`, "DUPLICATE_FIELD", { sku_id, field: change.field });
+      }
+      bySku.set(sku_id, [...list, change]);
     }
     const rows: LedgerRow[] = [];
     for (const [sku_id, changes] of bySku) {
@@ -420,43 +449,9 @@ r.post("/stock/desk/:deskId/entries", async (c) => {
     return c.json({ ok: true, rows });
   }
 
-  // Legacy form: last write wins, only the fields sent are changed.
-  const items: Record<string, any>[] = Array.isArray(body.rows) ? body.rows : [];
-  const patches: LedgerRowPatch[] = [];
-  for (const item of items) {
-    const skuId = String(item?.sku_id ?? "");
-    if (!known.has(skuId)) throw unknownSku(skuId);
-    const patch: LedgerRowPatch = { ledger_date: date, desk_id: desk.desk_id, sku_id: skuId, branch_id: desk.branch_id };
-    let changed = false;
-    for (const field of QTY_FIELDS) {
-      if (item[field] === undefined) continue;
-      const qty = parseQty(item[field]);
-      if (qty === null) throw new HttpError(400, `${field} must be a whole number, 0 or more`, "BAD_QTY", { sku_id: skuId, field });
-      patch[field] = qty;
-      changed = true;
-    }
-    if (item.destock_note !== undefined) {
-      patch.destock_note = item.destock_note ? String(item.destock_note).slice(0, 200) : null;
-      changed = true;
-    }
-    if (item.counted_qty !== undefined) {
-      const counted = parseCount(item.counted_qty);
-      if (counted === null && item.counted_qty !== null && item.counted_qty !== "") {
-        throw new HttpError(400, "Count must be a whole number, 0 or more", "BAD_QTY", { sku_id: skuId, field: "counted_qty" });
-      }
-      patch.counted_qty = counted;
-      changed = true;
-    }
-    if (item.counted_note !== undefined) {
-      patch.counted_note = item.counted_note ? String(item.counted_note).slice(0, 200) : null;
-      changed = true;
-    }
-    if (changed) patches.push({ ...patch, performed_by: user.accountId });
-  }
-
-  await store.patchLedgerRows(patches);
-  await saveNote();
-  return c.json({ ok: true, saved: patches.length });
+  // The old last-write-wins `rows` body is gone: its partial upsert fires the
+  // database's BEFORE INSERT negative guard on the proposed row. Use `changes`.
+  throw new HttpError(400, "Send the entries as changes: [{sku_id, field, from, to}]", "USE_CHANGES");
 });
 
 // ---------------------------------------------------------------------------

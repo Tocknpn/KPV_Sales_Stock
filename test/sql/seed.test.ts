@@ -215,6 +215,29 @@ describe('purge_seed_data.sql', () => {
     expect((await one<{ n: number }>(db, `select count(*)::int n from audit_log where action = 'real.entry'`)).n).toBe(1);
   });
 
+  it('PURGE_MIXED_TRANSFER: a transfer between a real and a mock case stops the whole purge', async () => {
+    await realRows();
+    await runSeed(db);
+    await db.query(
+      `insert into transfers (kind, from_desk_id, from_branch_id, to_desk_id, to_branch_id, sku_id, qty, sent_date, status)
+       values ('transfer', 'R-1', 'B-REAL', 'T1-1', 'B-TST1', 'RING-1', 2, kpv_today() - 1, 'in_transit')`);
+    const before = await counts(db);
+    let message = '';
+    try {
+      await runPurge(db);
+    } catch (e) {
+      message = String((e as Error).message);
+    }
+    expect(message).toContain('PURGE_MIXED_TRANSFER');
+    expect(message).toContain('R-1');
+    expect(message).toContain('T1-1');
+    expect(message).toContain('RING-1');
+    expect(message).toContain('in_transit');
+    // nothing was deleted
+    expect(await counts(db)).toEqual(before);
+    expect((await one<{ n: number }>(db, `select count(*)::int n from transfers where from_desk_id = 'R-1'`)).n).toBe(1);
+  });
+
   it('purge is safe to run twice, and the seed can load again afterwards', async () => {
     await realRows();
     await runSeed(db);

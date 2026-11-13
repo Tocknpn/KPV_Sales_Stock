@@ -51,7 +51,7 @@ export async function countEverything(session: Session, deskId: string, date: st
   const detail = (await call(session, "GET", `/stock/desk/${deskId}?date=${date}`)).json;
   return call(session, "POST", `/stock/desk/${deskId}/entries`, {
     date,
-    rows: detail.rows.map((r: any) => ({ sku_id: r.sku_id, counted_qty: r.closing_qty })),
+    changes: detail.rows.map((r: any) => ({ sku_id: r.sku_id, field: "counted_qty", to: r.closing_qty })),
   });
 }
 

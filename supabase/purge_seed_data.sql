@@ -7,6 +7,8 @@
 --   2. In ONE atomic DO block: turns the purge allowances on for this
 --      transaction only, deletes every is_seed row child-first, and removes
 --      references from real rows to seed staff (see below).
+--      Before deleting anything it refuses (PURGE_MIXED_TRANSFER, everything
+--      rolls back) if a transfer links a real case with a mock case.
 --   3. Asserts every seed count is 0 and that each table has exactly as many
 --      real rows as before; otherwise it raises and EVERYTHING rolls back.
 --   4. Writes one permanent audit entry "seed.purge" with the counts.
@@ -51,6 +53,21 @@ begin
     select unnest(v_tables) as x except select unnest(c_order)) m;
   if v_bad is not null then
     raise exception 'PURGE_TABLE_MISSING: add % to purge_seed_data.sql', v_bad using errcode = 'P0001';
+  end if;
+
+  -- A transfer between a real case and a mock case would be purged with the
+  -- mock side and strand the real side's ledger. Refuse before anything is
+  -- deleted; resolve each one by hand (receive/cancel it, or correct the real
+  -- ledger), then run the purge again.
+  select string_agg(format('%s -> %s sku %s qty %s (%s)', x.from_desk_id, x.to_desk_id, x.sku_id, x.qty, x.status), '; ' order by x.sent_date, x.from_desk_id)
+    into v_bad
+    from transfers x
+    join desks f on f.desk_id = x.from_desk_id
+    join desks d on d.desk_id = x.to_desk_id
+   where f.is_seed is distinct from d.is_seed;
+  if v_bad is not null then
+    raise exception 'PURGE_MIXED_TRANSFER: resolve these real<->mock transfers by hand, then run the purge again: %', v_bad
+      using errcode = 'P0001';
   end if;
 
   select jsonb_object_agg(table_name, real_rows) into v_before from kpv_seed_counts();

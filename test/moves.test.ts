@@ -82,7 +82,7 @@ describe("moves", () => {
     const staff = await asStaff("B-MM");
     const moved = await call(staff, "POST", "/moves", body({ lines: [{ skuId: "GB-001", qty: 2 }] }));
     expect(moved.status).toBe(200);
-    expect((await call(staff, "POST", "/stock/desk/MM-D02/entries", { date: TODAY, rows: [{ sku_id: "GB-001", retail_sale: 2 }] })).status).toBe(200);
+    expect((await call(staff, "POST", "/stock/desk/MM-D02/entries", { date: TODAY, changes: [{ sku_id: "GB-001", field: "retail_sale", to: 2 }] })).status).toBe(200);
     const a = await detailOf(staff, "MM-D01");
     const b = await detailOf(staff, "MM-D02");
     const res = await call(staff, "POST", `/moves/${moved.json.ticketId}/undo`, { clientRef: ref() });

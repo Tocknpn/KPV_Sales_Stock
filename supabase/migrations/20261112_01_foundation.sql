@@ -143,6 +143,10 @@ create trigger trg_desk_days_guard_future before insert on desk_days
 
 -- ---------------------------------------------------------------------------
 -- Done lock, purge-aware: seed rows may be deleted while kpv.purging = 'on'.
+-- NOTE: migration 07 (20261112_07_seed_tools.sql) REDEFINES ledger_guard_done.
+-- Re-running only this file would silently put back this older body. On an
+-- existing project always re-run the whole sequence 01 -> 07, then
+-- users_roles.sql, never a single earlier file.
 -- ---------------------------------------------------------------------------
 create or replace function ledger_guard_done() returns trigger
 language plpgsql as $$

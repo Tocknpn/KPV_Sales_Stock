@@ -8,7 +8,8 @@ import { dataMode } from "../dataMode";
 const r = newRouter();
 
 r.get("/meta", async (c) => {
-  const body = { dataMode: dataMode(c.env), seedRows: 0 };
+  // null = unknown: only an authenticated admin is told how many mock rows remain.
+  const body: { dataMode: ReturnType<typeof dataMode>; seedRows: number | null } = { dataMode: dataMode(c.env), seedRows: null };
   const header = c.req.header("Authorization") || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
   const payload = token ? await verifyToken(token, authSecret(c.env)) : null;

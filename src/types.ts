@@ -12,6 +12,7 @@ export interface Desk {
   active: boolean;
   sort_order: number;
   created_at: string;
+  is_seed?: boolean;
 }
 
 // master_sku.category is a free-text mirror of sku_type.name_en, kept so

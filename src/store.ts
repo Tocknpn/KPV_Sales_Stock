@@ -1257,6 +1257,12 @@ class SupabaseStore implements Store {
   }
   async patchLedgerRows(patches: LedgerRowPatch[]) {
     if (patches.length === 0) return [];
+    // WARNING: partial upserts must never carry outflow fields (retail_sale,
+    // wholesale, destock, transfer_out, move, stock_in ...). INSERT ... ON
+    // CONFLICT fires the BEFORE INSERT negative guard on the proposed row, which
+    // for such a patch is a row with zero opening, so it is refused even when
+    // the stored row would stay non-negative. Entries go through
+    // applyLedgerChanges (ledger_apply); this is for opening_qty / excluded only.
     // A bulk upsert writes exactly the columns in the payload, so rows are
     // grouped by which fields they change: each group is one request and no
     // row has a field overwritten that its own patch did not carry.

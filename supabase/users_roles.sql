@@ -2,10 +2,12 @@
 -- KPV Stock v2 -- roles, permission guards and lockdown.
 --
 -- Purpose: adds the 'manager' (branch manager) role, enforces who may do what
--- INSIDE the database (so a bug or a stolen service key in the Worker cannot
--- widen anyone's permissions), and shuts the public API (anon / authenticated)
--- out of every table and function. The Worker is the only client and uses the
--- service_role key.
+-- INSIDE the database (so a Worker bug or a forgotten check cannot widen
+-- anyone's permissions), and shuts the public API (anon / authenticated) out of
+-- every table and function. The Worker is the only client and uses the
+-- service_role key. These guards do NOT protect against a leaked service-role
+-- key: actor UUIDs are public (/api/auth/accounts lists them), so whoever holds
+-- the key can claim any actor. Keep that key secret.
 --
 -- Run order (fresh project):
 --   schema.sql -> migrations/* (name order) -> users_roles.sql -> base.sql

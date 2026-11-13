@@ -82,7 +82,6 @@ export const api = {
   deskDetail: (deskId, date) => request(`/stock/desk/${deskId}?${query({ date })}`),
   calendar: (branchId, month) => request(`/stock/calendar?${query({ branchId, month })}`),
   checkIn: (deskId, date) => post(`/stock/desk/${deskId}/checkin`, { date }),
-  saveEntries: (deskId, payload) => post(`/stock/desk/${deskId}/entries`, payload),
   // Compare-and-set save: changes = [{sku_id, field, from?, to}].
   saveChanges: (deskId, payload) => post(`/stock/desk/${deskId}/entries`, payload),
   closeDay: (deskId, payload) => post(`/stock/desk/${deskId}/close`, payload),

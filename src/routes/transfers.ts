@@ -7,6 +7,7 @@
 import { storeFor, newRouter, readBody, HttpError, scopeBranch, requireDesk, requireDate, requireOpenDay } from "../app";
 import { assertBranchAccess } from "../auth";
 import { businessDate } from "../time";
+import { mixedTestEnds } from "../dataMode";
 import { computeClosing, parseQty } from "../logic";
 
 const r = newRouter();
@@ -57,6 +58,7 @@ r.post("/transfers", async (c) => {
   if (to.desk_id === from.desk_id) throw new HttpError(400, "Destination must be a different desk", "SAME_DESK");
   // Same-branch hand-overs are instant and all-or-nothing: see routes/moves.ts.
   if (to.branch_id === from.branch_id) throw new HttpError(400, "Use a Move for a case in the same branch", "USE_MOVE");
+  if (mixedTestEnds(from, to)) throw new HttpError(400, "Do not move gold between a real case and a test-data case", "MIXED_TEST_TRANSFER");
 
   const qty = parseQty(body.qty);
   if (qty === null || qty === 0) throw new HttpError(400, "Quantity must be a whole number above 0", "BAD_QTY");

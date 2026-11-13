@@ -7,6 +7,7 @@ import { storeFor, newRouter, readBody, HttpError, requireDesk, requireDate, req
 import { assertBranchAccess } from "../auth";
 import { businessDate } from "../time";
 import { parseQty } from "../logic";
+import { mixedTestEnds } from "../dataMode";
 import { checkInDesk } from "./stock";
 import type { MoveResult } from "../store";
 
@@ -77,6 +78,7 @@ r.post("/moves", async (c) => {
   if (!to || !to.active) throw new HttpError(400, "Unknown destination desk", "BAD_DESTINATION");
   if (to.desk_id === from.desk_id) throw new HttpError(400, REFUSAL_TEXT.SAME_DESK, "SAME_DESK");
   if (to.branch_id !== from.branch_id) throw new HttpError(400, REFUSAL_TEXT.OTHER_BRANCH, "OTHER_BRANCH");
+  if (mixedTestEnds(from, to)) throw new HttpError(400, "Do not move gold between a real case and a test-data case", "MIXED_TEST_TRANSFER");
 
   await requireOpenDay(store, user, from.desk_id, date, today);
   const note = body.note ? String(body.note).slice(0, 200) : undefined;

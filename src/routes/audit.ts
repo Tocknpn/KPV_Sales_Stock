@@ -6,6 +6,7 @@
 // Mounted behind requireAuth in src/index.ts.
 import { storeFor, newRouter, HttpError, requireDesk } from "../app";
 import { businessDate, addDays, isValidDate } from "../time";
+import { parseAuditCursor, UUID_RE, SCOPE_ID_RE } from "../auditParams";
 
 const r = newRouter();
 
@@ -31,11 +32,14 @@ r.get("/audit", async (c) => {
   const cursor = q("before");
   let before: { createdAt: string; id: string } | undefined;
   if (cursor !== undefined) {
-    const at = cursor.lastIndexOf("|");
-    const createdAt = cursor.slice(0, at);
-    const id = cursor.slice(at + 1);
-    if (at < 1 || !id || Number.isNaN(Date.parse(createdAt))) throw new HttpError(400, "Invalid cursor", "BAD_CURSOR");
-    before = { createdAt, id };
+    const parsed = parseAuditCursor(cursor);
+    if (!parsed) throw new HttpError(400, "Invalid cursor", "BAD_CURSOR");
+    before = parsed;
+  }
+  // These reach a PostgREST filter string: refuse anything but a plain id.
+  if (actorId !== undefined && !UUID_RE.test(actorId)) throw new HttpError(400, "Invalid filter", "BAD_FILTER");
+  for (const v of [deskId, branchId]) {
+    if (v !== undefined && !SCOPE_ID_RE.test(v)) throw new HttpError(400, "Invalid filter", "BAD_FILTER");
   }
 
   for (const d of [from, to]) {

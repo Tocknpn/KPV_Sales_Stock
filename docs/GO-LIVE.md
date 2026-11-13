@@ -57,8 +57,11 @@ skip to section 2.)
 - The mock data creates a company-wide replenishment rule for the group
   **"Snake Necklace"**. If your real SKUs use that group name, the rule applies
   to them until the purge.
-- A real transfer into a mock case is purged with the mock data. Do not test
-  cross-branch transfers between real and mock cases.
+- Never move gold between a real case and a mock case. The app refuses it
+  (`MIXED_TEST_TRANSFER`), and the purge refuses to run (`PURGE_MIXED_TRANSFER`,
+  nothing is deleted) if such a transfer already exists, listing each one so you
+  can resolve it by hand (receive or cancel it, or correct the real ledger) and
+  run the purge again.
 
 ## 2. An existing live project (before deploying v2)
 
@@ -81,7 +84,16 @@ Do these in order, **before** the new code is deployed.
    Fix every row (correct the count or the entry in the old app). After v2 such
    a row can only be corrected, never pushed further down.
 3. Run `supabase/migrations/20261112_01_foundation.sql` to `20261112_07_seed_tools.sql`
-   in name order, then `supabase/users_roles.sql`. All are safe to run twice.
+   in name order, then `supabase/users_roles.sql`. All are safe to run twice, but
+   always re-run the **whole** sequence 01 to 07 and then `users_roles.sql`,
+   never a single earlier file (migration 07 redefines a function that
+   migration 01 also defines).
+
+   > **Warning: the old (v1) app stops saving as soon as these migrations have
+   > run.** Every write it makes fails with `AUDIT_ACTOR_MISSING` or
+   > `ROLE_DENIED`, including PIN lockouts. Nobody may use the app between
+   > running the migrations and deploying v2. Deploy v2 (section 3) immediately
+   > after the migrations.
 4. **Re-run `supabase/users_roles.sql` after any future migration**, so new
    tables and functions are locked down too.
 5. Do not run `seed_mock_data.sql` on a project holding real data unless you
@@ -123,9 +135,13 @@ is configured.
    run the printed SQL. This is the only account made by hand.
 3. Set `KPV_DATA_MODE=production` in Cloudflare and redeploy (or save the
    variable; a new version is deployed).
-4. Open `https://<your worker>/api/meta` signed in as the admin (or look at the
-   strip on screen): it must show `dataMode: "production"` and `seedRows: 0`.
-   A red strip means mock rows remain: run the purge again.
+4. Check that no mock rows remain. The primary check is on screen: sign in as
+   the admin and reload; the **red strip must be absent**. Or, in the SQL
+   editor, run `select * from kpv_seed_counts();`: every `seed_rows` must be 0.
+   (`/api/meta` shows `dataMode: "production"` to everyone, but `seedRows` is
+   `null`, meaning unknown, unless an admin is signed in, so an anonymous call
+   proves nothing.) A red strip or a non-zero count means mock rows remain: run
+   the purge again.
 5. Log in as the admin and load real data:
    - **Settings, Gold price**: gold price per Baht and the USD rate.
    - **Settings, SKU**: check types and sizes, then **Import CSV** (template
