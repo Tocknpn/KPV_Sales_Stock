@@ -116,7 +116,7 @@ export const api = {
 
   createUser: (payload) => post(`/users`, payload),
   updateUser: (id, payload) => patch(`/users/${id}`, payload),
-  audit: (limit = 50) => request(`/audit?limit=${limit}`),
+  audit: (params) => request(`/audit?${query(params ?? {})}`),
 
   myCases: (branchId) => request(`/my-cases?${query({ branchId })}`),
   assignDesk: (deskId, staffId, note) => post(`/desks/${encodeURIComponent(deskId)}/assign`, { staffId, note }),

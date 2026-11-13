@@ -9,7 +9,7 @@ import { addDays, businessDate, datesInMonth, isValidMonth, laosDate } from "../
 import { buildDayStatus } from "../dayStatus";
 import { loadBranchStatuses } from "../replenishment";
 import { buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, parseQty, validateDeskDay } from "../logic";
-import type { Desk, DeskDay, LedgerRow, SessionUser } from "../types";
+import type { Desk, DeskDay, LedgerRow, MasterSku, SessionUser, StaffAccount, Transfer } from "../types";
 
 // Mounted behind requireAuth in src/index.ts.
 const r = newRouter();
@@ -212,6 +212,48 @@ r.post("/desks", async (c) => {
 // ---------------------------------------------------------------------------
 // Desk detail
 // ---------------------------------------------------------------------------
+// The same-branch moves touching a case on a date, one item per ticket, for the
+// History tab. canUndo mirrors what POST /moves/:ticketId/undo will accept: the
+// ticket is not undone, is not itself an undo, and neither day is Done.
+async function historyMoves(store: Store, deskId: string, date: string, outgoing: Transfer[], staffAccounts: StaffAccount[], skus: MasterSku[], allDesks: Desk[]) {
+  const incomingToday = await store.transfers({ toDeskId: deskId, sentDate: date });
+  const rows = [...outgoing, ...incomingToday].filter((t) => t.kind === "move" && t.ticket_id && t.status !== "cancelled");
+  const tickets = new Map<string, Transfer[]>();
+  for (const t of rows) {
+    const list = tickets.get(t.ticket_id!) ?? [];
+    if (!list.some((x) => x.id === t.id)) list.push(t);
+    tickets.set(t.ticket_id!, list);
+  }
+  const reversedIds = new Set(rows.map((t) => t.reverses_id).filter(Boolean));
+  const statusOf = async (id: string) => (await store.deskDays({ deskId: id, date, limit: 1 }))[0]?.status;
+  const deskName = (id: string) => {
+    const d = allDesks.find((x) => x.desk_id === id);
+    return d ? `${d.desk_id} · ${d.display_name}` : id;
+  };
+  const out = [];
+  for (const [ticketId, lines] of tickets) {
+    const first = lines[0];
+    const reversal = lines.some((t) => t.reverses_id);
+    const reversed = lines.some((t) => reversedIds.has(t.id));
+    const open = (await statusOf(first.from_desk_id)) !== "done" && (await statusOf(first.to_desk_id)) !== "done";
+    out.push({
+      ticketId,
+      created_at: lines.reduce((m, t) => (t.created_at < m ? t.created_at : m), first.created_at),
+      from_desk_id: first.from_desk_id,
+      to_desk_id: first.to_desk_id,
+      from: deskName(first.from_desk_id),
+      to: deskName(first.to_desk_id),
+      by: staffAccounts.find((a) => a.id === first.sent_by)?.display_name ?? null,
+      note: first.note,
+      reversal,
+      reversed,
+      canUndo: !reversal && !reversed && open,
+      lines: lines.map((t) => ({ sku_id: t.sku_id, name_en: skus.find((s) => s.sku_id === t.sku_id)?.name_en ?? t.sku_id, qty: t.qty })),
+    });
+  }
+  return out.sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
 async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: string, date: string) {
   const desk = await requireDesk(store, user, deskId);
   const [branches, skus, days, ledgerRows, staffAccounts, weights, config, earlier, laterDone, incoming, outgoing, allDesks] = await Promise.all([
@@ -228,6 +270,7 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
     store.transfers({ fromDeskId: deskId, sentDate: date }),
     store.desks(),
   ]);
+  const moves = await historyMoves(store, deskId, date, outgoing, staffAccounts, skus, allDesks);
   const day = days[0];
   const statuses = await loadBranchStatuses(store, [desk.branch_id], businessDate(c.env));
   const detail = buildDeskDetail(desk, branches.find((b) => b.branch_id === desk.branch_id), day, skus, ledgerRows, staffAccounts, config, weights, statuses);
@@ -246,6 +289,7 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
     incoming: incoming
       .filter((t) => t.sent_date <= date)
       .map((t) => ({ id: t.id, kind: t.kind, sku_id: t.sku_id, name_en: skuName(t.sku_id), qty: t.qty, from: deskName(t.from_desk_id), sent_date: t.sent_date })),
+    moves,
     outgoing: outgoing
       .filter((t) => t.status !== "cancelled")
       .map((t) => ({ id: t.id, kind: t.kind, sku_id: t.sku_id, name_en: skuName(t.sku_id), qty: t.qty, to: deskName(t.to_desk_id), status: t.status })),

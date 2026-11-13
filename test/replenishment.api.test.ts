@@ -106,7 +106,7 @@ describe("rules", () => {
   it("every change is audited", async () => {
     const admin = await asAdmin();
     await putRule(admin);
-    const log = await getStore({} as any).auditLog(20);
+    const log = await getStore({} as any).auditLog({ limit: 20 });
     expect(log.some((e) => e.action === "replenishment.rule")).toBe(true);
     expect(log.some((e) => e.table_name === "replenishment_rule" && e.op === "UPDATE")).toBe(true);
   });

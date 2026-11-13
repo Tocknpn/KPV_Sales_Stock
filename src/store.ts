@@ -221,7 +221,20 @@ export interface Store {
   releaseDesk(deskId: string): Promise<void>;
 
   audit(entry: Omit<AuditEntry, "id" | "created_at">): Promise<void>;
-  auditLog(limit: number): Promise<AuditEntry[]>;
+  // Newest first. deskId matches either end of a transfer or move (desk_id or
+  // to_desk_id), branchId likewise. from is inclusive and to exclusive, both
+  // ISO timestamps; before is a created_at cursor (strictly older).
+  auditLog(filter: AuditFilter): Promise<AuditEntry[]>;
+}
+
+export interface AuditFilter {
+  deskId?: string;
+  branchId?: string;
+  from?: string;
+  to?: string;
+  actorId?: string;
+  before?: string;
+  limit: number;
 }
 
 function nextDeskId(branchId: string, existingIds: string[]) {
@@ -283,11 +296,18 @@ export class DemoStore implements Store {
     const actorId = this.actor && "id" in this.actor ? this.actor.id : null;
     const account = actorId ? this.db.staffAccounts.find((a) => a.id === actorId) : undefined;
     const entry = auditEntry(table, op, strip(oldRow), strip(newRow), { actor: this.actor, name: account?.display_name, role: account?.role });
-    if (entry) this.db.audit.unshift({ id: crypto.randomUUID(), created_at: this.now(), ...entry });
+    if (entry) this.db.audit.unshift({ id: crypto.randomUUID(), created_at: this.auditStamp(), ...entry });
   }
 
   private newId(prefix: string) {
     return `${prefix}-${++this.idSeq}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+  // Audit rows get strictly increasing stamps so a created_at cursor never
+  // skips or repeats a row written in the same millisecond.
+  private auditStamp() {
+    const now = Date.now();
+    const last = this.db.audit[0] ? Date.parse(this.db.audit[0].created_at) : 0;
+    return new Date(Math.max(now, last + 1)).toISOString();
   }
   private now() {
     return new Date().toISOString();
@@ -1002,10 +1022,20 @@ export class DemoStore implements Store {
   }
 
   async audit(entry: Omit<AuditEntry, "id" | "created_at">) {
-    this.db.audit.unshift({ id: crypto.randomUUID(), created_at: this.now(), ...entry });
+    this.db.audit.unshift({ id: crypto.randomUUID(), created_at: this.auditStamp(), ...entry });
   }
-  async auditLog(limit: number) {
-    return this.db.audit.slice(0, limit);
+  async auditLog(f: AuditFilter) {
+    return this.db.audit
+      .filter((e) => {
+        if (f.deskId && e.desk_id !== f.deskId && e.to_desk_id !== f.deskId) return false;
+        if (f.branchId && e.branch_id !== f.branchId && e.to_branch_id !== f.branchId) return false;
+        if (f.actorId && e.actor_id !== f.actorId) return false;
+        if (f.from && e.created_at < f.from) return false;
+        if (f.to && e.created_at >= f.to) return false;
+        if (f.before && e.created_at >= f.before) return false;
+        return true;
+      })
+      .slice(0, f.limit);
   }
 }
 
@@ -1421,8 +1451,20 @@ class SupabaseStore implements Store {
   async audit(entry: Omit<AuditEntry, "id" | "created_at">) {
     await this.rest("audit_log", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(entry) });
   }
-  async auditLog(limit: number) {
-    return this.rest<AuditEntry[]>(`audit_log?select=*&order=created_at.desc&limit=${limit}`);
+  async auditLog(f: AuditFilter) {
+    const q = ["select=*", "order=created_at.desc", `limit=${f.limit}`];
+    // A case or branch matches either end of a transfer or move. Two "or"
+    // groups cannot share one query key, so they go inside and=(...).
+    const groups: string[] = [];
+    if (f.deskId) groups.push(`or(desk_id.eq.${enc(f.deskId)},to_desk_id.eq.${enc(f.deskId)})`);
+    if (f.branchId) groups.push(`or(branch_id.eq.${enc(f.branchId)},to_branch_id.eq.${enc(f.branchId)})`);
+    if (groups.length === 1) q.push(`or=${groups[0].slice(2)}`);
+    else if (groups.length > 1) q.push(`and=(${groups.join(",")})`);
+    if (f.actorId) q.push(`actor_id=eq.${enc(f.actorId)}`);
+    if (f.from) q.push(`created_at=gte.${enc(f.from)}`);
+    if (f.to) q.push(`created_at=lt.${enc(f.to)}`);
+    if (f.before) q.push(`created_at=lt.${enc(f.before)}`);
+    return this.rest<AuditEntry[]>(`audit_log?${q.join("&")}`);
   }
 }
 

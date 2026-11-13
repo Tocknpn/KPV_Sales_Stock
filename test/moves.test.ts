@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEMO_STAFF } from "../src/demoData";
 import { getStore } from "../src/store";
-import { TODAY, YESTERDAY, freshApp, call, asAdmin, asStaff } from "./helpers";
+import { TODAY, YESTERDAY, freshApp, call, asAdmin, asStaff, closeDay } from "./helpers";
 
 beforeEach(freshApp);
 
@@ -190,5 +190,35 @@ describe("carry-forward racing a move", () => {
     await store.insertLedgerRows([{ ...key, branch_id: "B-MM", opening_qty: carried, performed_by: DEMO_STAFF["B-MM"] }], { overwriteOpening: true });
     const row = (await store.ledger({ date: TODAY, deskId: "MM-D02" })).find((r) => r.sku_id === "NK-011")!;
     expect(row).toMatchObject({ opening_qty: carried, transfer_in: 1, closing_qty: carried + 1 });
+  });
+});
+
+describe("desk detail moves (History tab)", () => {
+  it("lists a case's moves for the date with canUndo until reversed or Done", async () => {
+    const staff = await asStaff("B-MM");
+    await call(staff, "POST", "/stock/desk/MM-D02/checkin", { date: TODAY });
+    const moved = await call(staff, "POST", "/moves", body({ lines: [{ skuId: "GB-001", qty: 1 }] }));
+    const src = (await detailOf(staff, "MM-D01")).moves;
+    const dst = (await detailOf(staff, "MM-D02")).moves;
+    expect(src).toHaveLength(1);
+    expect(dst).toHaveLength(1);
+    expect(src[0]).toMatchObject({ ticketId: moved.json.ticketId, reversal: false, reversed: false, canUndo: true });
+    expect(src[0].lines).toEqual([expect.objectContaining({ sku_id: "GB-001", qty: 1 })]);
+
+    const undo = await call(staff, "POST", `/moves/${moved.json.ticketId}/undo`, { clientRef: ref() });
+    expect(undo.status).toBe(200);
+    const after = (await detailOf(staff, "MM-D01")).moves;
+    expect(after).toHaveLength(2);
+    expect(after.every((m: any) => m.canUndo === false)).toBe(true);
+    expect(after.find((m: any) => m.ticketId === moved.json.ticketId).reversed).toBe(true);
+    expect(after.filter((m: any) => m.reversal)).toHaveLength(1);
+  });
+
+  it("no Undo once either day is Done", async () => {
+    const staff = await asStaff("B-MM");
+    await call(staff, "POST", "/stock/desk/MM-D02/checkin", { date: TODAY });
+    await call(staff, "POST", "/moves", body());
+    await closeDay(staff, "MM-D02", TODAY);
+    expect((await detailOf(staff, "MM-D01")).moves[0].canUndo).toBe(false);
   });
 });

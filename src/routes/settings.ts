@@ -1,5 +1,5 @@
 // Settings: SKU master data (incl. CSV import), system config,
-// user management and the audit log. Reads are open to every logged-in user;
+// user management. Reads are open to every logged-in user;
 // every change is admin only.
 // Mounted behind requireAuth in src/index.ts.
 import { storeFor, newRouter, readBody, HttpError, audit } from "../app";
@@ -394,11 +394,6 @@ r.patch("/users/:id", requireManager, async (c) => {
   await store.updateStaffAccount(account.id, patch);
   await audit(store, me, "user.update", account.display_name, { id: account.id, changes });
   return c.json({ ok: true });
-});
-
-r.get("/audit", requireAdmin, async (c) => {
-  const limit = Math.min(200, Math.max(1, Math.floor(Number(c.req.query("limit")) || 50)));
-  return c.json({ entries: await storeFor(c).auditLog(limit) });
 });
 
 export default r;

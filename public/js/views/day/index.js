@@ -24,6 +24,10 @@ import {
   openRemoveItemSheet,
 } from "./sheets.js";
 import { openMoveSheet } from "./move-sheet.js";
+import { renderHistory } from "./history.js";
+
+// After Undo on the History tab the day reloads; this brings the tab back.
+let resumeTab = null;
 
 const STOCK_CUTOFF_HOUR = 15;
 const STOCK_CUTOFF_MINUTE = 30;
@@ -89,6 +93,7 @@ export async function mountDay(deskCard, date, hooks = {}) {
     countMode: rows.some((r) => r.counted_qty != null),
     search: "",
     onlyActivity: false,
+    tab: resumeTab ?? "stock",
     collapsed: new Set(),
     problems: new Map(),
     saveState: "",
@@ -97,6 +102,7 @@ export async function mountDay(deskCard, date, hooks = {}) {
     ctx: null,
   };
   S = screen;
+  resumeTab = null;
 
   screen.queue = createSaveQueue({
     deskId: deskCard.desk_id,
@@ -219,6 +225,15 @@ function renderScreen() {
   root.scrollTo({ top: 0 });
   root.innerHTML = `
     <div id="day-screen" class="min-w-0">
+      <div role="tablist" aria-label="${t("day.menu")}" class="mb-3 flex gap-1 rounded-xl bg-gray-100 p-1">
+        ${["stock", "history"]
+          .map(
+            (id) => `<button type="button" role="tab" data-tab="${id}" aria-selected="${S.tab === id}" class="focus-ring tap-target min-w-0 flex-1 rounded-lg px-2 text-sm font-extrabold ${S.tab === id ? "bg-white text-brand-700 shadow-card" : "text-gray-600"}">${t(id === "stock" ? "history.tabStock" : "history.tab")}</button>`
+          )
+          .join("")}
+      </div>
+      <div id="day-history" class="${S.tab === "history" ? "" : "hidden"}"></div>
+      <div id="day-stock" class="${S.tab === "stock" ? "" : "hidden"}">
       <div id="day-notices"></div>
       ${
         S.rows.length
@@ -232,15 +247,46 @@ function renderScreen() {
           : ""
       }
       <div id="day-list" class="flex flex-col gap-3"></div>
+      </div>
     </div>`;
   renderNotices();
   renderList();
+  if (S.tab === "history") showHistory();
 
   const screen = $("#day-screen");
   screen.addEventListener("click", onClick);
   screen.addEventListener("pointerdown", onPointerDown);
   screen.addEventListener("change", onChange);
   screen.addEventListener("input", onInput);
+}
+
+function showHistory() {
+  const screen = S;
+  renderHistory(document.getElementById("day-history"), {
+    deskId: screen.deskCard.desk_id,
+    date: screen.date,
+    detail: screen.detail,
+    onUndone: async () => {
+      resumeTab = "history";
+      await screen.hooks.reload?.();
+    },
+  });
+}
+
+function setTab(tab) {
+  if (!S || S.tab === tab) return;
+  S.tab = tab;
+  document.querySelectorAll("#day-screen [data-tab]").forEach((b) => {
+    const on = b.dataset.tab === tab;
+    b.setAttribute("aria-selected", String(on));
+    b.classList.toggle("bg-white", on);
+    b.classList.toggle("text-brand-700", on);
+    b.classList.toggle("shadow-card", on);
+    b.classList.toggle("text-gray-600", !on);
+  });
+  document.getElementById("day-stock").classList.toggle("hidden", tab !== "stock");
+  document.getElementById("day-history").classList.toggle("hidden", tab !== "history");
+  if (tab === "history") showHistory();
 }
 
 function renderNotices() {
@@ -393,6 +439,8 @@ function renderFooter() {
 // Events
 // ---------------------------------------------------------------------------
 function onClick(e) {
+  const tab = e.target.closest("[data-tab]");
+  if (tab) return setTab(tab.dataset.tab);
   const btn = e.target.closest("[data-act]");
   if (!btn) return;
   // "✓ matches" runs on pointerdown (see onPointerDown); only a keyboard

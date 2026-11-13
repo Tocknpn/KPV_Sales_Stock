@@ -519,7 +519,7 @@ describe("branch manager", () => {
     expect((await call(manager, "POST", "/users", { displayName: "X", branchId: "B-MM", pin: "1111" })).status).toBe(403);
     expect((await call(manager, "PATCH", `/users/${DEMO_STAFF["B-MM"]}`, { pin: "1111" })).status).toBe(403);
     expect((await call(manager, "PATCH", "/skus/GB-001", { active: false })).status).toBe(403);
-    expect((await call(manager, "GET", "/audit")).status).toBe(403);
+    expect((await call(manager, "GET", "/audit?branchId=B-IT")).status).toBe(403);
   });
 
   it("can unlock own-branch staff but nothing else about them", async () => {
