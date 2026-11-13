@@ -1,0 +1,213 @@
+﻿sku_id,name_en,name_lo,type,weight,purity,baht_weight,unit_price_lak,reorder_level,avg_daily_sales,order_lead_time_days,group
+BAR-1G,Gold Bar 1g,ຄຳແທ່ງ 1 g,Gold Bars,1g,99.99%,0.0667,,,,,Gold Bar
+BAR-1S,Gold Bar 1 Salueng,ຄຳແທ່ງ 1 ສະຫຼຶງ,Gold Bars,0.25 Baht,99.99%,0.25,,,,,Gold Bar
+BAR-2S,Gold Bar 2 Salueng,ຄຳແທ່ງ 2 ສະຫຼຶງ,Gold Bars,0.5 Baht,99.99%,0.5,,,,,Gold Bar
+BAR-1B,Gold Bar 1 Baht,ຄຳແທ່ງ 1 ບາດ,Gold Bars,1 Baht,99.99%,1,,,,,Gold Bar
+BAR-2B,Gold Bar 2 Baht,ຄຳແທ່ງ 2 ບາດ,Gold Bars,2 Baht,99.99%,2,,,,,Gold Bar
+BAR-5B,Gold Bar 5 Baht,ຄຳແທ່ງ 5 ບາດ,Gold Bars,,99.99%,5,,,,,Gold Bar
+BAR-10B,Gold Bar 10 Baht,ຄຳແທ່ງ 10 ບາດ,Gold Bars,,99.99%,10,,,,,Gold Bar
+BAR-1000G,Gold Bar 1000g,ຄຳແທ່ງ 1000 g,Gold Bars,1kg,99.99%,66.6667,,,,,Gold Bar
+NUGGET-2B,Gold Nugget 2 Baht,ກ້ອນຄຳ 2 ບາດ,Gold Bars,2 Baht,96.5%,2,,,,,Gold Nugget
+NUGGET-3B,Gold Nugget 3 Baht,ກ້ອນຄຳ 3 ບາດ,Gold Bars,,96.5%,3,,,,,Gold Nugget
+NUGGET-5B,Gold Nugget 5 Baht,ກ້ອນຄຳ 5 ບາດ,Gold Bars,,96.5%,5,,,,,Gold Nugget
+SHEET-1H,Gold Sheet 1 Hun,ແຜ່ນຄຳ 1 ຫຸນ,Gold Bars,,96.5%,0.025,,,,,Gold Sheet
+SHEET-1B,Gold Sheet 1 Baht,ແຜ່ນຄຳ 1 ບາດ,Gold Bars,1 Baht,96.5%,1,,,,,Gold Sheet
+SWISS-1000G,Swiss Gold Bar 1000g,ຄຳແທ່ງສະວິດ 1000 g,Gold Bars,1kg,99.99%,66.6667,,,,,Swiss Gold Bar
+NECK-1S,Necklace 1 Salueng,ສາຍຄໍ 1 ສະຫຼຶງ,Necklaces,0.25 Baht,96.5%,0.25,,,,,Necklace
+NECK-2S,Necklace 2 Salueng,ສາຍຄໍ 2 ສະຫຼຶງ,Necklaces,0.5 Baht,96.5%,0.5,,,,,Necklace
+NECK-1B,Necklace 1 Baht,ສາຍຄໍ 1 ບາດ,Necklaces,1 Baht,96.5%,1,,,,,Necklace
+NECK-1_5B,Necklace 1.5 Baht,ສາຍຄໍ 1.5 ບາດ,Necklaces,,96.5%,1.5,,,,,Necklace
+NECK-2B,Necklace 2 Baht,ສາຍຄໍ 2 ບາດ,Necklaces,2 Baht,96.5%,2,,,,,Necklace
+NECK-3B,Necklace 3 Baht,ສາຍຄໍ 3 ບາດ,Necklaces,,96.5%,3,,,,,Necklace
+NECK-53_96G,Necklace 53.96g,ສາຍຄໍ 53.96 g,Necklaces,,96.5%,3.5973,,0,,,Necklace
+NECK-4B,Necklace 4 Baht,ສາຍຄໍ 4 ບາດ,Necklaces,,96.5%,4,,,,,Necklace
+NECK-68_21G,Necklace 68.21g,ສາຍຄໍ 68.21 g,Necklaces,,96.5%,4.5473,,0,,,Necklace
+NECK-5B,Necklace 5 Baht,ສາຍຄໍ 5 ບາດ,Necklaces,,96.5%,5,,,,,Necklace
+NECK-82_57G,Necklace 82.57g,ສາຍຄໍ 82.57 g,Necklaces,,96.5%,5.5047,,0,,,Necklace
+NECK-6B,Necklace 6 Baht,ສາຍຄໍ 6 ບາດ,Necklaces,,96.5%,6,,,,,Necklace
+NECK-7B,Necklace 7 Baht,ສາຍຄໍ 7 ບາດ,Necklaces,,96.5%,7,,,,,Necklace
+NECK-8B,Necklace 8 Baht,ສາຍຄໍ 8 ບາດ,Necklaces,,96.5%,8,,,,,Necklace
+NECK-8_5B,Necklace 8.5 Baht,ສາຍຄໍ 8.5 ບາດ,Necklaces,,96.5%,8.5,,,,,Necklace
+NECK-9B,Necklace 9 Baht,ສາຍຄໍ 9 ບາດ,Necklaces,,96.5%,9,,,,,Necklace
+NECK-10B,Necklace 10 Baht,ສາຍຄໍ 10 ບາດ,Necklaces,,96.5%,10,,,,,Necklace
+NECK-12B,Necklace 12 Baht,ສາຍຄໍ 12 ບາດ,Necklaces,,96.5%,12,,,,,Necklace
+NECK-14B,Necklace 14 Baht,ສາຍຄໍ 14 ບາດ,Necklaces,,96.5%,14,,,,,Necklace
+NECK-15B,Necklace 15 Baht,ສາຍຄໍ 15 ບາດ,Necklaces,,96.5%,15,,,,,Necklace
+NECK-20B,Necklace 20 Baht,ສາຍຄໍ 20 ບາດ,Necklaces,,96.5%,20,,,,,Necklace
+NECK-30B,Necklace 30 Baht,ສາຍຄໍ 30 ບາດ,Necklaces,,96.5%,30,,,,,Necklace
+BANGLE9-4B,Bangle (Kong Kao) 4 Baht,ກ້ອງເກົ້າ 4 ບາດ,Bracelets,,96.5%,4,,,,,Bangle (Kong Kao)
+BRAC-0_22G,Bracelet 0.22g,ສາຍແຂນ 0.22 g,Bracelets,,96.5%,0.0147,,0,,,Bracelet
+BRAC-1_45G,Bracelet 1.45g,ສາຍແຂນ 1.45 g,Bracelets,,96.5%,0.0967,,0,,,Bracelet
+BRAC-1_55G,Bracelet 1.55g,ສາຍແຂນ 1.55 g,Bracelets,,96.5%,0.1033,,0,,,Bracelet
+BRAC-1_84G,Bracelet 1.84g,ສາຍແຂນ 1.84 g,Bracelets,,96.5%,0.1227,,0,,,Bracelet
+BRAC-1S,Bracelet 1 Salueng,ສາຍແຂນ 1 ສະຫຼຶງ,Bracelets,0.25 Baht,96.5%,0.25,,,,,Bracelet
+BRAC-3_79G,Bracelet 3.79g,ສາຍແຂນ 3.79 g,Bracelets,,96.5%,0.2527,,0,,,Bracelet
+BRAC-3_81G,Bracelet 3.81g,ສາຍແຂນ 3.81 g,Bracelets,,96.5%,0.254,,0,,,Bracelet
+BRAC-3_88G,Bracelet 3.88g,ສາຍແຂນ 3.88 g,Bracelets,,96.5%,0.2587,,0,,,Bracelet
+BRAC-3_9G,Bracelet 3.9g,ສາຍແຂນ 3.9 g,Bracelets,,96.5%,0.26,,0,,,Bracelet
+BRAC-3_99G,Bracelet 3.99g,ສາຍແຂນ 3.99 g,Bracelets,,96.5%,0.266,,0,,,Bracelet
+BRAC-4_33G,Bracelet 4.33g,ສາຍແຂນ 4.33 g,Bracelets,,96.5%,0.2887,,0,,,Bracelet
+BRAC-4_38G,Bracelet 4.38g,ສາຍແຂນ 4.38 g,Bracelets,,96.5%,0.292,,0,,,Bracelet
+BRAC-4_53G,Bracelet 4.53g,ສາຍແຂນ 4.53 g,Bracelets,,96.5%,0.302,,0,,,Bracelet
+BRAC-5_38G,Bracelet 5.38g,ສາຍແຂນ 5.38 g,Bracelets,,96.5%,0.3587,,0,,,Bracelet
+BRAC-5_72G,Bracelet 5.72g,ສາຍແຂນ 5.72 g,Bracelets,,96.5%,0.3813,,0,,,Bracelet
+BRAC-7_45G,Bracelet 7.45g,ສາຍແຂນ 7.45 g,Bracelets,,96.5%,0.4967,,0,,,Bracelet
+BRAC-2S,Bracelet 2 Salueng,ສາຍແຂນ 2 ສະຫຼຶງ,Bracelets,0.5 Baht,96.5%,0.5,,,,,Bracelet
+BRAC-1B,Bracelet 1 Baht,ສາຍແຂນ 1 ບາດ,Bracelets,1 Baht,96.5%,1,,,,,Bracelet
+BRAC-1_5B,Bracelet 1.5 Baht,ສາຍແຂນ 1.5 ບາດ,Bracelets,,96.5%,1.5,,,,,Bracelet
+BRAC-2B,Bracelet 2 Baht,ສາຍແຂນ 2 ບາດ,Bracelets,2 Baht,96.5%,2,,,,,Bracelet
+BRAC-33_75G,Bracelet 33.75g,ສາຍແຂນ 33.75 g,Bracelets,,96.5%,2.25,,0,,,Bracelet
+BRAC-2_5B,Bracelet 2.5 Baht,ສາຍແຂນ 2.5 ບາດ,Bracelets,,96.5%,2.5,,,,,Bracelet
+BRAC-3B,Bracelet 3 Baht,ສາຍແຂນ 3 ບາດ,Bracelets,,96.5%,3,,,,,Bracelet
+BRAC-4B,Bracelet 4 Baht,ສາຍແຂນ 4 ບາດ,Bracelets,,96.5%,4,,,,,Bracelet
+BRAC-5B,Bracelet 5 Baht,ສາຍແຂນ 5 ບາດ,Bracelets,,96.5%,5,,,,,Bracelet
+BRAC-5_5B,Bracelet 5.5 Baht,ສາຍແຂນ 5.5 ບາດ,Bracelets,,96.5%,5.5,,,,,Bracelet
+BRAC-6B,Bracelet 6 Baht,ສາຍແຂນ 6 ບາດ,Bracelets,,96.5%,6,,,,,Bracelet
+BRAC-8B,Bracelet 8 Baht,ສາຍແຂນ 8 ບາດ,Bracelets,,96.5%,8,,,,,Bracelet
+BRAC-10B,Bracelet 10 Baht,ສາຍແຂນ 10 ບາດ,Bracelets,,96.5%,10,,,,,Bracelet
+BRAC-15B,Bracelet 15 Baht,ສາຍແຂນ 15 ບາດ,Bracelets,,96.5%,15,,,,,Bracelet
+BRAC-20B,Bracelet 20 Baht,ສາຍແຂນ 20 ບາດ,Bracelets,,96.5%,20,,,,,Bracelet
+WATCH-2B,Watch Strap 2 Baht,ສາຍໂມງ 2 ບາດ,Bracelets,2 Baht,96.5%,2,,,,,Watch Strap
+WATCH-3B,Watch Strap 3 Baht,ສາຍໂມງ 3 ບາດ,Bracelets,,96.5%,3,,,,,Watch Strap
+WATCH-4B,Watch Strap 4 Baht,ສາຍໂມງ 4 ບາດ,Bracelets,,96.5%,4,,,,,Watch Strap
+WATCH-5B,Watch Strap 5 Baht,ສາຍໂມງ 5 ບາດ,Bracelets,,96.5%,5,,,,,Watch Strap
+AMUL-5H,Amulet Pendant 5 Hun,ກີ້ພະ 5 ຫຸນ,Rings & Accessories,,96.5%,0.125,,,,,Amulet Pendant
+AMUL-1S,Amulet Pendant 1 Salueng,ກີ້ພະ 1 ສະຫຼຶງ,Rings & Accessories,0.25 Baht,96.5%,0.25,,,,,Amulet Pendant
+AMUL-2S,Amulet Pendant 2 Salueng,ກີ້ພະ 2 ສະຫຼຶງ,Rings & Accessories,0.5 Baht,96.5%,0.5,,,,,Amulet Pendant
+AMUL-1B,Amulet Pendant 1 Baht,ກີ້ພະ 1 ບາດ,Rings & Accessories,1 Baht,96.5%,1,,,,,Amulet Pendant
+BELT-5B,Belt 5 Baht,ສາຍແອວ 5 ບາດ,Rings & Accessories,,96.5%,5,,,,,Belt
+BELT-7B,Belt 7 Baht,ສາຍແອວ 7 ບາດ,Rings & Accessories,,96.5%,7,,,,,Belt
+BELT-8B,Belt 8 Baht,ສາຍແອວ 8 ບາດ,Rings & Accessories,,96.5%,8,,,,,Belt
+BELT-9B,Belt 9 Baht,ສາຍແອວ 9 ບາດ,Rings & Accessories,,96.5%,9,,,,,Belt
+BELT-10B,Belt 10 Baht,ສາຍແອວ 10 ບາດ,Rings & Accessories,,96.5%,10,,,,,Belt
+BELT-15B,Belt 15 Baht,ສາຍແອວ 15 ບາດ,Rings & Accessories,,96.5%,15,,,,,Belt
+BELT-237_88G,Belt 237.88g,ສາຍແອວ 237.88 g,Rings & Accessories,,96.5%,15.8587,,0,,,Belt
+BELT-17B,Belt 17 Baht,ສາຍແອວ 17 ບາດ,Rings & Accessories,,96.5%,17,,,,,Belt
+BELT-18B,Belt 18 Baht,ສາຍແອວ 18 ບາດ,Rings & Accessories,,96.5%,18,,,,,Belt
+BELT-20B,Belt 20 Baht,ສາຍແອວ 20 ບາດ,Rings & Accessories,,96.5%,20,,,,,Belt
+BELT-22B,Belt 22 Baht,ສາຍແອວ 22 ບາດ,Rings & Accessories,,96.5%,22,,,,,Belt
+BELT-25B,Belt 25 Baht,ສາຍແອວ 25 ບາດ,Rings & Accessories,,96.5%,25,,,,,Belt
+BELT-30B,Belt 30 Baht,ສາຍແອວ 30 ບາດ,Rings & Accessories,,96.5%,30,,,,,Belt
+BELT-623G,Belt 623g,ສາຍແອວ 623 g,Rings & Accessories,,96.5%,41.5333,,0,,,Belt
+CLIP-2S,Clip (Kip) 2 Salueng,ກີບ 2 ສະຫຼຶງ,Rings & Accessories,0.5 Baht,96.5%,0.5,,,,,Clip (Kip)
+CLIP-1B,Clip (Kip) 1 Baht,ກີບ 1 ບາດ,Rings & Accessories,1 Baht,96.5%,1,,,,,Clip (Kip)
+CLIP-2B,Clip (Kip) 2 Baht,ກີບ 2 ບາດ,Rings & Accessories,2 Baht,96.5%,2,,,,,Clip (Kip)
+COMB-10B,Comb 10 Baht,ຫວີ 10 ບາດ,Rings & Accessories,,96.5%,10,,,,,Comb
+EAR-2H,Earrings 2 Hun,ຕ້າງ 2 ຫຸນ,Rings & Accessories,,96.5%,0.05,,,,,Earrings
+EAR-3H,Earrings 3 Hun,ຕ້າງ 3 ຫຸນ,Rings & Accessories,,96.5%,0.075,,,,,Earrings
+EAR-5H,Earrings 5 Hun,ຕ້າງ 5 ຫຸນ,Rings & Accessories,,96.5%,0.125,,,,,Earrings
+EAR-1S,Earrings 1 Salueng,ຕ້າງ 1 ສະຫຼຶງ,Rings & Accessories,0.25 Baht,96.5%,0.25,,,,,Earrings
+EAR-2S,Earrings 2 Salueng,ຕ້າງ 2 ສະຫຼຶງ,Rings & Accessories,0.5 Baht,96.5%,0.5,,,,,Earrings
+EAR-3S,Earrings 3 Salueng,ຕ້າງ 3 ສະຫຼຶງ,Rings & Accessories,,96.5%,0.75,,,,,Earrings
+EAR-13_55G,Earrings 13.55g,ຕ້າງ 13.55 g,Rings & Accessories,,96.5%,0.9033,,0,,,Earrings
+EAR-1B,Earrings 1 Baht,ຕ້າງ 1 ບາດ,Rings & Accessories,1 Baht,96.5%,1,,,,,Earrings
+EAR-18_7G,Earrings 18.7g,ຕ້າງ 18.7 g,Rings & Accessories,,96.5%,1.2467,,0,,,Earrings
+EAR-1_5B,Earrings 1.5 Baht,ຕ້າງ 1.5 ບາດ,Rings & Accessories,,96.5%,1.5,,,,,Earrings
+EAR-2B,Earrings 2 Baht,ຕ້າງ 2 ບາດ,Rings & Accessories,2 Baht,96.5%,2,,,,,Earrings
+EARB-2S,Earrings (Kon Tang) 2 Salueng,ກົ້ນຕ້າງ 2 ສະຫຼຶງ,Rings & Accessories,0.5 Baht,96.5%,0.5,,,,,Earrings (Kon Tang)
+EARB-1_5B,Earrings (Kon Tang) 1.5 Baht,ກົ້ນຕ້າງ 1.5 ບາດ,Rings & Accessories,,96.5%,1.5,,,,,Earrings (Kon Tang)
+EARB-2B,Earrings (Kon Tang) 2 Baht,ກົ້ນຕ້າງ 2 ບາດ,Rings & Accessories,2 Baht,96.5%,2,,,,,Earrings (Kon Tang)
+GARL-3B,Garland 3 Baht,ພວງມະໄລ 3 ບາດ,Rings & Accessories,,96.5%,3,,,,,Garland
+BOWL-1000G,Gold Bowl 1000g,ໂອຄຳ 1000 g,Rings & Accessories,1kg,96.5%,66.6667,,,,,Gold Bowl
+LAB-2H,Gold Lab 2 Hun,ຫຼາບຄຳ 2 ຫຸນ,Rings & Accessories,,96.5%,0.05,,,,,Gold Lab
+LAB-3H,Gold Lab 3 Hun,ຫຼາບຄຳ 3 ຫຸນ,Rings & Accessories,,96.5%,0.075,,,,,Gold Lab
+LAB-5H,Gold Lab 5 Hun,ຫຼາບຄຳ 5 ຫຸນ,Rings & Accessories,,96.5%,0.125,,,,,Gold Lab
+LAB-1S,Gold Lab 1 Salueng,ຫຼາບຄຳ 1 ສະຫຼຶງ,Rings & Accessories,0.25 Baht,96.5%,0.25,,,,,Gold Lab
+LAB-2S,Gold Lab 2 Salueng,ຫຼາບຄຳ 2 ສະຫຼຶງ,Rings & Accessories,0.5 Baht,96.5%,0.5,,,,,Gold Lab
+GPEND-5H,Gold Pendant 5 Hun,ກີ້ຄຳ 5 ຫຸນ,Rings & Accessories,,96.5%,0.125,,,,,Gold Pendant
+GPEND-1S,Gold Pendant 1 Salueng,ກີ້ຄຳ 1 ສະຫຼຶງ,Rings & Accessories,0.25 Baht,96.5%,0.25,,,,,Gold Pendant
+GPEND-2S,Gold Pendant 2 Salueng,ກີ້ຄຳ 2 ສະຫຼຶງ,Rings & Accessories,0.5 Baht,96.5%,0.5,,,,,Gold Pendant
+GPEND-1B,Gold Pendant 1 Baht,ກີ້ຄຳ 1 ບາດ,Rings & Accessories,1 Baht,96.5%,1,,,,,Gold Pendant
+BAG-15B,Gold Purse 15 Baht,ກະເປົາ 15 ບາດ,Rings & Accessories,,96.5%,15,,,,,Gold Purse
+BAG-20B,Gold Purse 20 Baht,ກະເປົາ 20 ບາດ,Rings & Accessories,,96.5%,20,,,,,Gold Purse
+BAG-25B,Gold Purse 25 Baht,ກະເປົາ 25 ບາດ,Rings & Accessories,,96.5%,25,,,,,Gold Purse
+BAG-30B,Gold Purse 30 Baht,ກະເປົາ 30 ບາດ,Rings & Accessories,,96.5%,30,,,,,Gold Purse
+BAG-40B,Gold Purse 40 Baht,ກະເປົາ 40 ບາດ,Rings & Accessories,,96.5%,40,,,,,Gold Purse
+BAG-50B,Gold Purse 50 Baht,ກະເປົາ 50 ບາດ,Rings & Accessories,,96.5%,50,,,,,Gold Purse
+PIN-1S,Hairpin 1 Salueng,ປິ່ນ 1 ສະຫຼຶງ,Rings & Accessories,0.25 Baht,96.5%,0.25,,,,,Hairpin
+PIN-2S,Hairpin 2 Salueng,ປິ່ນ 2 ສະຫຼຶງ,Rings & Accessories,0.5 Baht,96.5%,0.5,,,,,Hairpin
+PIN-1B,Hairpin 1 Baht,ປິ່ນ 1 ບາດ,Rings & Accessories,1 Baht,96.5%,1,,,,,Hairpin
+PIN-18_75G,Hairpin 18.75g,ປິ່ນ 18.75 g,Rings & Accessories,,96.5%,1.25,,0,,,Hairpin
+PIN-21_77G,Hairpin 21.77g,ປິ່ນ 21.77 g,Rings & Accessories,,96.5%,1.4513,,0,,,Hairpin
+PIN-1_5B,Hairpin 1.5 Baht,ປິ່ນ 1.5 ບາດ,Rings & Accessories,,96.5%,1.5,,,,,Hairpin
+PIN-22_5G,Hairpin 22.5g,ປິ່ນ 22.5 g,Rings & Accessories,,96.5%,1.5,,0,,,Hairpin
+PIN-22_74G,Hairpin 22.74g,ປິ່ນ 22.74 g,Rings & Accessories,,96.5%,1.516,,0,,,Hairpin
+PIN-26_25G,Hairpin 26.25g,ປິ່ນ 26.25 g,Rings & Accessories,,96.5%,1.75,,0,,,Hairpin
+PIN-2B,Hairpin 2 Baht,ປິ່ນ 2 ບາດ,Rings & Accessories,2 Baht,96.5%,2,,,,,Hairpin
+PIN-33_15G,Hairpin 33.15g,ປິ່ນ 33.15 g,Rings & Accessories,,96.5%,2.21,,0,,,Hairpin
+PIN-33_31G,Hairpin 33.31g,ປິ່ນ 33.31 g,Rings & Accessories,,96.5%,2.2207,,0,,,Hairpin
+PIN-33_75G,Hairpin 33.75g,ປິ່ນ 33.75 g,Rings & Accessories,,96.5%,2.25,,0,,,Hairpin
+PIN-3B,Hairpin 3 Baht,ປິ່ນ 3 ບາດ,Rings & Accessories,,96.5%,3,,,,,Hairpin
+PIN-5B,Hairpin 5 Baht,ປິ່ນ 5 ບາດ,Rings & Accessories,,96.5%,5,,,,,Hairpin
+SET-10B,Jewelry Set 10 Baht,ຊຸດ 10 ບາດ,Rings & Accessories,,96.5%,10,,,,,Jewelry Set
+SET-17B,Jewelry Set 17 Baht,ຊຸດ 17 ບາດ,Rings & Accessories,,96.5%,17,,,,,Jewelry Set
+SET-19B,Jewelry Set 19 Baht,ຊຸດ 19 ບາດ,Rings & Accessories,,96.5%,19,,,,,Jewelry Set
+MITNAK-5B,Mit Sa Nak 5 Baht,ມິດສະນາກ 5 ບາດ,Rings & Accessories,,,5,,,,,Mit Sa Nak
+MITNAK-10B,Mit Sa Nak 10 Baht,ມິດສະນາກ 10 ບາດ,Rings & Accessories,,,10,,,,,Mit Sa Nak
+PEND-1S,Pendant 1 Salueng,ກີ້ 1 ສະຫຼຶງ,Rings & Accessories,0.25 Baht,96.5%,0.25,,,,,Pendant
+PEND-2S,Pendant 2 Salueng,ກີ້ 2 ສະຫຼຶງ,Rings & Accessories,0.5 Baht,96.5%,0.5,,,,,Pendant
+PEND-3S,Pendant 3 Salueng,ກີ້ 3 ສະຫຼຶງ,Rings & Accessories,,96.5%,0.75,,,,,Pendant
+PEND-1B,Pendant 1 Baht,ກີ້ 1 ບາດ,Rings & Accessories,1 Baht,96.5%,1,,,,,Pendant
+PEND-1_5B,Pendant 1.5 Baht,ກີ້ 1.5 ບາດ,Rings & Accessories,,96.5%,1.5,,,,,Pendant
+PEND-2B,Pendant 2 Baht,ກີ້ 2 ບາດ,Rings & Accessories,2 Baht,96.5%,2,,,,,Pendant
+PEND-2_5B,Pendant 2.5 Baht,ກີ້ 2.5 ບາດ,Rings & Accessories,,96.5%,2.5,,,,,Pendant
+PEND-3B,Pendant 3 Baht,ກີ້ 3 ບາດ,Rings & Accessories,,96.5%,3,,,,,Pendant
+PEND-4B,Pendant 4 Baht,ກີ້ 4 ບາດ,Rings & Accessories,,96.5%,4,,,,,Pendant
+PEND-5B,Pendant 5 Baht,ກີ້ 5 ບາດ,Rings & Accessories,,96.5%,5,,,,,Pendant
+PIXIU-0_18G,Pixiu Charm 0.18g,ປີເຊຍ 0.18 g,Rings & Accessories,,96.5%,0.012,,0,,,Pixiu Charm
+PIXIU-0_19G,Pixiu Charm 0.19g,ປີເຊຍ 0.19 g,Rings & Accessories,,96.5%,0.0127,,0,,,Pixiu Charm
+PIXIU-0_85G,Pixiu Charm 0.85g,ປີເຊຍ 0.85 g,Rings & Accessories,,96.5%,0.0567,,0,,,Pixiu Charm
+PIXIU-0_87G,Pixiu Charm 0.87g,ປີເຊຍ 0.87 g,Rings & Accessories,,96.5%,0.058,,0,,,Pixiu Charm
+PIXIU-0_89G,Pixiu Charm 0.89g,ປີເຊຍ 0.89 g,Rings & Accessories,,96.5%,0.0593,,0,,,Pixiu Charm
+PIXIU-0_97G,Pixiu Charm 0.97g,ປີເຊຍ 0.97 g,Rings & Accessories,,96.5%,0.0647,,0,,,Pixiu Charm
+PIXIU-0_99G,Pixiu Charm 0.99g,ປີເຊຍ 0.99 g,Rings & Accessories,,96.5%,0.066,,0,,,Pixiu Charm
+PIXIU-1G,Pixiu Charm 1g,ປີເຊຍ 1 g,Rings & Accessories,1g,96.5%,0.0667,,,,,Pixiu Charm
+PIXIU-1_01G,Pixiu Charm 1.01g,ປີເຊຍ 1.01 g,Rings & Accessories,,96.5%,0.0673,,0,,,Pixiu Charm
+PIXIU-1_02G,Pixiu Charm 1.02g,ປີເຊຍ 1.02 g,Rings & Accessories,,96.5%,0.068,,0,,,Pixiu Charm
+PIXIU-1_06G,Pixiu Charm 1.06g,ປີເຊຍ 1.06 g,Rings & Accessories,,96.5%,0.0707,,0,,,Pixiu Charm
+PIXIU-1_07G,Pixiu Charm 1.07g,ປີເຊຍ 1.07 g,Rings & Accessories,,96.5%,0.0713,,0,,,Pixiu Charm
+PIXIU-1_08G,Pixiu Charm 1.08g,ປີເຊຍ 1.08 g,Rings & Accessories,,96.5%,0.072,,0,,,Pixiu Charm
+PIXIU-1_22G,Pixiu Charm 1.22g,ປີເຊຍ 1.22 g,Rings & Accessories,,96.5%,0.0813,,0,,,Pixiu Charm
+PIXIU-1_26G,Pixiu Charm 1.26g,ປີເຊຍ 1.26 g,Rings & Accessories,,96.5%,0.084,,0,,,Pixiu Charm
+PIXIU-1_42G,Pixiu Charm 1.42g,ປີເຊຍ 1.42 g,Rings & Accessories,,96.5%,0.0947,,0,,,Pixiu Charm
+PIXIU-1_58G,Pixiu Charm 1.58g,ປີເຊຍ 1.58 g,Rings & Accessories,,96.5%,0.1053,,0,,,Pixiu Charm
+PIXIU-1_6G,Pixiu Charm 1.6g,ປີເຊຍ 1.6 g,Rings & Accessories,,96.5%,0.1067,,0,,,Pixiu Charm
+PIXIU-1_62G,Pixiu Charm 1.62g,ປີເຊຍ 1.62 g,Rings & Accessories,,96.5%,0.108,,0,,,Pixiu Charm
+PIXIU-1_63G,Pixiu Charm 1.63g,ປີເຊຍ 1.63 g,Rings & Accessories,,96.5%,0.1087,,0,,,Pixiu Charm
+PIXIU-1_75G,Pixiu Charm 1.75g,ປີເຊຍ 1.75 g,Rings & Accessories,,96.5%,0.1167,,0,,,Pixiu Charm
+PIXIU-1_83G,Pixiu Charm 1.83g,ປີເຊຍ 1.83 g,Rings & Accessories,,96.5%,0.122,,0,,,Pixiu Charm
+PIXIU-2_22G,Pixiu Charm 2.22g,ປີເຊຍ 2.22 g,Rings & Accessories,,96.5%,0.148,,0,,,Pixiu Charm
+PIXIU-4_27G,Pixiu Charm 4.27g,ປີເຊຍ 4.27 g,Rings & Accessories,,96.5%,0.2847,,0,,,Pixiu Charm
+PIXIU-5_22G,Pixiu Charm 5.22g,ປີເຊຍ 5.22 g,Rings & Accessories,,96.5%,0.348,,0,,,Pixiu Charm
+PIXIU-6_26G,Pixiu Charm 6.26g,ປີເຊຍ 6.26 g,Rings & Accessories,,96.5%,0.4173,,0,,,Pixiu Charm
+PIXIU-8_6G,Pixiu Charm 8.6g,ປີເຊຍ 8.6 g,Rings & Accessories,,96.5%,0.5733,,0,,,Pixiu Charm
+PIXIU-10_22G,Pixiu Charm 10.22g,ປີເຊຍ 10.22 g,Rings & Accessories,,96.5%,0.6813,,0,,,Pixiu Charm
+NAKR-6B,Red Nak 6 Baht,ນາກແດງ 6 ບາດ,Rings & Accessories,,,6,,,,,Red Nak
+NAKR-8B,Red Nak 8 Baht,ນາກແດງ 8 ບາດ,Rings & Accessories,,,8,,,,,Red Nak
+NAKR-10B,Red Nak 10 Baht,ນາກແດງ 10 ບາດ,Rings & Accessories,,,10,,,,,Red Nak
+NAKR-12B,Red Nak 12 Baht,ນາກແດງ 12 ບາດ,Rings & Accessories,,,12,,,,,Red Nak
+NAKR-15B,Red Nak 15 Baht,ນາກແດງ 15 ບາດ,Rings & Accessories,,,15,,,,,Red Nak
+NAKR-20B,Red Nak 20 Baht,ນາກແດງ 20 ບາດ,Rings & Accessories,,,20,,,,,Red Nak
+RING-2H,Ring 2 Hun,ແຫວນ 2 ຫຸນ,Rings & Accessories,,96.5%,0.05,,,,,Ring
+RING-3H,Ring 3 Hun,ແຫວນ 3 ຫຸນ,Rings & Accessories,,96.5%,0.075,,,,,Ring
+RING-5H,Ring 5 Hun,ແຫວນ 5 ຫຸນ,Rings & Accessories,,96.5%,0.125,,,,,Ring
+RING-1S,Ring 1 Salueng,ແຫວນ 1 ສະຫຼຶງ,Rings & Accessories,0.25 Baht,96.5%,0.25,,,,,Ring
+RING-2S,Ring 2 Salueng,ແຫວນ 2 ສະຫຼຶງ,Rings & Accessories,0.5 Baht,96.5%,0.5,,,,,Ring
+RING-1B,Ring 1 Baht,ແຫວນ 1 ບາດ,Rings & Accessories,1 Baht,96.5%,1,,,,,Ring
+RING-18_94G,Ring 18.94g,ແຫວນ 18.94 g,Rings & Accessories,,96.5%,1.2627,,0,,,Ring
+RING-1_5B,Ring 1.5 Baht,ແຫວນ 1.5 ບາດ,Rings & Accessories,,96.5%,1.5,,,,,Ring
+RING-2B,Ring 2 Baht,ແຫວນ 2 ບາດ,Rings & Accessories,2 Baht,96.5%,2,,,,,Ring
+RING-3B,Ring 3 Baht,ແຫວນ 3 ບາດ,Rings & Accessories,,96.5%,3,,,,,Ring
+ROSE-1B,Rose Flower 1 Baht,ດອກກຸລາບ 1 ບາດ,Rings & Accessories,1 Baht,96.5%,1,,,,,Rose Flower
+ROSE-2B,Rose Flower 2 Baht,ດອກກຸລາບ 2 ບາດ,Rings & Accessories,2 Baht,96.5%,2,,,,,Rose Flower
+SASH-239_83G,Shoulder Chain 239.83g,ສາຍສະພາຍ 239.83 g,Rings & Accessories,,96.5%,15.9887,,0,,,Shoulder Chain
+SASH-20B,Shoulder Chain 20 Baht,ສາຍສະພາຍ 20 ບາດ,Rings & Accessories,,96.5%,20,,,,,Shoulder Chain
+SASH-25B,Shoulder Chain 25 Baht,ສາຍສະພາຍ 25 ບາດ,Rings & Accessories,,96.5%,25,,,,,Shoulder Chain
+SASH-437_43G,Shoulder Chain 437.43g,ສາຍສະພາຍ 437.43 g,Rings & Accessories,,96.5%,29.162,,0,,,Shoulder Chain
+TASSEL-1B,Tassel (Yoy) 1 Baht,ຍອຍ 1 ບາດ,Rings & Accessories,1 Baht,96.5%,1,,,,,Tassel (Yoy)
+TASSEL-27_2G,Tassel (Yoy) 27.2g,ຍອຍ 27.2 g,Rings & Accessories,,96.5%,1.8133,,0,,,Tassel (Yoy)
+NAKY-6B,Yellow Nak 6 Baht,ນາກເຫຼືອງ 6 ບາດ,Rings & Accessories,,,6,,,,,Yellow Nak
+NAKY-8B,Yellow Nak 8 Baht,ນາກເຫຼືອງ 8 ບາດ,Rings & Accessories,,,8,,,,,Yellow Nak
+NAKY-10B,Yellow Nak 10 Baht,ນາກເຫຼືອງ 10 ບາດ,Rings & Accessories,,,10,,,,,Yellow Nak
+NAKY-12B,Yellow Nak 12 Baht,ນາກເຫຼືອງ 12 ບາດ,Rings & Accessories,,,12,,,,,Yellow Nak
+NAKY-15B,Yellow Nak 15 Baht,ນາກເຫຼືອງ 15 ບາດ,Rings & Accessories,,,15,,,,,Yellow Nak
