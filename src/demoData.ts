@@ -46,8 +46,18 @@ export const DEMO_STAFF = {
   "B-IT": "11111111-0000-0000-0000-000000000004",
   "B-VT": "11111111-0000-0000-0000-000000000005",
 } as const;
-// One branch manager (Morning Market), PIN 5678.
-// A second Morning Market staff member, so handovers have somebody to hand to. PIN 1234.
+// One branch manager (Morning Market), password 5678.
+// A second Morning Market staff member, so handovers have somebody to hand to. Password 1234.
+// Demo usernames, by account id (see DEMO_LOGINS below for the passwords).
+export const DEMO_USERNAMES: Record<string, string> = {
+  "11111111-0000-0000-0000-000000000001": "owner",
+  "11111111-0000-0000-0000-000000000002": "somchai",
+  "11111111-0000-0000-0000-000000000003": "bounmy",
+  "11111111-0000-0000-0000-000000000004": "vilayphone",
+  "11111111-0000-0000-0000-000000000005": "khamla",
+  "11111111-0000-0000-0000-000000000006": "manivone",
+  "11111111-0000-0000-0000-000000000007": "noy",
+};
 export const DEMO_STAFF_MM2 = "11111111-0000-0000-0000-000000000007";
 export const DEMO_MANAGER = { "B-MM": "11111111-0000-0000-0000-000000000006" } as const;
 
@@ -94,8 +104,10 @@ function sku(
   };
 }
 
-// Demo PINs: Admin "9999" (all branches), each branch staff account "1234",
-// the Morning Market manager "5678".
+// Demo logins (username / password): owner / 9999 (all branches); each
+// branch staff account / 1234 (somchai, bounmy, vilayphone, khamla, noy);
+// the Morning Market manager manivone / 5678. These are the old demo PINs,
+// kept as passwords. Real accounts need 6+ characters.
 // Hashes precomputed with the pbkdf2 routine in src/auth.ts.
 function account(
   id: string,
@@ -109,6 +121,7 @@ function account(
     id,
     branch_id,
     display_name,
+    username: DEMO_USERNAMES[id] ?? null,
     pin_hash,
     role,
     active: true,

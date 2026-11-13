@@ -7,7 +7,7 @@ import { parseAuditCursor } from "../src/auditParams";
 import { actorHeaders } from "../src/actor";
 import { getStore } from "../src/store";
 import { addDays, laosDate } from "../src/time";
-import { TODAY, freshApp, call, asAdmin, asStaff, asManager } from "./helpers";
+import { TODAY, freshApp, call, creds, asAdmin, asStaff, asManager } from "./helpers";
 
 beforeEach(freshApp);
 
@@ -42,10 +42,10 @@ describe("audit trail", () => {
   it("login failures write nothing; a lockout writes locked_until with source system:login", async () => {
     const admin = await asAdmin();
     const id = DEMO_STAFF["B-MM"];
-    for (let i = 0; i < 4; i++) await call(null, "POST", "/auth/login", { accountId: id, pin: "0000" });
+    for (let i = 0; i < 4; i++) await call(null, "POST", "/auth/login", creds(id, "0000"));
     expect((await rowAudit(admin)).filter((e: any) => e.table_name === "staff_accounts")).toHaveLength(0);
 
-    await call(null, "POST", "/auth/login", { accountId: id, pin: "0000" });
+    await call(null, "POST", "/auth/login", creds(id, "0000"));
     const locks = (await rowAudit(admin)).filter((e: any) => e.table_name === "staff_accounts");
     expect(locks).toHaveLength(1);
     expect(locks[0]).toMatchObject({ source: "system:login", actor_id: null, op: "UPDATE", row_key: { id } });

@@ -4,7 +4,7 @@
 // Mounted behind requireAuth in src/index.ts.
 import { storeFor, newRouter, readBody, HttpError, audit } from "../app";
 import type { NewSku, Store } from "../store";
-import { requireAdmin, requireManager, hashPin, isValidPin, isManagerOf } from "../auth";
+import { requireAdmin, requireManager, hashPassword, isValidPassword, normalizeUsername, isValidUsername, isManagerOf, MIN_PASSWORD } from "../auth";
 import { isLive } from "../time";
 import { skuSummary, staffAccountSummary } from "../logic";
 import type { MasterSku, SkuType, SkuWeight } from "../types";
@@ -323,6 +323,16 @@ r.get("/settings/about", async (c) => c.json({ version: c.env.APP_VERSION || "de
 // ---------------------------------------------------------------------------
 // User management (admin)
 // ---------------------------------------------------------------------------
+
+// A valid username nobody else (other than `selfId`) already uses.
+async function checkUsername(store: Store, raw: unknown, selfId: string | null) {
+  const username = normalizeUsername(raw);
+  if (!isValidUsername(username)) throw new HttpError(400, "Username: 3-30 letters a-z, digits, . _ -", "BAD_USERNAME");
+  if ((await store.staffAccounts()).some((a) => a.username === username && a.id !== selfId)) {
+    throw new HttpError(409, "That username is already taken", "USERNAME_TAKEN");
+  }
+  return username;
+}
 r.post("/users", requireAdmin, async (c) => {
   const store = storeFor(c);
   const body = await readBody(c);
@@ -330,9 +340,10 @@ r.post("/users", requireAdmin, async (c) => {
   const role = body.role === "admin" ? "admin" : body.role === "manager" ? "manager" : "staff";
   const branch_id = role === "admin" ? null : String(body.branchId ?? "");
   if (!display_name) throw new HttpError(400, "Name is required", "BAD_USER");
-  if (!isValidPin(body.pin)) throw new HttpError(400, "PIN must be exactly 4 digits", "BAD_PIN");
+  const username = await checkUsername(store, body.username, null);
+  if (!isValidPassword(body.password)) throw new HttpError(400, `Password must be at least ${MIN_PASSWORD} characters`, "BAD_PASSWORD");
   if (role !== "admin" && !(await store.branches()).some((b) => b.branch_id === branch_id)) throw new HttpError(400, "Choose a branch", "BAD_BRANCH");
-  const account = await store.createStaffAccount({ display_name: display_name.slice(0, 60), role, branch_id, pin_hash: await hashPin(body.pin) });
+  const account = await store.createStaffAccount({ display_name: display_name.slice(0, 60), username, role, branch_id, pin_hash: await hashPassword(body.password) });
   await audit(store, c.get("user"), "user.create", account.display_name, { id: account.id, role, branch_id }, { branchId: account.branch_id });
   return c.json({ id: account.id });
 });
@@ -360,6 +371,13 @@ r.patch("/users/:id", requireManager, async (c) => {
     patch.display_name = name.slice(0, 60);
     changes.push("name");
   }
+  if (body.username !== undefined) {
+    const username = await checkUsername(store, body.username, account.id);
+    if (username !== account.username) {
+      patch.username = username;
+      changes.push("username");
+    }
+  }
   if (body.branchId !== undefined && account.role !== "admin") {
     if (!(await store.branches()).some((b) => b.branch_id === body.branchId)) throw new HttpError(400, "Unknown branch", "BAD_BRANCH");
     patch.branch_id = body.branchId;
@@ -374,12 +392,12 @@ r.patch("/users/:id", requireManager, async (c) => {
     patch.active = active;
     changes.push(active ? "activated" : "deactivated");
   }
-  if (body.pin !== undefined) {
-    if (!isValidPin(body.pin)) throw new HttpError(400, "PIN must be exactly 4 digits", "BAD_PIN");
-    patch.pin_hash = await hashPin(body.pin);
+  if (body.password !== undefined) {
+    if (!isValidPassword(body.password)) throw new HttpError(400, `Password must be at least ${MIN_PASSWORD} characters`, "BAD_PASSWORD");
+    patch.pin_hash = await hashPassword(body.password);
     patch.failed_attempts = 0;
     patch.locked_until = null;
-    changes.push("pin");
+    changes.push("password");
   }
   if (body.unlock) {
     patch.failed_attempts = 0;
@@ -388,7 +406,7 @@ r.patch("/users/:id", requireManager, async (c) => {
   }
   // Anything that changes who the person is or what they may see ends every
   // session they have open (name and branch are baked into the token).
-  if (changes.some((ch) => ch !== "unlocked" && ch !== "activated")) patch.token_version = account.token_version + 1;
+  if (changes.some((ch) => ch !== "unlocked" && ch !== "activated" && ch !== "username")) patch.token_version = account.token_version + 1;
   if (changes.length === 0) return c.json({ ok: true });
 
   await store.updateStaffAccount(account.id, patch);

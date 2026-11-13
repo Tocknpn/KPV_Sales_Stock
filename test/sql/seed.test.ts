@@ -3,7 +3,7 @@ import type { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { freshDb, asActor, expectPgError } from './db';
-import { verifyPin } from '../../src/auth';
+import { verifyPassword } from '../../src/auth';
 
 const sqlFile = (...p: string[]) => readFileSync(join(process.cwd(), 'supabase', ...p), 'utf8');
 const runSeed = (db: PGlite) => db.exec(sqlFile('seed_mock_data.sql'));
@@ -130,7 +130,7 @@ describe('seed_mock_data.sql', () => {
       `select role, branch_id, pin_hash from staff_accounts where is_seed order by role, branch_id, display_name`);
     expect(staff.rows.map((s) => `${s.role}/${s.branch_id}`)).toEqual([
       'admin/null', 'manager/B-TST1', 'staff/B-TST1', 'staff/B-TST1', 'staff/B-TST2']);
-    for (const s of staff.rows) expect(await verifyPin('1234', s.pin_hash)).toBe(true);
+    for (const s of staff.rows) expect(await verifyPassword('1234', s.pin_hash)).toBe(true);
     expect((await one<{ display_name: string }>(db,
       `select display_name from staff_accounts where role = 'admin' and is_seed`)).display_name).toBe('Test Admin');
 

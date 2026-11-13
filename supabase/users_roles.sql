@@ -6,8 +6,7 @@
 -- anyone's permissions), and shuts the public API (anon / authenticated) out of
 -- every table and function. The Worker is the only client and uses the
 -- service_role key. These guards do NOT protect against a leaked service-role
--- key: actor UUIDs are public (/api/auth/accounts lists them), so whoever holds
--- the key can claim any actor. Keep that key secret.
+-- key: whoever holds it can claim any actor (an actor is just a UUID header). Keep that key secret.
 --
 -- Run order (fresh project):
 --   schema.sql -> migrations/* (name order) -> users_roles.sql -> base.sql
@@ -16,7 +15,7 @@
 -- idempotent, and later tasks append their guards to it.
 --
 -- First admin (nobody can log in until one exists):
---   npm run db:admin -- "Owner" 4821
+--   npm run db:admin -- "Owner" owner 'a-long-password'
 --   and paste the SQL it prints into the Supabase SQL editor. The SQL editor
 --   has no actor header, so the guards below let it through.
 -- ============================================================================
