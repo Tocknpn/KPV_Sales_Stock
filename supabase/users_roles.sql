@@ -234,6 +234,25 @@ drop trigger if exists trg_guard_branch_closed_day on branch_closed_day;
 create trigger trg_guard_branch_closed_day before insert or update or delete on branch_closed_day
   for each row execute function guard_branch_closed_day();
 
+-- Replenishment rules: a company-wide rule (no branch) is admin only; a branch
+-- rule needs an admin or that branch's manager.
+create or replace function guard_replenishment_rule() returns trigger
+language plpgsql as $$
+begin
+  -- UPDATE and DELETE check the existing row too, so a rule cannot be moved
+  -- out of a scope the actor does not control.
+  if tg_op in ('UPDATE', 'DELETE') then
+    perform kpv_require(case when old.branch_id is null then '{admin}'::text[] else '{admin,manager}'::text[] end, old.branch_id);
+    if tg_op = 'DELETE' then return old; end if;
+  end if;
+  perform kpv_require(case when new.branch_id is null then '{admin}'::text[] else '{admin,manager}'::text[] end, new.branch_id);
+  return new;
+end $$;
+
+drop trigger if exists trg_guard_replenishment_rule on replenishment_rule;
+create trigger trg_guard_replenishment_rule before insert or update or delete on replenishment_rule
+  for each row execute function guard_replenishment_rule();
+
 drop trigger if exists trg_guard_desk_assignment on desk_assignment;
 create trigger trg_guard_desk_assignment before insert or update or delete on desk_assignment
   for each row execute function guard_desk_assignment();
