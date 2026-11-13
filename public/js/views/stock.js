@@ -1,18 +1,15 @@
 import { api } from "../api.js";
 import { state, branchName } from "../state.js";
 import { toast, openSheet, closeSheet, openActionSheet } from "../ui.js";
-import { fmtBaht, fmtInt, fmtDate, icon, statusPillClasses, escapeHtml } from "../util.js";
-import { t, pickName } from "../i18n.js";
+import { fmtBaht, fmtInt, fmtDate, icon, statusPillClasses, escapeHtml, fmtClock, laosDateOf, flameIcon } from "../util.js";
+import { t, tf, pickName } from "../i18n.js";
 import { renderCalendar } from "../calendar.js";
 import { isAdmin } from "../session.js";
+import { casesChipHtml, refreshCasesChip, wireCasesChip } from "./cases-switcher.js";
+import { switchUser } from "./login.js";
 import { mountDay, unmountDay } from "./day/index.js";
 
 const PURITY_OPTIONS = ["96.5%", "99.99%"];
-
-// t() with {placeholders}.
-function tf(key, vars) {
-  return Object.entries(vars).reduce((text, [k, v]) => text.replace(`{${k}}`, v), t(key));
-}
 
 function setStockDate(date) {
   state.stock.date = date;
@@ -57,9 +54,13 @@ function renderTopbar() {
         <h1 class="text-lg font-extrabold text-gray-900">${t("stock.title")}</h1>
         <p class="text-[11px] font-medium text-gray-600">${t("stock.subtitle")}</p>
       </div>
-      <div id="stock-badges" class="flex gap-1.5"></div>
+      <div id="stock-badges" class="flex flex-wrap justify-end gap-1.5"></div>
     </div>
-    <div class="mt-3 flex gap-2">
+    <div class="mt-3 flex items-center gap-2">
+      ${casesChipHtml()}
+      <button id="switch-user" class="chip ml-auto shrink-0 border-hairline bg-white text-gray-700">${t("switchUser.button")}</button>
+    </div>
+    <div class="mt-2 flex gap-2">
       <button id="date-select" class="chip flex-1 justify-between border-hairline bg-white text-gray-700">
         <span id="date-label">${fmtDate(state.stock.date)}</span>
         <svg class="h-3.5 w-3.5 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
@@ -89,6 +90,9 @@ function renderTopbar() {
   }
 
   document.getElementById("date-select").addEventListener("click", (e) => openCalendarSheet(e.currentTarget));
+  document.getElementById("switch-user").addEventListener("click", () => switchUser(state.user.branchId));
+  wireCasesChip(() => state.stock.branch, () => refreshCards(false));
+  refreshCasesChip(state.stock.branch);
 }
 
 async function backToGrid() {
@@ -102,8 +106,9 @@ async function backToGrid() {
 // it won't blow away the page the user is looking at.
 async function syncCurrentCards() {
   try {
-    const { desks } = await api.deskCards(state.stock.date, state.stock.branch);
+    const { desks, today } = await api.deskCards(state.stock.date, state.stock.branch);
     currentCards = desks;
+    currentToday = today;
   } catch {}
 }
 
@@ -140,32 +145,41 @@ function openCalendarSheet(anchorEl) {
 
 let currentCards = [];
 
-async function refreshCards() {
+let currentToday = null;
+
+// showLoading=false re-renders in place (after a take/release) without the spinner flash.
+async function refreshCards(showLoading = true) {
   const root = document.getElementById("view-root");
-  root.innerHTML = `<div class="py-16 text-center text-sm text-gray-600">${t("stock.loadingDesks")}</div>`;
-  const { desks } = await api.deskCards(state.stock.date, state.stock.branch);
+  if (showLoading) root.innerHTML = `<div class="py-16 text-center text-sm text-gray-600">${t("stock.loadingDesks")}</div>`;
+  const { desks, branchSummary, today } = await api.deskCards(state.stock.date, state.stock.branch);
   currentCards = desks;
-  renderBadges(desks);
-  renderBody(desks);
+  currentToday = today;
+  renderBadges(desks, branchSummary);
+  renderBody(desks, branchSummary);
+  refreshCasesChip(state.stock.branch);
 }
 
-function renderBadges(desks) {
-  const counts = { done: 0, active: 0 };
-  desks.forEach((d) => {
-    if (d.status === "done") counts.done++;
-    else if (d.status !== "not_started") counts.active++;
-  });
+function renderBadges(desks, summary) {
+  const active = desks.filter((d) => d.status !== "done" && d.status !== "not_started").length;
   const el = document.getElementById("stock-badges");
   if (!el) return;
   el.innerHTML = `
-    ${counts.done ? `<span class="status-pill bg-success-bg text-success">${counts.done} ${t("stock.badgeDone")}</span>` : ""}
-    ${counts.active ? `<span class="status-pill bg-brand-100 text-brand-700">${counts.active} ${t("stock.badgeActive")}</span>` : ""}
+    ${summary?.overdue ? `<span class="status-pill bg-danger-bg text-danger">⚠ ${summary.overdue} ${t("stock.badgeOverdue")}</span>` : ""}
+    ${summary?.behind1 ? `<span class="status-pill bg-warning-bg text-warning">${summary.behind1} ${t("stock.badgeBehind")}</span>` : ""}
+    ${summary?.checkedToday ? `<span class="status-pill bg-success-bg text-success">${summary.checkedToday} ${t("stock.badgeDone")}</span>` : ""}
+    ${active ? `<span class="status-pill bg-brand-100 text-brand-700">${active} ${t("stock.badgeActive")}</span>` : ""}
   `;
 }
 
-function renderBody(desks) {
+function renderBody(desks, summary) {
   const root = document.getElementById("view-root");
   root.innerHTML = `
+    ${
+      summary
+        ? `<p id="branch-line" class="mb-3 text-xs font-bold ${summary.overdue ? "text-danger" : "text-gray-700"}">${tf("stock.branchLine", { cases: summary.cases, checked: summary.checkedToday, overdue: summary.overdue })}</p>`
+        : ""
+    }
+    <div id="overdue-strip" class="mb-3 hidden flex-col gap-3"></div>
     <div id="desk-grid" class="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4"></div>
   `;
   renderFab();
@@ -210,17 +224,54 @@ function blockedDate(desk) {
   return desk.status === "not_started" && desk.openEarlierDate ? desk.openEarlierDate : null;
 }
 
-function renderGrid(desks) {
-  const grid = document.getElementById("desk-grid");
-  if (desks.length === 0) {
-    grid.innerHTML = `<div class="col-span-full py-10 text-center text-sm text-gray-600">${t("stock.noDesks")}</div>`;
-    return;
-  }
+// Tier look (spec CR3): left bar + tint + a text line that always names the tier.
+const TIER_STYLE = {
+  done_today: { bar: "border-l-success", tint: "", text: "text-success" },
+  on_track: { bar: "border-l-gray-300", tint: "", text: "text-gray-600" },
+  behind_1: { bar: "border-l-amber-500", tint: "bg-warning-bg", text: "text-warning" },
+  overdue: { bar: "border-l-danger", tint: "bg-danger-bg", text: "text-danger" },
+};
 
-  grid.innerHTML = desks
-    .map(
-      (d) => `
-    <div class="card flex flex-col gap-2.5 p-3.5" data-card="${d.desk_id}">
+function tierText(d) {
+  const last = d.lastDoneDate ? fmtDate(d.lastDoneDate) : null;
+  switch (d.tier) {
+    case "done_today":
+      return d.lastDoneByName
+        ? tf("stock.tierDoneToday", { time: d.lastDoneAt ? fmtClock(d.lastDoneAt) : "", name: d.lastDoneByName })
+        : tf("stock.tierDoneTodayNoName", { time: d.lastDoneAt ? fmtClock(d.lastDoneAt) : "" });
+    case "behind_1":
+      return tf("stock.tierBehind1", { date: last ?? "—" });
+    case "overdue":
+      return last ? tf("stock.tierOverdue", { n: d.daysBehind, date: last }) : tf("stock.tierOverdueNever", { n: d.daysBehind });
+    default:
+      return d.status === "not_started" ? t("stock.tierOnTrackIdle") : t("stock.tierOnTrackOpen");
+  }
+}
+
+// Staff cannot take over a colleague's case (the server answers NOT_HOLDER),
+// so a stale holder's "Take" is offered to managers; a free case to staff and managers.
+function canTake(d) {
+  if (isAdmin(state.user)) return false;
+  if (!d.assignee) return true;
+  return d.assignee.stale && d.assignee.staffId !== state.user.accountId && state.user.role === "manager";
+}
+
+function holderLine(d) {
+  const a = d.assignee;
+  if (!a) return `<span class="text-gray-500">${t("stock.noHolder")}</span>`;
+  const name = escapeHtml(a.name ?? "");
+  if (!a.stale) return `<span class="font-semibold text-gray-800">👤 ${tf("stock.holderSince", { name, time: fmtClock(a.since) })}</span>`;
+  const sinceDate = laosDateOf(a.since);
+  const yesterday = currentToday ? new Date(Date.parse(`${currentToday}T00:00:00Z`) - 86400000).toISOString().slice(0, 10) : null;
+  const when = sinceDate === yesterday ? t("stock.yesterday") : fmtDate(sinceDate);
+  return `<span class="text-gray-500">${tf("stock.lastHolder", { name, when })}</span>`;
+}
+
+function renderCard(d) {
+  const ts = TIER_STYLE[d.tier] ?? TIER_STYLE.on_track;
+  const streak = d.streak > 365 ? "365+" : d.streak;
+  return `
+    <div class="card flex flex-col gap-2.5 border-l-4 p-3.5 ${ts.bar} ${ts.tint}" data-card="${d.desk_id}" data-tier="${d.tier}">
       <div class="flex items-center justify-between gap-2">
         <div class="flex min-w-0 items-center gap-2">
           ${
@@ -236,6 +287,15 @@ function renderGrid(desks) {
         <span class="status-pill shrink-0 ${statusPillClasses(d.status)}">${statusLabel(d.status)}</span>
       </div>
 
+      <div class="flex items-start justify-between gap-2">
+        <p class="min-w-0 text-[11px] font-bold leading-snug ${ts.text}">${escapeHtml(tierText(d))}</p>
+        ${
+          d.streak > 0
+            ? `<span class="inline-flex shrink-0 items-center gap-0.5 text-[11px] font-extrabold text-brand-700">${flameIcon()}${streak}<span class="sr-only"> ${t("stock.streakDays")}</span></span>`
+            : ""
+        }
+      </div>
+
       <div class="flex items-baseline gap-1">
         <span class="text-xl font-extrabold text-gray-900">${fmtBaht(d.totalBaht)}</span>
         <span class="text-[11px] font-semibold text-gray-600">Baht</span>
@@ -243,6 +303,11 @@ function renderGrid(desks) {
       <div class="flex items-center justify-between text-[11px] text-gray-600">
         <span>${fmtInt(d.totalPcs)} pcs</span>
         ${d.lowStockCount > 0 ? `<span class="font-bold text-danger">⚠ ${d.lowStockCount} ${t("stock.lowShort")}</span>` : ""}
+      </div>
+
+      <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+        <div class="min-w-0">${holderLine(d)}</div>
+        ${canTake(d) ? `<button data-take="${d.desk_id}" class="tap-target rounded-full border border-brand-600 px-3 text-[11px] font-bold text-brand-700 active:bg-brand-50">${t("stock.takeCase")}</button>` : ""}
       </div>
       ${
         blockedDate(d)
@@ -253,13 +318,32 @@ function renderGrid(desks) {
       <button data-action="${d.desk_id}" class="btn-${d.status === "done" ? "secondary" : "primary"} mt-1 w-full py-2 text-xs">
         ${blockedDate(d) ? tf("stock.goToDate", { date: fmtDate(d.openEarlierDate) }) : actionLabel(d.status)}
       </button>
-    </div>`
-    )
-    .join("");
+    </div>`;
+}
 
-  grid.querySelectorAll("[data-card]").forEach((card) => {
+function renderGrid(desks) {
+  const grid = document.getElementById("desk-grid");
+  const strip = document.getElementById("overdue-strip");
+  if (desks.length === 0) {
+    strip.classList.add("hidden");
+    grid.innerHTML = `<div class="col-span-full py-10 text-center text-sm text-gray-600">${t("stock.noDesks")}</div>`;
+    return;
+  }
+
+  // Overdue cases are pinned in a full-width strip above the grid.
+  const overdue = desks.filter((d) => d.tier === "overdue");
+  const rest = desks.filter((d) => d.tier !== "overdue");
+  strip.classList.toggle("hidden", overdue.length === 0);
+  strip.classList.toggle("flex", overdue.length > 0);
+  strip.innerHTML = overdue.length
+    ? `<h2 class="text-xs font-extrabold uppercase tracking-wide text-danger">⚠ ${tf("stock.overdueStrip", { n: overdue.length })}</h2>${overdue.map((d) => renderCard(d)).join("")}`
+    : "";
+  grid.innerHTML = rest.map((d) => renderCard(d)).join("");
+
+  const root = document.getElementById("view-root");
+  root.querySelectorAll("[data-card]").forEach((card) => {
     card.addEventListener("click", (e) => {
-      if (e.target.closest("[data-action]")) return;
+      if (e.target.closest("[data-action], [data-take]")) return;
       const desk = currentCards.find((d) => d.desk_id === card.dataset.card);
       // Not started today has no opening-balance row to show yet (it's only
       // materialized on check-in), so tapping the card falls back to the
@@ -268,10 +352,23 @@ function renderGrid(desks) {
       else openOpeningBalanceSheet(desk);
     });
   });
-  grid.querySelectorAll("[data-action]").forEach((btn) => {
+  root.querySelectorAll("[data-action]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const desk = currentCards.find((d) => d.desk_id === btn.dataset.action);
       handleCardAction(desk);
+    });
+  });
+  root.querySelectorAll("[data-take]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const desk = currentCards.find((d) => d.desk_id === btn.dataset.take);
+      btn.disabled = true;
+      try {
+        await api.assignDesk(desk.desk_id, state.user.accountId);
+        toast(tf("stock.takenToast", { case: desk.display_name }), "success");
+      } catch (err) {
+        toast(err.message, "error");
+      }
+      await refreshCards(false);
     });
   });
 }

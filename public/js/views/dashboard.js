@@ -3,7 +3,8 @@ import { state, branchName, deskById } from "../state.js";
 import { renderDonut, renderCapacityBar, categoryColor } from "../charts.js";
 import { openActionSheet } from "../ui.js";
 import { fmtBaht, fmtInt, fmtLak, fmtLakSigned, fmtUsd, escapeHtml } from "../util.js";
-import { t, pickName } from "../i18n.js";
+import { t, tf, pickName } from "../i18n.js";
+import { isAdmin } from "../session.js";
 
 // The category filter lists the SKU types the admin maintains in Settings.
 let categoryOptions = [];
@@ -142,6 +143,56 @@ async function refreshDashboard() {
   render(root, data);
 }
 
+// Admin "All branches": today's case checks per branch, worst first. Computed from the
+// cards of every branch (spec 3.4) so it matches what each branch sees.
+async function loadCaseHealth() {
+  let desks;
+  try {
+    ({ desks } = await api.deskCards(undefined, undefined));
+  } catch {
+    return;
+  }
+  const el = document.getElementById("case-health");
+  if (!el) return;
+  const byBranch = new Map();
+  for (const d of desks) {
+    const s = byBranch.get(d.branch_id) ?? { branch_id: d.branch_id, cases: 0, checked: 0, behind: 0, overdue: 0 };
+    s.cases++;
+    if (d.tier === "done_today") s.checked++;
+    if (d.tier === "behind_1") s.behind++;
+    if (d.tier === "overdue") s.overdue++;
+    byBranch.set(d.branch_id, s);
+  }
+  const ratio = (r) => r.checked / (r.cases || 1);
+  const rows = [...byBranch.values()].sort((a, b) => b.overdue - a.overdue || b.behind - a.behind || ratio(a) - ratio(b));
+  if (!rows.length) return;
+  const worst = (r) =>
+    r.overdue
+      ? { label: t("dashboard.worstOverdue"), cls: "bg-danger-bg text-danger", bar: "border-l-danger" }
+      : r.behind
+      ? { label: t("dashboard.worstBehind"), cls: "bg-warning-bg text-warning", bar: "border-l-amber-500" }
+      : { label: t("dashboard.worstOk"), cls: "bg-success-bg text-success", bar: "border-l-success" };
+  el.innerHTML = `
+    <h2 class="mb-3 mt-5 text-sm font-extrabold text-gray-900">${t("dashboard.caseHealth")}</h2>
+    <div class="card divide-y divide-hairline p-0">
+      ${rows
+        .map((r) => {
+          const w = worst(r);
+          const detail = [tf("dashboard.checkedOfTotal", { c: r.checked, n: r.cases }), r.behind ? tf("dashboard.behindN", { n: r.behind }) : "", r.overdue ? tf("dashboard.overdueN", { n: r.overdue }) : ""]
+            .filter(Boolean)
+            .join(" · ");
+          return `<div class="flex items-center justify-between gap-2 border-l-4 px-4 py-3 ${w.bar}">
+            <div class="min-w-0">
+              <div class="truncate text-sm font-extrabold text-gray-900">${escapeHtml(branchName(r.branch_id))}</div>
+              <div class="text-[11px] font-semibold text-gray-600">${escapeHtml(detail)}</div>
+            </div>
+            <span class="status-pill shrink-0 ${w.cls}">${w.label}</span>
+          </div>`;
+        })
+        .join("")}
+    </div>`;
+}
+
 function watchlistRow(item, kind) {
   return `
     <div class="flex items-center justify-between gap-2 py-1.5">
@@ -273,9 +324,13 @@ function render(root, data) {
       <div id="donut-chart"></div>
     </div>
 
+    <div id="case-health"></div>
+
     <h2 class="mb-3 mt-5 text-sm font-extrabold text-gray-900">${t("dashboard.branches")}</h2>
     <div id="branch-cards" class="grid grid-cols-1 gap-3 md:grid-cols-2"></div>
   `;
+
+  if (isAdmin(state.user) && !state.dashboard.branch) loadCaseHealth();
 
   const statusLabel = { in_stock: t("dashboard.inStock"), low_stock: t("dashboard.lowStockFlag"), depleted: t("dashboard.depleted") };
   renderCapacityBar(

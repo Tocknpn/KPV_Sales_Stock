@@ -116,6 +116,13 @@ export const api = {
   createUser: (payload) => post(`/users`, payload),
   updateUser: (id, payload) => patch(`/users/${id}`, payload),
   audit: (limit = 50) => request(`/audit?limit=${limit}`),
+
+  myCases: (branchId) => request(`/my-cases?${query({ branchId })}`),
+  assignDesk: (deskId, staffId, note) => post(`/desks/${encodeURIComponent(deskId)}/assign`, { staffId, note }),
+  releaseDesk: (deskId) => post(`/desks/${encodeURIComponent(deskId)}/release`),
+  closedDays: (params) => request(`/closed-days?${query(params ?? {})}`),
+  addClosedDays: (payload) => post(`/closed-days`, payload),
+  removeClosedDay: (branchId, date) => request(`/closed-days?${query({ branchId, date })}`, { method: "DELETE" }),
 };
 
 // Printing needs the login token, which a plain new-tab link cannot send. The
