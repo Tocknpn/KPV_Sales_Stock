@@ -1,7 +1,7 @@
 // In-memory demo dataset, built relative to a given business date so the demo
 // always has a few finished days behind "today". Used whenever Supabase is not
-// configured (local development and tests). scripts/gen-seed.ts turns the same
-// dataset into supabase/seed.sql.
+// configured (local development and tests). Test data for a real Supabase project
+// is supabase/seed_mock_data.sql (hand-written, tagged is_seed).
 import type {
   Branch,
   Desk,
@@ -15,6 +15,9 @@ import type {
   StaffAccount,
   Transfer,
   AuditEntry,
+  ClosedDay,
+  DeskAssignment,
+  ReplenishmentRule,
 } from "./types";
 
 export interface DemoData {
@@ -31,6 +34,9 @@ export interface DemoData {
   config: SystemConfig;
   transfers: Transfer[];
   audit: AuditEntry[];
+  closedDays: ClosedDay[];
+  assignments: DeskAssignment[];
+  rules: ReplenishmentRule[];
 }
 
 export const DEMO_ADMIN_ID = "11111111-0000-0000-0000-000000000001";
@@ -40,6 +46,10 @@ export const DEMO_STAFF = {
   "B-IT": "11111111-0000-0000-0000-000000000004",
   "B-VT": "11111111-0000-0000-0000-000000000005",
 } as const;
+// One branch manager (Morning Market), PIN 5678.
+// A second Morning Market staff member, so handovers have somebody to hand to. PIN 1234.
+export const DEMO_STAFF_MM2 = "11111111-0000-0000-0000-000000000007";
+export const DEMO_MANAGER = { "B-MM": "11111111-0000-0000-0000-000000000006" } as const;
 
 function shiftDate(dateStr: string, days: number) {
   const d = new Date(`${dateStr}T00:00:00Z`);
@@ -79,19 +89,28 @@ function sku(
     avg_daily_sales,
     order_lead_time_days,
     active: true,
+    group_name: null,
     icon: icon ?? type.icon,
   };
 }
 
-// Demo PINs: Admin "9999" (all branches), each branch staff account "1234".
+// Demo PINs: Admin "9999" (all branches), each branch staff account "1234",
+// the Morning Market manager "5678".
 // Hashes precomputed with the pbkdf2 routine in src/auth.ts.
-function account(id: string, branch_id: string | null, display_name: string, pin_hash: string, created_at: string): StaffAccount {
+function account(
+  id: string,
+  branch_id: string | null,
+  display_name: string,
+  pin_hash: string,
+  created_at: string,
+  role: StaffAccount["role"] = branch_id ? "staff" : "admin"
+): StaffAccount {
   return {
     id,
     branch_id,
     display_name,
     pin_hash,
-    role: branch_id ? "staff" : "admin",
+    role,
     active: true,
     token_version: 0,
     failed_attempts: 0,
@@ -137,6 +156,8 @@ export function buildDemoData(today: string): DemoData {
     account(DEMO_STAFF["B-TS"], "B-TS", "Bounmy K.", "pbkdf2$100000$c7dbf04fcf343d0e37d4ed5eae7686a5$32d08f9b51e411c2888ca090837a53774162389bf23143e3d4e964d14d21ace5", startedAt),
     account(DEMO_STAFF["B-IT"], "B-IT", "Vilayphone N.", "pbkdf2$100000$25cc26e71c8f12edb467d813fabcb081$91c5af05b41c76bcd563d587af00a4ce04b4fdf87c468333b1f812c7a391984a", startedAt),
     account(DEMO_STAFF["B-VT"], "B-VT", "Khamla P.", "pbkdf2$100000$fc5f0bc2c09393ef3814d8fbff21b477$7246099325f4a7e9d7003bbb43f2a351b4d6908e9f04fef2ced496dc309aee88", startedAt),
+    account(DEMO_MANAGER["B-MM"], "B-MM", "Manivone M.", "pbkdf2$100000$a1b2c3d4e5f60718293a4b5c6d7e8f90$2efde50c6cbd8c79669882d0346318c69b15af97db7c12a05f6909d105efdfb6", startedAt, "manager"),
+    account(DEMO_STAFF_MM2, "B-MM", "Noy P.", "pbkdf2$100000$f9a0b9935d5ed4f141b351308c396b6f$322d97255131fbbb277ca489bfbf0e7fcc8e6c1ac24e632256dc0ae5a8706edd", startedAt),
   ];
 
   const T = {
@@ -171,6 +192,28 @@ export function buildDemoData(today: string): DemoData {
     sku("SP-902", "Logo Paper Bag", "ຖົງເຈ້ຍໂລໂກ້", T.supplies, null, null, null, 0, 3500, 8000, 30, null, null, "bag"),
     sku("SP-903", "Branded Pen", "ປາກກາ", T.supplies, null, null, null, 0, 5000, 12000, 30, null, null, "pen"),
     sku("SP-904", "Ceramic Mug", "ຈອກເຊລາມິກ", T.supplies, null, null, null, 0, 32000, 65000, 15, null, null, "mug"),
+  ];
+
+  // The demo necklaces form one product family.
+  for (const s of skus) if (s.type_id === T.necklaces.type_id) s.group_name = "Snake Necklace";
+
+  // Replenishment rules: the per-SKU numbers above as company-wide SKU rules (what the
+  // migration does for a live database), plus one group rule for the necklace family.
+  const rule = (scope: ReplenishmentRule["scope"], scope_key: string, avg: number | null, lead: number | null): ReplenishmentRule => ({
+    id: `00000000-0000-0000-0000-${String(1000 + ruleSeq++).padStart(12, "0")}`,
+    scope,
+    scope_key,
+    branch_id: null,
+    avg_daily_sell: avg,
+    lead_time_days: lead,
+    updated_by: null,
+    updated_at: startedAt,
+    is_seed: false,
+  });
+  let ruleSeq = 0;
+  const rules: ReplenishmentRule[] = [
+    ...skus.filter((s) => s.avg_daily_sales != null || s.order_lead_time_days != null).map((s) => rule("sku", s.sku_id, s.avg_daily_sales, s.order_lead_time_days)),
+    rule("group", "Snake Necklace", 1.5, 7),
   ];
 
   // Four demo days per desk, oldest first; the last one is today.
@@ -312,8 +355,11 @@ export function buildDemoData(today: string): DemoData {
     ledger,
     documents,
     docCounters: { [`B-MM/${year}`]: 2, [`B-TS/${year}`]: 1 },
-    config: { id: 1, safety_buffer_days: 2, spot_lak_per_baht: 32500000, usd_to_lak_rate: 20800, updated_at: startedAt },
+    config: { id: 1, safety_buffer_days: 2, spot_lak_per_baht: 32500000, usd_to_lak_rate: 20800, default_lead_time_days: 7, warning_margin_days: 3, velocity_window_days: 28, updated_at: startedAt },
     transfers: [],
     audit: [],
+    closedDays: [],
+    assignments: [],
+    rules,
   };
 }

@@ -4,13 +4,22 @@
 # for real). Demo logins and PINs are documented in src/demoData.ts.
 
 # --- Real database (Supabase) ---
-SUPABASE_URL=https://YOUR-PROJECT.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+SUPABASE_URL=https://tpekfhbjbosbeikawkys.supabase.co
+# Server-side only: the Worker is the only thing that talks to Supabase.
+# No VITE_* variable and no anon key exist in this project: the browser never
+# receives a Supabase key (spec D3), so every rule is checked by the Worker and
+# the database, not by a key held in a phone.
+SUPABASE_SERVICE_ROLE_KEY=
 
 # Required whenever SUPABASE_* is set: signs login sessions. Use a long random
 # value (e.g. `openssl rand -hex 32`) and never share it. Changing it logs
 # everyone out.
-AUTH_SECRET=replace-with-a-long-random-value
+AUTH_SECRET=
+
+# test       = the database holds mock data: a TEST DATA strip shows on every screen.
+# production = real data: mock-data accounts cannot log in.
+# If unset: production when SUPABASE_* is set, demo otherwise.
+KPV_DATA_MODE=test
 
 # Demo only: pin "today" to a fixed date. Ignored when Supabase is set.
 # DEMO_DATE=2026-11-12

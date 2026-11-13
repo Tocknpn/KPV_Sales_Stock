@@ -1,13 +1,13 @@
-// Linked Transfer-out (to a desk in another branch) and Move (to another desk
-// in the same branch). The sender's row carries the quantity in transfer_out /
-// move immediately; the gold is "in transit" until the receiving desk confirms,
+// Linked Transfer-out to a desk in another branch (same-branch Moves are in
+// routes/moves.ts). The sender's row carries the quantity in transfer_out
+// immediately; the gold is "in transit" until the receiving desk confirms,
 // which credits that desk's transfer_in on its open day. Neither side's
 // closing is ever blocked by the other.
 // Mounted behind requireAuth in src/index.ts.
-import { newRouter, readBody, HttpError, scopeBranch, requireDesk, requireDate, requireOpenDay } from "../app";
-import { getStore } from "../store";
+import { storeFor, newRouter, readBody, HttpError, scopeBranch, requireDesk, requireDate, requireOpenDay } from "../app";
 import { assertBranchAccess } from "../auth";
 import { businessDate } from "../time";
+import { mixedTestEnds } from "../dataMode";
 import { computeClosing, parseQty } from "../logic";
 
 const r = newRouter();
@@ -15,7 +15,7 @@ const r = newRouter();
 // Every active desk in the company — the destination picker. Desk names are
 // not sensitive, and staff must be able to send to another branch.
 r.get("/transfers/destinations", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const [desks, branches] = await Promise.all([store.desks(), store.branches()]);
   const branchName = new Map(branches.map((b) => [b.branch_id, b]));
   return c.json({
@@ -32,7 +32,7 @@ r.get("/transfers/destinations", async (c) => {
 });
 
 r.get("/transfers", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const branchId = scopeBranch(user, c.req.query("branchId") || undefined);
   const status = c.req.query("status");
@@ -45,7 +45,7 @@ r.get("/transfers", async (c) => {
 });
 
 r.post("/transfers", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const today = businessDate(c.env);
@@ -56,6 +56,9 @@ r.post("/transfers", async (c) => {
   const to = (await store.desks()).find((d) => d.desk_id === body.toDeskId);
   if (!to || !to.active) throw new HttpError(400, "Unknown destination desk", "BAD_DESTINATION");
   if (to.desk_id === from.desk_id) throw new HttpError(400, "Destination must be a different desk", "SAME_DESK");
+  // Same-branch hand-overs are instant and all-or-nothing: see routes/moves.ts.
+  if (to.branch_id === from.branch_id) throw new HttpError(400, "Use a Move for a case in the same branch", "USE_MOVE");
+  if (mixedTestEnds(from, to)) throw new HttpError(400, "Do not move gold between a real case and a test-data case", "MIXED_TEST_TRANSFER");
 
   const qty = parseQty(body.qty);
   if (qty === null || qty === 0) throw new HttpError(400, "Quantity must be a whole number above 0", "BAD_QTY");
@@ -65,10 +68,8 @@ r.post("/transfers", async (c) => {
   const available = computeClosing(row);
   if (qty > available) throw new HttpError(409, `Only ${available} pcs available to send`, "NOT_ENOUGH_STOCK", { available });
 
-  // Same branch = Move, another branch = Transfer-out.
-  const kind = to.branch_id === from.branch_id ? "move" : "transfer";
   const transfer = await store.createTransfer({
-    kind,
+    kind: "transfer",
     from_desk_id: from.desk_id,
     from_branch_id: from.branch_id,
     to_desk_id: to.desk_id,
@@ -80,7 +81,7 @@ r.post("/transfers", async (c) => {
   });
   try {
     const key = { ledger_date: date, desk_id: from.desk_id, sku_id: skuId };
-    const applied = await store.ledgerAdd(key, kind === "move" ? "move" : "transfer_out", qty, user.accountId);
+    const applied = await store.ledgerAdd(key, "transfer_out", qty, user.accountId);
     if (applied === null) throw new HttpError(409, "That item is no longer on this desk today", "ROW_NOT_FOUND");
   } catch (err) {
     // The sender's stock was not reduced, so the transfer must not exist.
@@ -92,7 +93,7 @@ r.post("/transfers", async (c) => {
 
 // Sender takes back a transfer that has not been received yet.
 r.post("/transfers/:id/cancel", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const today = businessDate(c.env);
   const transfer = await store.getTransfer((c.req.param("id") ?? ""));
@@ -116,7 +117,7 @@ r.post("/transfers/:id/cancel", async (c) => {
 
 // Receiving desk confirms the gold arrived. It lands on the desk's open day.
 r.post("/transfers/:id/receive", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const today = businessDate(c.env);

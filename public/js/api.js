@@ -55,7 +55,8 @@ const patch = (path, payload) => request(path, { method: "PATCH", body: JSON.str
 const query = (params) => new URLSearchParams(Object.entries(params).filter(([, v]) => v !== null && v !== undefined && v !== "")).toString();
 
 export const api = {
-  meta: () => request("/meta"),
+  meta: () => request("/app-meta"),
+  dataMeta: () => request("/meta"),
   branches: () => request("/branches"),
 
   authAccounts: (branchId) => request(`/auth/accounts${branchId ? `?branchId=${branchId}` : ""}`),
@@ -81,13 +82,17 @@ export const api = {
   deskDetail: (deskId, date) => request(`/stock/desk/${deskId}?${query({ date })}`),
   calendar: (branchId, month) => request(`/stock/calendar?${query({ branchId, month })}`),
   checkIn: (deskId, date) => post(`/stock/desk/${deskId}/checkin`, { date }),
-  saveEntries: (deskId, payload) => post(`/stock/desk/${deskId}/entries`, payload),
+  // Compare-and-set save: changes = [{sku_id, field, from?, to}].
+  saveChanges: (deskId, payload) => post(`/stock/desk/${deskId}/entries`, payload),
+  closeDay: (deskId, payload) => post(`/stock/desk/${deskId}/close`, payload),
   transitionDesk: (deskId, payload) => post(`/stock/desk/${deskId}/transition`, payload),
   reopenDesk: (deskId, payload) => post(`/stock/desk/${deskId}/reopen`, payload),
   addDeskSku: (deskId, payload) => post(`/stock/desk/${deskId}/sku`, payload),
   removeDeskSku: (deskId, skuId, date) => request(`/stock/desk/${deskId}/sku/${encodeURIComponent(skuId)}?${query({ date })}`, { method: "DELETE" }),
 
   transferDestinations: () => request(`/transfers/destinations`),
+  move: (payload) => post(`/moves`, payload),
+  undoMove: (ticketId, clientRef) => post(`/moves/${encodeURIComponent(ticketId)}/undo`, { clientRef }),
   transfers: (params) => request(`/transfers?${query(params ?? {})}`),
   createTransfer: (payload) => post(`/transfers`, payload),
   cancelTransfer: (id) => post(`/transfers/${id}/cancel`),
@@ -104,13 +109,21 @@ export const api = {
 
   settingsSummary: () => request("/settings/summary"),
   saveConfig: (payload) => post("/settings/config", payload),
-  runRate: () => request("/settings/run-rate"),
-  saveRunRate: (skuId, payload) => post(`/settings/run-rate/${encodeURIComponent(skuId)}`, payload),
+  replenishment: (branchId) => request(`/replenishment?${query({ branchId })}`),
+  saveRule: (payload) => request("/replenishment/rules", { method: "PUT", body: JSON.stringify(payload) }),
+  bulkRule: (payload) => post("/replenishment/rules/bulk", payload),
   about: () => request("/settings/about"),
 
   createUser: (payload) => post(`/users`, payload),
   updateUser: (id, payload) => patch(`/users/${id}`, payload),
-  audit: (limit = 50) => request(`/audit?limit=${limit}`),
+  audit: (params) => request(`/audit?${query(params ?? {})}`),
+
+  myCases: (branchId) => request(`/my-cases?${query({ branchId })}`),
+  assignDesk: (deskId, staffId, note) => post(`/desks/${encodeURIComponent(deskId)}/assign`, { staffId, note }),
+  releaseDesk: (deskId) => post(`/desks/${encodeURIComponent(deskId)}/release`),
+  closedDays: (params) => request(`/closed-days?${query(params ?? {})}`),
+  addClosedDays: (payload) => post(`/closed-days`, payload),
+  removeClosedDay: (branchId, date) => request(`/closed-days?${query({ branchId, date })}`, { method: "DELETE" }),
 };
 
 // Printing needs the login token, which a plain new-tab link cannot send. The

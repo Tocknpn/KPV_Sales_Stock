@@ -1,7 +1,7 @@
 // Drives the real Hono app against a fresh in-memory demo store.
 import app from "../src/index";
 import { resetDemoStore } from "../src/store";
-import { DEMO_ADMIN_ID, DEMO_STAFF } from "../src/demoData";
+import { DEMO_ADMIN_ID, DEMO_MANAGER, DEMO_STAFF } from "../src/demoData";
 
 export const TODAY = "2026-11-12";
 export const YESTERDAY = "2026-11-11";
@@ -17,7 +17,7 @@ export function freshApp() {
   resetDemoStore();
 }
 
-export async function call(session: Session | null, method: string, path: string, body?: unknown, date = session?.date ?? TODAY) {
+export async function call(session: Session | null, method: string, path: string, body?: unknown, date = session?.date ?? TODAY, env: Record<string, string> = {}) {
   const res = await app.request(
     `/api${path}`,
     {
@@ -25,7 +25,7 @@ export async function call(session: Session | null, method: string, path: string
       headers: { "Content-Type": "application/json", ...(session ? { Authorization: `Bearer ${session.token}` } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
     },
-    { DEMO_DATE: date }
+    { DEMO_DATE: date, ...env }
   );
   const text = await res.text();
   let json: any = null;
@@ -43,6 +43,7 @@ export async function login(accountId: string, pin: string, date = TODAY): Promi
 
 export const asAdmin = (date = TODAY) => login(DEMO_ADMIN_ID, "9999", date);
 export const asStaff = (branch: keyof typeof DEMO_STAFF, date = TODAY) => login(DEMO_STAFF[branch], "1234", date);
+export const asManager = (branch: keyof typeof DEMO_MANAGER = "B-MM", date = TODAY) => login(DEMO_MANAGER[branch], "5678", date);
 export const on = (session: Session, date: string): Session => ({ ...session, date });
 
 // Fills in every count (= calculated closing) so a desk day can be closed.
@@ -50,16 +51,11 @@ export async function countEverything(session: Session, deskId: string, date: st
   const detail = (await call(session, "GET", `/stock/desk/${deskId}?date=${date}`)).json;
   return call(session, "POST", `/stock/desk/${deskId}/entries`, {
     date,
-    rows: detail.rows.map((r: any) => ({ sku_id: r.sku_id, counted_qty: r.closing_qty })),
+    changes: detail.rows.map((r: any) => ({ sku_id: r.sku_id, field: "counted_qty", to: r.closing_qty })),
   });
 }
 
 export async function closeDay(session: Session, deskId: string, date: string) {
-  const detail = (await call(session, "GET", `/stock/desk/${deskId}?date=${date}`)).json;
-  if (detail.status === "check_in") {
-    const step = await call(session, "POST", `/stock/desk/${deskId}/transition`, { date, toStatus: "final_stock" });
-    if (step.status !== 200) throw new Error(`final_stock failed: ${step.text}`);
-  }
   await countEverything(session, deskId, date);
-  return call(session, "POST", `/stock/desk/${deskId}/transition`, { date, toStatus: "done" });
+  return call(session, "POST", `/stock/desk/${deskId}/close`, { date });
 }

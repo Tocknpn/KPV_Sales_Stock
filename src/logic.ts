@@ -146,6 +146,10 @@ function lastActor(rows: LedgerRow[], day: DeskDay | undefined, staffById: Map<s
   return actorId ? staffById.get(actorId)?.display_name ?? null : null;
 }
 
+// Branch-wide replenishment status of a SKU, keyed "branchId|skuId". Structural
+// so logic.ts does not depend on replenishment.ts (which depends on it).
+export type BranchStatuses = Map<string, { status: "critical" | "warning" | "ok" | "no_data"; position: number; onHand: number; fixedLevel: boolean; avg: { value: number | null }; lead: { value: number }; runwayDays: number | null }>;
+
 export function buildDeskCards(
   desks: Desk[],
   branches: Branch[],
@@ -153,7 +157,9 @@ export function buildDeskCards(
   days: DeskDay[],
   ledgerRows: LedgerRow[],
   staffAccounts: StaffAccount[],
-  config: SystemConfig
+  _config: SystemConfig,
+  // Branch-wide status per "branchId|skuId" (see loadBranchStatuses).
+  statuses: BranchStatuses = new Map()
 ) {
   const branchById = new Map(branches.map((b) => [b.branch_id, b]));
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
@@ -167,13 +173,14 @@ export function buildDeskCards(
       const rows = ledgerRows.filter((r) => r.desk_id === desk.desk_id && !r.excluded);
       let totalPcs = 0;
       let totalBaht = 0;
-      let lowStockCount = 0;
+      // SKUs on this case whose BRANCH-wide runway is Critical (a case alone says nothing).
+      let criticalCount = 0;
       for (const r of rows) {
         const sku = skuById.get(r.sku_id);
         const qty = currentQty(r, status);
         totalPcs += qty;
         totalBaht += bahtOf(sku, qty);
-        if (isLowStock(qty, reorderPoint(sku, config))) lowStockCount++;
+        if (statuses.get(`${desk.branch_id}|${r.sku_id}`)?.status === "critical") criticalCount++;
       }
       const branch = branchById.get(desk.branch_id);
       return {
@@ -187,7 +194,7 @@ export function buildDeskCards(
         totalPcs,
         totalBaht: round2(totalBaht),
         skuCount: rows.length,
-        lowStockCount,
+        criticalCount,
       };
     });
 }
@@ -200,7 +207,9 @@ export function buildDeskDetail(
   ledgerRows: LedgerRow[],
   staffAccounts: StaffAccount[],
   config: SystemConfig,
-  weights: SkuWeight[] = []
+  weights: SkuWeight[] = [],
+  // Branch-wide status per "branchId|skuId"; the only source of low-stock alerts.
+  statuses: BranchStatuses = new Map()
 ) {
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
   const staffById = new Map(staffAccounts.map((s) => [s.id, s]));
@@ -210,10 +219,11 @@ export function buildDeskDetail(
   const rows = visibleRows.map((r) => {
     const sku = skuById.get(r.sku_id);
     const closing = computeClosing(r);
-    const threshold = reorderPoint(sku, config);
+    const branchRow = statuses.get(`${desk.branch_id}|${r.sku_id}`);
+    const avg = branchRow?.avg.value ?? null;
     const variance = r.counted_qty != null ? r.counted_qty - closing : null;
-    const lifetime = estLifetimeDays(sku, closing);
-    const leadTime = sku?.order_lead_time_days ?? null;
+    const lifetime = avg != null && avg > 0 ? round1(closing / avg) : null;
+    const leadTime = avg != null ? branchRow?.lead.value ?? null : null;
     return {
       sku_id: r.sku_id,
       name_en: sku?.name_en ?? r.sku_id,
@@ -241,9 +251,9 @@ export function buildDeskDetail(
       baht_weight_each: sku?.baht_weight ?? 0,
       gram_weight_each: sku?.std_gram_weight ?? 0,
       value_lak: round2(valueLak(sku, closing, config)),
-      low_stock: isLowStock(closing, threshold),
-      threshold,
-      avg_daily_sales: sku?.avg_daily_sales ?? null,
+      branch_status: branchRow?.status ?? "no_data",
+      runway_days: branchRow?.runwayDays ?? null,
+      avg_daily_sales: avg,
       order_lead_time_days: leadTime,
       est_lifetime_days: lifetime,
       lifetime_alert: lifetime !== null && leadTime !== null && lifetime < leadTime,
@@ -269,6 +279,15 @@ export function buildDeskDetail(
     lastActorName: lastActor(visibleRows, day, staffById),
     status,
     safe_drop_note: day?.safe_drop_note ?? null,
+    // For the "Closed 18:42 by Noy" banner and the "Changed by Noy" conflict prompt.
+    closed_at: day?.done_at ?? null,
+    closed_by_name: day?.done_by ? staffById.get(day.done_by)?.display_name ?? null : null,
+    // Only people who touched this desk's day, not every account company-wide.
+    actors: Object.fromEntries(
+      [...new Set([...ledgerRows.map((r) => r.performed_by), day?.done_by, day?.checked_in_by])]
+        .filter((id): id is string => Boolean(id) && staffById.has(id as string))
+        .map((id) => [id, staffById.get(id)!.display_name])
+    ),
     rows,
     totals: {
       pcs: totals.pcs,
@@ -277,7 +296,7 @@ export function buildDeskDetail(
       valueLak: round2(totals.valueLak),
       valueUsd: config.usd_to_lak_rate > 0 ? round2(totals.valueLak / config.usd_to_lak_rate) : 0,
     },
-    lowStockItems: rows.filter((r) => r.low_stock).length,
+    criticalItems: rows.filter((r) => r.branch_status === "critical").length,
     stockHealth: {
       avgLifetimeDays: withLifetime.length ? round1(withLifetime.reduce((s, r) => s + (r.est_lifetime_days ?? 0), 0) / withLifetime.length) : null,
       alertSkus: rows
@@ -358,6 +377,15 @@ export interface DashboardInput {
   inTransit: Transfer[];
   config: SystemConfig;
   filter: DashboardFilter;
+  // Branch-wide status per "branchId|skuId"; decides what counts as low stock.
+  statuses?: BranchStatuses;
+}
+
+interface LowItem {
+  sku: MasterSku;
+  branchId: string;
+  deskId: string;
+  st: BranchStatuses extends Map<string, infer V> ? V : never;
 }
 
 interface Position {
@@ -370,6 +398,13 @@ interface Position {
 
 export function buildDashboard(input: DashboardInput) {
   const { today, skus, branches, desks, latestDays, latestRows, movementRows, agingRows, inTransit, config, filter } = input;
+  const statuses = input.statuses ?? new Map();
+  // Low = the SKU's runway at this BRANCH is Critical or Warning.
+  const branchStatus = (p: { branch_id: string; sku: MasterSku }) => statuses.get(`${p.branch_id}|${p.sku.sku_id}`);
+  const isLow = (p: { branch_id: string; sku: MasterSku }) => {
+    const st = branchStatus(p)?.status;
+    return st === "critical" || st === "warning";
+  };
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
   const statusByDesk = new Map(latestDays.map((d) => [d.desk_id, d.status]));
   const categoryOk = (sku: MasterSku | undefined) => Boolean(sku) && (!filter.category || sku!.category === filter.category);
@@ -388,10 +423,44 @@ export function buildDashboard(input: DashboardInput) {
     });
   }
 
-  const low = positions.filter((p) => isLowStock(p.qty, p.point)).sort((a, b) => b.point - b.qty - (a.point - a.qty));
+  const low = positions.filter(isLow);
+  // Watchlist: one line per branch and SKU, built from the branch statuses so a SKU that
+  // is only on a truck (nothing on hand anywhere) still shows. Worst runway first.
+  const deskBranch = filter.deskId ? desks.find((d) => d.desk_id === filter.deskId)?.branch_id : undefined;
+  const lowItems: LowItem[] = [];
+  for (const [key, st] of statuses) {
+    if (st.status !== "critical" && st.status !== "warning") continue;
+    const [branchId, skuId] = key.split("|");
+    const sku = skuById.get(skuId);
+    if (!sku || !categoryOk(sku)) continue;
+    if (filter.branchId && branchId !== filter.branchId) continue;
+    const held = positions.filter((p) => p.branch_id === branchId && p.sku.sku_id === skuId).sort((a, b) => b.qty - a.qty);
+    if (filter.deskId && (branchId !== deskBranch || !held.some((p) => p.desk_id === filter.deskId))) continue;
+    const deskId = filter.deskId ?? held[0]?.desk_id ?? inTransit.find((t) => t.sku_id === skuId && t.to_branch_id === branchId)?.to_desk_id ?? "";
+    lowItems.push({ sku, branchId, deskId, st });
+  }
+  lowItems.sort((a, b) => (a.st.status === "critical" ? 0 : 1) - (b.st.status === "critical" ? 0 : 1) || (a.st.runwayDays ?? 0) - (b.st.runwayDays ?? 0));
   const over = positions
     .filter((p) => p.point > 0 && p.qty > p.point * OVERSTOCK_MULTIPLIER)
     .sort((a, b) => b.qty - b.point * OVERSTOCK_MULTIPLIER - (a.qty - a.point * OVERSTOCK_MULTIPLIER));
+  const lowItem = ({ sku, branchId, deskId, st }: LowItem) => {
+    const avg = st.avg.value;
+    const fixed = st.fixedLevel || avg == null;
+    return {
+      sku_id: sku.sku_id,
+      name_en: sku.name_en,
+      name_lo: sku.name_lo,
+      category: sku.category,
+      desk_id: deskId,
+      branch_id: branchId,
+      // Runway items compare the branch position with the level that clears the warning;
+      // a fixed-level warning compares what is on hand with the SKU's fixed level.
+      closing: fixed ? st.onHand : st.position,
+      reorder_level: fixed ? sku.reorder_level : Math.ceil((avg as number) * (st.lead.value + config.warning_margin_days)),
+      status: st.status,
+      runway_days: st.runwayDays,
+    };
+  };
   const watchItem = (p: Position) => ({
     sku_id: p.sku.sku_id,
     name_en: p.sku.name_en,
@@ -443,7 +512,7 @@ export function buildDashboard(input: DashboardInput) {
   const statusCounts = { in_stock: 0, low_stock: 0, depleted: 0 };
   for (const p of scoped) {
     if (p.qty <= 0) statusCounts.depleted++;
-    else if (isLowStock(p.qty, p.point)) statusCounts.low_stock++;
+    else if (isLow(p)) statusCounts.low_stock++;
     else statusCounts.in_stock++;
   }
   const lineTotal = scoped.length || 1;
@@ -480,7 +549,8 @@ export function buildDashboard(input: DashboardInput) {
         baht: round2(mine.reduce((s, p) => s + bahtOf(p.sku, p.qty), 0)),
         pcs: mine.reduce((s, p) => s + p.qty, 0),
         lakValue: round2(mine.reduce((s, p) => s + valueLak(p.sku, p.qty, config), 0)),
-        lowCount: mine.filter((p) => isLowStock(p.qty, p.point)).length,
+        lowCount: new Set(mine.filter(isLow).map((p) => p.sku.sku_id)).size,
+        criticalCount: new Set(mine.filter((p) => branchStatus(p)?.status === "critical").map((p) => p.sku.sku_id)).size,
         desksTotal: myDesks.length,
         desksDoneToday: myDesks.filter((d) => doneToday(d.desk_id)).length,
       };
@@ -518,9 +588,9 @@ export function buildDashboard(input: DashboardInput) {
     branchCards,
     movement: buildMovement(movementRows.filter((r) => categoryOk(skuById.get(r.sku_id))), skus, config),
     watchlist: {
-      lowCount: low.length,
+      lowCount: lowItems.length,
       overCount: over.length,
-      topLow: low.slice(0, 5).map(watchItem),
+      topLow: lowItems.slice(0, 5).map(lowItem),
       topOver: over.slice(0, 5).map(watchItem),
     },
     aging: buildAging(skus, agingRows, filter),
@@ -705,7 +775,7 @@ export function skuSummary(skus: MasterSku[]) {
 
 export function staffAccountSummary(staffAccounts: StaffAccount[], branches: Branch[], nowIso: string) {
   const branchById = new Map(branches.map((b) => [b.branch_id, b]));
-  const roleCounts: Record<string, number> = { staff: 0, admin: 0 };
+  const roleCounts: Record<string, number> = { staff: 0, manager: 0, admin: 0 };
   for (const a of staffAccounts) if (a.active) roleCounts[a.role] = (roleCounts[a.role] ?? 0) + 1;
   return {
     roleCounts,

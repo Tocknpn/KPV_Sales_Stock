@@ -1,10 +1,10 @@
 // Dashboard and Report — both computed entirely from the ledger.
 // Mounted behind requireAuth in src/index.ts.
-import { newRouter, HttpError, scopeBranch } from "../app";
-import { getStore } from "../store";
+import { storeFor, newRouter, HttpError, scopeBranch } from "../app";
 import { assertBranchAccess } from "../auth";
 import { businessDate, addDays, isValidMonth, monthRange } from "../time";
 import { buildDashboard, buildReport, AGING_LOOKBACK_DAYS } from "../logic";
+import { loadBranchStatuses } from "../replenishment";
 import type { Desk, SessionUser } from "../types";
 
 const r = newRouter();
@@ -19,7 +19,7 @@ function scopeDesk(user: SessionUser, desks: Desk[], deskId: string | undefined)
 }
 
 r.get("/dashboard", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const today = businessDate(c.env);
   const period = c.req.query("period") === "mtd" ? "mtd" : "today";
@@ -41,6 +41,7 @@ r.get("/dashboard", async (c) => {
     store.transfers({ branchId, status: "in_transit" }),
     store.config(),
   ]);
+  const statuses = await loadBranchStatuses(store, branchId ? [branchId] : branches.map((b) => b.branch_id), today);
   return c.json(
     buildDashboard({
       today,
@@ -53,13 +54,14 @@ r.get("/dashboard", async (c) => {
       agingRows: windowRows,
       inTransit,
       config,
+      statuses,
       filter: { branchId, deskId, category: c.req.query("category") || undefined, stockFlag },
     })
   );
 });
 
 r.get("/report", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const period = c.req.query("period") || businessDate(c.env).slice(0, 7);
   if (!isValidMonth(period)) throw new HttpError(400, "Invalid period", "BAD_MONTH");

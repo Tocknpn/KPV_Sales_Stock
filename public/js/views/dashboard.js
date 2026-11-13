@@ -2,8 +2,9 @@ import { api } from "../api.js";
 import { state, branchName, deskById } from "../state.js";
 import { renderDonut, renderCapacityBar, categoryColor } from "../charts.js";
 import { openActionSheet } from "../ui.js";
-import { fmtBaht, fmtInt, fmtLak, fmtLakSigned, fmtUsd, escapeHtml } from "../util.js";
-import { t, pickName } from "../i18n.js";
+import { fmtBaht, fmtInt, fmtLak, fmtLakSigned, fmtUsd, escapeHtml, fmtRunway } from "../util.js";
+import { t, tf, pickName } from "../i18n.js";
+import { isAdmin } from "../session.js";
 
 // The category filter lists the SKU types the admin maintains in Settings.
 let categoryOptions = [];
@@ -142,6 +143,136 @@ async function refreshDashboard() {
   render(root, data);
 }
 
+// Admin "All branches": today's case checks per branch, worst first. Computed from the
+// cards of every branch (spec 3.4) so it matches what each branch sees.
+async function loadCaseHealth() {
+  let desks;
+  try {
+    ({ desks } = await api.deskCards(undefined, undefined));
+  } catch {
+    return;
+  }
+  const el = document.getElementById("case-health");
+  if (!el) return;
+  const byBranch = new Map();
+  for (const d of desks) {
+    const s = byBranch.get(d.branch_id) ?? { branch_id: d.branch_id, cases: 0, checked: 0, behind: 0, overdue: 0 };
+    s.cases++;
+    if (d.tier === "done_today") s.checked++;
+    if (d.tier === "behind_1") s.behind++;
+    if (d.tier === "overdue") s.overdue++;
+    byBranch.set(d.branch_id, s);
+  }
+  const ratio = (r) => r.checked / (r.cases || 1);
+  const rows = [...byBranch.values()].sort((a, b) => b.overdue - a.overdue || b.behind - a.behind || ratio(a) - ratio(b));
+  if (!rows.length) return;
+  const worst = (r) =>
+    r.overdue
+      ? { label: t("dashboard.worstOverdue"), cls: "bg-danger-bg text-danger", bar: "border-l-danger" }
+      : r.behind
+      ? { label: t("dashboard.worstBehind"), cls: "bg-warning-bg text-warning", bar: "border-l-amber-500" }
+      : { label: t("dashboard.worstOk"), cls: "bg-success-bg text-success", bar: "border-l-success" };
+  el.innerHTML = `
+    <h2 class="mb-3 mt-5 text-sm font-extrabold text-gray-900">${t("dashboard.caseHealth")}</h2>
+    <div class="card divide-y divide-hairline p-0">
+      ${rows
+        .map((r) => {
+          const w = worst(r);
+          const detail = [tf("dashboard.checkedOfTotal", { c: r.checked, n: r.cases }), r.behind ? tf("dashboard.behindN", { n: r.behind }) : "", r.overdue ? tf("dashboard.overdueN", { n: r.overdue }) : ""]
+            .filter(Boolean)
+            .join(" · ");
+          return `<div class="flex items-center justify-between gap-2 border-l-4 px-4 py-3 ${w.bar}">
+            <div class="min-w-0">
+              <div class="truncate text-sm font-extrabold text-gray-900">${escapeHtml(branchName(r.branch_id))}</div>
+              <div class="text-[11px] font-semibold text-gray-600">${escapeHtml(detail)}</div>
+            </div>
+            <span class="status-pill shrink-0 ${w.cls}">${w.label}</span>
+          </div>`;
+        })
+        .join("")}
+    </div>`;
+}
+
+// Reorder panel: per branch, how many SKUs are Critical / Warning on branch-wide runway.
+// Tapping a count lists those SKUs under the branch.
+let reorderOpen = null; // "branchId|status"
+
+async function loadReorder() {
+  const branches = state.dashboard.branch
+    ? [state.dashboard.branch]
+    : isAdmin(state.user)
+    ? state.meta.branches.map((b) => b.branch_id)
+    : [state.user.branchId].filter(Boolean);
+  const results = await Promise.all(
+    branches.map((id) =>
+      api
+        .replenishment(id)
+        .then((res) => ({ branchId: id, rows: res.rows }))
+        .catch(() => null)
+    )
+  );
+  const el = document.getElementById("reorder-panel");
+  if (!el) return;
+  paintReorder(el, results.filter(Boolean));
+}
+
+function paintReorder(el, results) {
+  const countOf = (rows, status) => rows.filter((r) => r.status === status).length;
+  const pill = (branchId, rows, status, cls) => {
+    const n = countOf(rows, status);
+    const on = reorderOpen === `${branchId}|${status}`;
+    return `<button type="button" data-reorder="${escapeHtml(branchId)}|${status}" ${n ? "" : "disabled"} aria-expanded="${on}"
+      class="tap-target focus-ring min-w-0 rounded-xl px-3 text-xs font-extrabold ${n ? cls : "bg-gray-100 text-gray-500"} ${on ? "ring-2 ring-gray-900" : ""}">${t(`replen.status.${status}`)} · ${n}</button>`;
+  };
+  const listFor = (branchId, rows) => {
+    const [openBranch, openStatus] = (reorderOpen ?? "|").split("|");
+    if (openBranch !== branchId) return "";
+    const items = rows.filter((r) => r.status === openStatus);
+    return `<div class="divide-y divide-hairline border-t border-hairline px-4">
+      ${items
+        .map(
+          (r) => `<div class="flex items-center justify-between gap-2 py-2">
+        <div class="min-w-0">
+          <div class="truncate text-xs font-bold text-gray-900">${escapeHtml(r.name)}</div>
+          <div class="truncate text-[10px] text-gray-500">${escapeHtml(fmtRunway(r.runwayDays) ?? "")}${r.suggestedQty > 0 ? ` · ${escapeHtml(tf("replen.suggest", { n: r.suggestedQty }))}` : ""}</div>
+        </div>
+        <span class="status-pill shrink-0 ${openStatus === "critical" ? "bg-danger-bg text-danger" : "bg-warning-bg text-warning"}">${t(`replen.status.${openStatus}`)}</span>
+      </div>`
+        )
+        .join("")}
+    </div>`;
+  };
+  el.innerHTML = `
+    <div class="card mt-4 p-0">
+      <div class="px-4 pb-2 pt-4">
+        <h2 class="text-sm font-extrabold text-gray-900">${t("dashboard.reorder")}</h2>
+        <p class="text-[11px] text-gray-500">${t("dashboard.reorderSubtitle")}</p>
+      </div>
+      ${
+        results.length
+          ? results
+              .map(
+                ({ branchId, rows }) => `
+        <div class="border-t border-hairline">
+          <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
+            <div class="min-w-0 truncate text-sm font-extrabold text-gray-900">${escapeHtml(branchName(branchId))}</div>
+            <div class="flex gap-2">${pill(branchId, rows, "critical", "bg-danger-bg text-danger")}${pill(branchId, rows, "warning", "bg-warning-bg text-warning")}</div>
+          </div>
+          ${listFor(branchId, rows)}
+        </div>`
+              )
+              .join("")
+          : `<div class="border-t border-hairline px-4 py-3 text-[11px] text-gray-500">${t("dashboard.reorderNone")}</div>`
+      }
+    </div>`;
+  el.querySelectorAll("[data-reorder]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      reorderOpen = reorderOpen === btn.dataset.reorder ? null : btn.dataset.reorder;
+      paintReorder(el, results);
+    })
+  );
+}
+
 function watchlistRow(item, kind) {
   return `
     <div class="flex items-center justify-between gap-2 py-1.5">
@@ -199,6 +330,8 @@ function render(root, data) {
         <span>${portfolio.spotLakPerBaht > 0 ? `1 Baht = ${fmtInt(portfolio.spotLakPerBaht)} LAK` : t("dashboard.goldPriceMissing")}</span>
       </div>
     </div>
+
+    <div id="reorder-panel"></div>
 
     ${
       transit.count > 0
@@ -273,9 +406,15 @@ function render(root, data) {
       <div id="donut-chart"></div>
     </div>
 
+    <div id="case-health"></div>
+
     <h2 class="mb-3 mt-5 text-sm font-extrabold text-gray-900">${t("dashboard.branches")}</h2>
     <div id="branch-cards" class="grid grid-cols-1 gap-3 md:grid-cols-2"></div>
   `;
+
+  if (isAdmin(state.user) && !state.dashboard.branch) loadCaseHealth();
+  reorderOpen = null;
+  loadReorder();
 
   const statusLabel = { in_stock: t("dashboard.inStock"), low_stock: t("dashboard.lowStockFlag"), depleted: t("dashboard.depleted") };
   renderCapacityBar(

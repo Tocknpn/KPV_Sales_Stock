@@ -1,13 +1,15 @@
 // Generates the SQL files that set up a Supabase project:
 //
-//   npm run db:sql                      -> writes supabase/base.sql and supabase/seed.sql
+//   npm run db:sql                      -> writes supabase/base.sql
 //   npm run db:admin -- "Owner" 4821    -> prints SQL that creates the first admin
+//   npm run db:pin -- 1234              -> prints one PBKDF2 hash for that PIN
 //
 // base.sql  = what a real (production) database starts with: the 4 branches,
 //             the config row, and the standard SKU types and sizes. No people,
 //             no stock — those are added through the app.
-// seed.sql  = the same demo dataset the in-memory store uses (for testing a
-//             Supabase project before go-live). It WIPES app data first.
+// Test data lives in supabase/seed_mock_data.sql (hand-written, tagged is_seed,
+// removed by supabase/purge_seed_data.sql). The old seed.sql, which wiped the
+// database, is gone. db:pin was used once to fill the PIN constant in that file.
 import fs from "node:fs";
 import { buildDemoData } from "../src/demoData";
 import { hashPin, isValidPin } from "../src/auth";
@@ -47,56 +49,16 @@ function writeSqlFiles() {
     "\n" +
     insert("sku_weight", demo.skuWeights);
 
-  const ledgerCols = [
-    "ledger_date", "desk_id", "branch_id", "sku_id", "opening_qty", "stock_in", "transfer_in", "retail_sale", "wholesale",
-    "transfer_out", "destock", "destock_note", "move", "counted_qty", "counted_note", "performed_by", "excluded",
-  ];
-  const seed =
-    header("KPV Stock — DEMO data for testing (do NOT run on the production database)", [
-      `Built for business date ${today}. WIPES all app data, then loads the demo set.`,
-      "Demo PINs are documented in src/demoData.ts.",
-    ]) +
-    `truncate table audit_log, transfers, document_rows, documents, doc_counters, daily_stock_ledger, desk_days,\n` +
-    `  master_sku, sku_type, sku_weight, staff_accounts, desks, system_config, branches restart identity cascade;\n\n` +
-    insert("branches", demo.branches) +
-    "\n" +
-    insert("desks", demo.desks) +
-    "\n" +
-    insert("staff_accounts", demo.staffAccounts, ["id", "branch_id", "display_name", "pin_hash", "role", "active"]) +
-    "\n" +
-    insert("sku_type", demo.skuTypes) +
-    "\n" +
-    insert("sku_weight", demo.skuWeights) +
-    "\n" +
-    insert("master_sku", demo.skus) +
-    "\n" +
-    insert("system_config", [demo.config], ["id", "safety_buffer_days", "spot_lak_per_baht", "usd_to_lak_rate"]) +
-    "\n" +
-    insert("desk_days", demo.deskDays, ["desk_id", "ledger_date", "branch_id", "status", "safe_drop_note", "checked_in_by", "done_by", "done_at"]) +
-    "\n" +
-    // Rows are inserted while their day is still open; desk_days above already
-    // says "done", so the Done guard is lifted for the load only.
-    `alter table daily_stock_ledger disable trigger trg_ledger_guard_done;\n` +
-    insert("daily_stock_ledger", demo.ledger, ledgerCols) +
-    `alter table daily_stock_ledger enable trigger trg_ledger_guard_done;\n\n` +
-    insert("documents", demo.documents.map(({ rows: _rows, ...d }) => d)) +
-    "\n" +
-    insert(
-      "document_rows",
-      demo.documents.flatMap((d) => (d.rows ?? []).map(({ id: _id, ...r }) => r))
-    ) +
-    "\n" +
-    insert(
-      "doc_counters",
-      Object.entries(demo.docCounters).map(([key, last_seq]) => {
-        const [branch_id, year] = key.split("/");
-        return { branch_id, year: Number(year), last_seq };
-      })
-    );
-
   fs.writeFileSync("supabase/base.sql", base);
-  fs.writeFileSync("supabase/seed.sql", seed);
-  console.log(`Wrote supabase/base.sql and supabase/seed.sql (demo date ${today}).`);
+  console.log(`Wrote supabase/base.sql (demo date ${today}).`);
+}
+
+async function printPinHash(pin: string | undefined) {
+  if (!isValidPin(pin)) {
+    console.error("Usage: npm run db:pin -- 1234   (PIN = 4 digits)");
+    process.exit(1);
+  }
+  console.log(await hashPin(pin as string));
 }
 
 async function printAdminSql(name: string | undefined, pin: string | undefined) {
@@ -111,4 +73,5 @@ async function printAdminSql(name: string | undefined, pin: string | undefined) 
 
 const [mode, ...args] = process.argv.slice(2);
 if (mode === "admin") await printAdminSql(args[0], args[1]);
+else if (mode === "pin-hash") await printPinHash(args[0]);
 else writeSqlFiles();

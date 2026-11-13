@@ -1,3 +1,5 @@
+import { t, tf } from "./i18n.js";
+
 export function fmtInt(n) {
   return Math.round(n).toLocaleString("en-US");
 }
@@ -53,6 +55,13 @@ export function debounce(fn, ms = 250) {
     clearTimeout(t);
     t = setTimeout(() => fn(...args), ms);
   };
+}
+
+// "≈ 3.5 d" for a runway in days; "Out of stock" at zero; null when unknown.
+export function fmtRunway(days) {
+  if (days == null) return null;
+  if (days <= 0) return t("replen.outOfStock");
+  return tf("replen.runway", { n: (Math.round(days * 10) / 10).toFixed(1) });
 }
 
 export function clamp(n, min, max) {
@@ -116,4 +125,18 @@ export function healthClasses(health) {
     default:
       return { chip: "bg-danger-bg text-danger", bar: "#ee552b" };
   }
+}
+
+// Laos wall-clock time (HH:MM) and calendar date of an ISO timestamp. This
+// only formats a server-supplied instant; the client never decides "today".
+export function fmtClock(iso) {
+  return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Vientiane" });
+}
+
+export function laosDateOf(iso) {
+  return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Asia/Vientiane" });
+}
+
+export function flameIcon(cls = "h-3.5 w-3.5") {
+  return `<svg class="${cls}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2c.5 3-1 4.5-2.5 6.2C8 10 7 11.6 7 14a5 5 0 0 0 10 0c0-1.7-.7-3-1.6-4.2-.3 1-.9 1.7-1.7 2C14 9.5 13.4 5.2 12 2z"/></svg>`;
 }

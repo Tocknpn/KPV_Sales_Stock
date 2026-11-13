@@ -1,9 +1,34 @@
 // Full-screen login gate shown before the normal app chrome mounts. Flow:
 // Branch (or Owner/Admin) -> pick your name -> PIN pad -> session stored.
 import { api } from "../api.js";
-import { setSession } from "../session.js";
+import { setSession, clearSession } from "../session.js";
 import { toast } from "../ui.js";
 import { t } from "../i18n.js";
+
+// "Switch user" on a shared tablet: end the session and reopen login with the
+// current branch already chosen ("" = the owner/admin list).
+const PRESELECT_KEY = "kpv_login_branch";
+
+export async function switchUser(branchId) {
+  try {
+    await api.logout();
+  } catch {}
+  clearSession();
+  try {
+    sessionStorage.setItem(PRESELECT_KEY, branchId ?? "");
+  } catch {}
+  window.location.reload();
+}
+
+function takePreselectedBranch() {
+  try {
+    const v = sessionStorage.getItem(PRESELECT_KEY);
+    sessionStorage.removeItem(PRESELECT_KEY);
+    return v;
+  } catch {
+    return null;
+  }
+}
 
 export async function mountLogin(branches, onSuccess) {
   document.getElementById("topbar-slot").innerHTML = "";
@@ -12,6 +37,11 @@ export async function mountLogin(branches, onSuccess) {
 
   let step = "start"; // start -> account -> pin
   let selectedBranchId = null;
+  const preselected = takePreselectedBranch();
+  if (preselected !== null && (preselected === "" || branches.some((b) => b.branch_id === preselected))) {
+    selectedBranchId = preselected === "" ? null : preselected;
+    step = "account";
+  }
   let selectedAccount = null;
   let pin = "";
   let error = "";

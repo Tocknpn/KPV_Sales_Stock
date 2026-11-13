@@ -1,16 +1,27 @@
 // Daily Stock: desk cards, the desk day lifecycle
 // (not started -> check_in -> final_stock -> done) and row entry.
-import { newRouter, readBody, HttpError, scopeBranch, requireDesk, requireDate, assertDateWritable, getDay, requireOpenDay, audit } from "../app";
+import { storeFor, newRouter, readBody, HttpError, scopeBranch, requireDesk, requireDate, assertDateWritable, getDay, requireOpenDay, audit } from "../app";
 import type { Ctx } from "../app";
-import { getStore } from "../store";
-import type { Store, LedgerRowPatch, NewLedgerRow } from "../store";
-import { requireAdmin, assertBranchAccess } from "../auth";
-import { businessDate, datesInMonth, isValidMonth } from "../time";
-import { buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, parseQty, validateDeskDay } from "../logic";
-import type { DeskDay, LedgerRow, SessionUser } from "../types";
+import { LEDGER_CHANGE_FIELDS, TEXT_CHANGE_FIELDS } from "../store";
+import type { Store, LedgerRowPatch, NewLedgerRow, LedgerChange, LedgerChangeField } from "../store";
+import { requireManager, assertBranchAccess, isManagerOf } from "../auth";
+import { addDays, businessDate, datesInMonth, isValidMonth, laosDate } from "../time";
+import { buildDayStatus } from "../dayStatus";
+import { loadBranchStatuses } from "../replenishment";
+import { buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, computeClosing, parseQty, validateDeskDay } from "../logic";
+import type { Desk, DeskDay, LedgerRow, MasterSku, SessionUser, StaffAccount, Transfer } from "../types";
 
 // Mounted behind requireAuth in src/index.ts.
 const r = newRouter();
+
+// A branch manager may reopen a Done day of their own branch up to this many
+// days back; an admin has no limit.
+export const MANAGER_REOPEN_DAYS = 3;
+const withinManagerWindow = (date: string, today: string) => date >= addDays(today, -MANAGER_REOPEN_DAYS);
+
+function mayReopen(user: SessionUser, branchId: string, date: string, today: string) {
+  return user.role === "admin" || (isManagerOf(user, branchId) && withinManagerWindow(date, today));
+}
 
 function hasActivity(row: LedgerRow) {
   return (
@@ -27,7 +38,7 @@ function hasActivity(row: LedgerRow) {
 
 // Hands a closed day's stock to the following day: each SKU opens with what
 // was physically counted (or the calculated closing when there was no count).
-async function carryForward(store: Store, from: DeskDay, toDate: string, actor: string) {
+async function planCarry(store: Store, from: DeskDay, toDate: string, actor: string) {
   const [fromRows, toRows] = await Promise.all([
     store.ledger({ deskId: from.desk_id, date: from.ledger_date }),
     store.ledger({ deskId: from.desk_id, date: toDate }),
@@ -35,28 +46,83 @@ async function carryForward(store: Store, from: DeskDay, toDate: string, actor: 
   const existing = new Map(toRows.map((row) => [row.sku_id, row]));
   const inserts: NewLedgerRow[] = [];
   const patches: LedgerRowPatch[] = [];
+  // The next day's rows whose opening changes, with the closing they would get.
+  const reopenings: { row: LedgerRow; closing: number }[] = [];
   for (const row of fromRows) {
     if (row.excluded) continue;
     const opening = Math.max(0, carryQty(row));
     const target = existing.get(row.sku_id);
     const key = { ledger_date: toDate, desk_id: from.desk_id, sku_id: row.sku_id, branch_id: from.branch_id };
     if (!target) inserts.push({ ...key, opening_qty: opening, performed_by: actor });
-    else if (target.opening_qty !== opening) patches.push({ ...key, opening_qty: opening });
+    else if (target.opening_qty !== opening) {
+      patches.push({ ...key, opening_qty: opening });
+      reopenings.push({ row: target, closing: computeClosing({ ...target, opening_qty: opening }) });
+    }
   }
-  await store.insertLedgerRows(inserts);
+  return { inserts, patches, reopenings };
+}
+
+async function carryForward(store: Store, from: DeskDay, toDate: string, actor: string) {
+  const { inserts, patches } = await planCarry(store, from, toDate, actor);
+  await store.insertLedgerRows(inserts, { overwriteOpening: true });
   await store.patchLedgerRows(patches);
+}
+
+const safeDropNote = (body: Record<string, any>) =>
+  body.safe_drop_note !== undefined ? { safe_drop_note: body.safe_drop_note ? String(body.safe_drop_note).slice(0, 500) : null } : {};
+
+// Marks an open day Done (from check-in or final stock) once every row is
+// counted and explained, then updates the following day's opening balances if
+// that day already exists. Shared by /transition (to done) and /close.
+async function closeDeskDay(store: Store, user: SessionUser, desk: Desk, date: string, note: { safe_drop_note?: string | null }) {
+  const day = await getDay(store, desk.desk_id, date);
+  if (!day || (day.status !== "check_in" && day.status !== "final_stock")) {
+    throw new HttpError(409, `Cannot close a day that is ${day?.status ?? "not started"}`, "BAD_TRANSITION");
+  }
+  const failures = validateDeskDay(await store.ledger({ date, deskId: desk.desk_id }));
+  if (failures.length > 0) {
+    throw new HttpError(422, "This desk cannot be closed yet", "DAY_INCOMPLETE", { failures });
+  }
+  // If the following day is already open (this day was reopened and closed
+  // again), its opening balances follow the corrected count. Check that the new
+  // openings keep that day non-negative BEFORE marking this day Done, so a
+  // refusal leaves nothing half written. Same rule as the database's negative
+  // guard: a row may not end below 0, nor drop further when already below 0.
+  const [next] = await store.deskDays({ deskId: desk.desk_id, after: date, order: "asc", limit: 1 });
+  const nextOpen = next && next.status !== "done" ? next : undefined;
+  if (nextOpen) {
+    const plan = await planCarry(store, day, nextOpen.ledger_date, user.accountId);
+    for (const { row, closing } of plan.reopenings) {
+      if (closing < 0 && closing < row.closing_qty) {
+        throw new HttpError(409, `The next day (${nextOpen.ledger_date}) would go negative for ${row.sku_id}`, "NEXT_DAY_NEGATIVE", {
+          sku_id: row.sku_id,
+          date: nextOpen.ledger_date,
+          available: Math.max(row.closing_qty, 0),
+        });
+      }
+    }
+  }
+
+  const updated = await store.updateDeskDay(
+    desk.desk_id,
+    date,
+    { status: "done", done_by: user.accountId, done_at: new Date().toISOString(), ...note },
+    day.status
+  );
+  if (!updated) throw new HttpError(409, "This desk was changed on another device — reload", "STALE");
+  if (nextOpen) await carryForward(store, updated, nextOpen.ledger_date, user.accountId);
 }
 
 // ---------------------------------------------------------------------------
 // Desk cards + calendar
 // ---------------------------------------------------------------------------
 r.get("/stock/desks", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const today = businessDate(c.env);
   const date = requireDate(c.req.query("date"), today);
   const branchId = scopeBranch(user, c.req.query("branchId") || undefined);
-  const [desks, branches, skus, days, ledgerRows, staffAccounts, config, openEarlier] = await Promise.all([
+  const [desks, branches, skus, days, ledgerRows, staffAccounts, config, openEarlier, history, closed, assignments] = await Promise.all([
     store.desks(),
     store.branches(),
     store.skus(),
@@ -65,20 +131,62 @@ r.get("/stock/desks", async (c) => {
     store.staffAccounts(),
     store.config(),
     store.deskDays({ branchId, before: date, notStatus: "done" }),
+    // Check history for streaks: 400 days (a streak shows "365+" beyond that).
+    store.deskDays({ branchId, from: addDays(today, -400), to: today }),
+    store.closedDays({ branchId, from: addDays(today, -400), to: today }),
+    store.activeAssignments({ branchId }),
   ]);
   const scopedDesks = branchId ? desks.filter((d) => d.branch_id === branchId) : desks;
+  const statuses = await loadBranchStatuses(store, [...new Set(scopedDesks.map((d) => d.branch_id))], today);
   // Earliest unfinished earlier day per desk — check-in is blocked until it is closed.
   const blockedBy = new Map<string, string>();
   for (const d of openEarlier) if (!blockedBy.has(d.desk_id)) blockedBy.set(d.desk_id, d.ledger_date);
-  const cards = buildDeskCards(scopedDesks, branches, skus, days, ledgerRows, staffAccounts, config).map((card) => ({
-    ...card,
-    openEarlierDate: blockedBy.get(card.desk_id) ?? null,
-  }));
-  return c.json({ date, today, desks: cards });
+  const staffName = new Map(staffAccounts.map((a) => [a.id, a.display_name]));
+  const historyByDesk = new Map<string, typeof history>();
+  for (const d of history) historyByDesk.set(d.desk_id, [...(historyByDesk.get(d.desk_id) ?? []), d]);
+  const closedByBranch = new Map<string, Set<string>>();
+  for (const cd of closed) closedByBranch.set(cd.branch_id, (closedByBranch.get(cd.branch_id) ?? new Set()).add(cd.closed_date));
+  const holderByDesk = new Map(assignments.map((a) => [a.desk_id, a]));
+  const deskById = new Map(desks.map((d) => [d.desk_id, d]));
+  const none = new Set<string>();
+
+  const cards = buildDeskCards(scopedDesks, branches, skus, days, ledgerRows, staffAccounts, config, statuses).map((card) => {
+    const desk = deskById.get(card.desk_id)!;
+    const status = buildDayStatus({
+      deskCreatedDate: laosDate(new Date(desk.created_at)),
+      days: historyByDesk.get(card.desk_id) ?? [],
+      closedDates: closedByBranch.get(card.branch_id) ?? none,
+      today,
+    });
+    const held = holderByDesk.get(card.desk_id);
+    return {
+      ...card,
+      openEarlierDate: blockedBy.get(card.desk_id) ?? null,
+      openedAt: days.find((x) => x.desk_id === card.desk_id)?.created_at ?? null,
+      streak: status.streak,
+      lastDoneDate: status.lastDoneDate,
+      lastDoneAt: status.lastDoneAt,
+      lastDoneByName: status.lastDoneBy ? staffName.get(status.lastDoneBy) ?? null : null,
+      daysBehind: status.daysBehind,
+      tier: status.tier,
+      assignee: held
+        ? { staffId: held.staff_id, name: staffName.get(held.staff_id) ?? null, since: held.started_at, stale: laosDate(new Date(held.started_at)) < today }
+        : null,
+    };
+  });
+  // Overdue cases first; the rest keep their order (Array.sort is stable).
+  cards.sort((a, b) => Number(b.tier === "overdue") - Number(a.tier === "overdue"));
+  const branchSummary = {
+    cases: cards.length,
+    checkedToday: cards.filter((x) => x.tier === "done_today").length,
+    behind1: cards.filter((x) => x.tier === "behind_1").length,
+    overdue: cards.filter((x) => x.tier === "overdue").length,
+  };
+  return c.json({ date, today, desks: cards, branchSummary });
 });
 
 r.get("/stock/calendar", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const branchId = scopeBranch(user, c.req.query("branchId") || undefined);
   if (!branchId) throw new HttpError(400, "branchId is required", "BRANCH_REQUIRED");
@@ -93,7 +201,7 @@ r.get("/stock/calendar", async (c) => {
 // New desk ("case") with its starting stock
 // ---------------------------------------------------------------------------
 r.post("/desks", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const branchId = String(body.branchId ?? "");
@@ -123,13 +231,55 @@ r.post("/desks", async (c) => {
       performed_by: user.accountId,
     }))
   );
-  await audit(store, user, "desk.create", desk.desk_id, { display_name: displayName, opening: Object.fromEntries(opening) });
+  await audit(store, user, "desk.create", desk.desk_id, { display_name: displayName, opening: Object.fromEntries(opening) }, { branchId: desk.branch_id, deskId: desk.desk_id });
   return c.json({ desk, rows });
 });
 
 // ---------------------------------------------------------------------------
 // Desk detail
 // ---------------------------------------------------------------------------
+// The same-branch moves touching a case on a date, one item per ticket, for the
+// History tab. canUndo mirrors what POST /moves/:ticketId/undo will accept: the
+// ticket is not undone, is not itself an undo, and neither day is Done.
+async function historyMoves(store: Store, deskId: string, date: string, outgoing: Transfer[], staffAccounts: StaffAccount[], skus: MasterSku[], allDesks: Desk[]) {
+  const incomingToday = await store.transfers({ toDeskId: deskId, sentDate: date });
+  const rows = [...outgoing, ...incomingToday].filter((t) => t.kind === "move" && t.ticket_id && t.status !== "cancelled");
+  const tickets = new Map<string, Transfer[]>();
+  for (const t of rows) {
+    const list = tickets.get(t.ticket_id!) ?? [];
+    if (!list.some((x) => x.id === t.id)) list.push(t);
+    tickets.set(t.ticket_id!, list);
+  }
+  const reversedIds = new Set(rows.map((t) => t.reverses_id).filter(Boolean));
+  const statusOf = async (id: string) => (await store.deskDays({ deskId: id, date, limit: 1 }))[0]?.status;
+  const deskName = (id: string) => {
+    const d = allDesks.find((x) => x.desk_id === id);
+    return d ? `${d.desk_id} · ${d.display_name}` : id;
+  };
+  const out = [];
+  for (const [ticketId, lines] of tickets) {
+    const first = lines[0];
+    const reversal = lines.some((t) => t.reverses_id);
+    const reversed = lines.some((t) => reversedIds.has(t.id));
+    const open = (await statusOf(first.from_desk_id)) !== "done" && (await statusOf(first.to_desk_id)) !== "done";
+    out.push({
+      ticketId,
+      created_at: lines.reduce((m, t) => (t.created_at < m ? t.created_at : m), first.created_at),
+      from_desk_id: first.from_desk_id,
+      to_desk_id: first.to_desk_id,
+      from: deskName(first.from_desk_id),
+      to: deskName(first.to_desk_id),
+      by: staffAccounts.find((a) => a.id === first.sent_by)?.display_name ?? null,
+      note: first.note,
+      reversal,
+      reversed,
+      canUndo: !reversal && !reversed && open,
+      lines: lines.map((t) => ({ sku_id: t.sku_id, name_en: skus.find((s) => s.sku_id === t.sku_id)?.name_en ?? t.sku_id, qty: t.qty })),
+    });
+  }
+  return out.sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
 async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: string, date: string) {
   const desk = await requireDesk(store, user, deskId);
   const [branches, skus, days, ledgerRows, staffAccounts, weights, config, earlier, laterDone, incoming, outgoing, allDesks] = await Promise.all([
@@ -146,8 +296,10 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
     store.transfers({ fromDeskId: deskId, sentDate: date }),
     store.desks(),
   ]);
+  const moves = await historyMoves(store, deskId, date, outgoing, staffAccounts, skus, allDesks);
   const day = days[0];
-  const detail = buildDeskDetail(desk, branches.find((b) => b.branch_id === desk.branch_id), day, skus, ledgerRows, staffAccounts, config, weights);
+  const statuses = await loadBranchStatuses(store, [desk.branch_id], businessDate(c.env));
+  const detail = buildDeskDetail(desk, branches.find((b) => b.branch_id === desk.branch_id), day, skus, ledgerRows, staffAccounts, config, weights, statuses);
   const skuName = (id: string) => skus.find((s) => s.sku_id === id)?.name_en ?? id;
   const deskName = (id: string) => {
     const d = allDesks.find((x) => x.desk_id === id);
@@ -159,10 +311,11 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
     today: businessDate(c.env),
     // The very first day of a desk: starting stock may still be typed in.
     isFirstDay: Boolean(day) && earlier.length === 0,
-    canReopen: user.role === "admin" && day?.status === "done" && laterDone.length === 0,
+    canReopen: mayReopen(user, desk.branch_id, date, businessDate(c.env)) && day?.status === "done" && laterDone.length === 0,
     incoming: incoming
       .filter((t) => t.sent_date <= date)
       .map((t) => ({ id: t.id, kind: t.kind, sku_id: t.sku_id, name_en: skuName(t.sku_id), qty: t.qty, from: deskName(t.from_desk_id), sent_date: t.sent_date })),
+    moves,
     outgoing: outgoing
       .filter((t) => t.status !== "cancelled")
       .map((t) => ({ id: t.id, kind: t.kind, sku_id: t.sku_id, name_en: skuName(t.sku_id), qty: t.qty, to: deskName(t.to_desk_id), status: t.status })),
@@ -172,7 +325,7 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
 // ?date=latest resolves to the desk's most recent recorded day — "what is on
 // this desk right now" for screens that are not tied to one date.
 r.get("/stock/desk/:deskId", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const today = businessDate(c.env);
   const deskId = c.req.param("deskId");
   let date: string;
@@ -185,19 +338,12 @@ r.get("/stock/desk/:deskId", async (c) => {
   return c.json(await deskDetail(c, store, c.get("user"), deskId, date));
 });
 
-// ---------------------------------------------------------------------------
-// Check-in: opens the day and carries the previous day's stock forward.
-// ---------------------------------------------------------------------------
-r.post("/stock/desk/:deskId/checkin", async (c) => {
-  const store = getStore(c.env);
-  const user = c.get("user");
-  const body = await readBody(c);
-  const today = businessDate(c.env);
-  const date = requireDate(body.date, today);
-  const desk = await requireDesk(store, user, c.req.param("deskId"));
+// Opens a desk's day and carries the previous day's stock forward. Shared by the
+// check-in route and moves (a destination case is checked in on demand).
+export async function checkInDesk(store: Store, user: SessionUser, desk: Desk, date: string, today: string): Promise<"created" | "exists"> {
   if (!desk.active) throw new HttpError(409, "This desk is not active", "DESK_INACTIVE");
 
-  if (await getDay(store, desk.desk_id, date)) return c.json({ ok: true, alreadyCheckedIn: true });
+  if (await getDay(store, desk.desk_id, date)) return "exists";
   assertDateWritable(user, date, today, undefined);
 
   const [openEarlier, later, previous] = await Promise.all([
@@ -217,9 +363,22 @@ r.post("/stock/desk/:deskId/checkin", async (c) => {
   }
 
   const created = await store.insertDeskDay({ desk_id: desk.desk_id, ledger_date: date, branch_id: desk.branch_id, checked_in_by: user.accountId });
-  if (!created) return c.json({ ok: true, alreadyCheckedIn: true });
+  if (!created) return "exists";
   if (previous[0]) await carryForward(store, previous[0], date, user.accountId);
-  return c.json({ ok: true });
+  return "created";
+}
+
+// ---------------------------------------------------------------------------
+// Check-in: opens the day and carries the previous day's stock forward.
+// ---------------------------------------------------------------------------
+r.post("/stock/desk/:deskId/checkin", async (c) => {
+  const store = storeFor(c);
+  const user = c.get("user");
+  const body = await readBody(c);
+  const today = businessDate(c.env);
+  const date = requireDate(body.date, today);
+  const desk = await requireDesk(store, user, c.req.param("deskId"));
+  return c.json((await checkInDesk(store, user, desk, date, today)) === "exists" ? { ok: true, alreadyCheckedIn: true } : { ok: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -227,66 +386,79 @@ r.post("/stock/desk/:deskId/checkin", async (c) => {
 // editing different things never overwrite each other. Transfer-out, Move and
 // incoming transfers are not typed here — see routes/transfers.ts.
 // ---------------------------------------------------------------------------
-const QTY_FIELDS = ["stock_in", "retail_sale", "wholesale", "destock"] as const;
+const parseCount = (v: unknown) => (v === null || v === "" ? null : parseQty(v));
+
+// One compare-and-set change: {sku_id, field, from?, to}. `from` omitted means
+// "apply whatever is stored".
+function parseChange(item: Record<string, any>): { sku_id: string; change: LedgerChange } {
+  const sku_id = String(item?.sku_id ?? "");
+  const field = item?.field as LedgerChangeField;
+  if (!LEDGER_CHANGE_FIELDS.includes(field)) throw new HttpError(400, `Field ${String(item?.field)} cannot be changed here`, "BAD_FIELD", { sku_id, field: item?.field });
+  const value = (v: unknown): number | string | null => {
+    if (TEXT_CHANGE_FIELDS.includes(field)) return v === null || v === undefined || v === "" ? null : String(v).slice(0, 200);
+    const qty = field === "counted_qty" ? parseCount(v) : parseQty(v);
+    if (qty === null && !(field === "counted_qty" && (v === null || v === ""))) {
+      throw new HttpError(400, `${field} must be a whole number, 0 or more`, "BAD_QTY", { sku_id, field });
+    }
+    return qty;
+  };
+  const change: LedgerChange = { field, to: value(item.to) };
+  if (item.from !== undefined) change.from = value(item.from);
+  return { sku_id, change };
+}
 
 r.post("/stock/desk/:deskId/entries", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const today = businessDate(c.env);
   const date = requireDate(body.date, today);
   const desk = await requireDesk(store, user, c.req.param("deskId"));
-  const day = await requireOpenDay(store, user, desk.desk_id, date, today);
+  await requireOpenDay(store, user, desk.desk_id, date, today);
 
-  const items: Record<string, any>[] = Array.isArray(body.rows) ? body.rows : [];
   const known = new Set((await store.ledger({ date, deskId: desk.desk_id })).filter((row) => !row.excluded).map((row) => row.sku_id));
-  const patches: LedgerRowPatch[] = [];
-  for (const item of items) {
-    const skuId = String(item?.sku_id ?? "");
-    if (!known.has(skuId)) throw new HttpError(400, `SKU ${skuId} is not on this desk for ${date}`, "ROW_NOT_FOUND", { sku_id: skuId });
-    const patch: LedgerRowPatch = { ledger_date: date, desk_id: desk.desk_id, sku_id: skuId, branch_id: desk.branch_id };
-    let changed = false;
-    for (const field of QTY_FIELDS) {
-      if (item[field] === undefined) continue;
-      const qty = parseQty(item[field]);
-      if (qty === null) throw new HttpError(400, `${field} must be a whole number, 0 or more`, "BAD_QTY", { sku_id: skuId, field });
-      patch[field] = qty;
-      changed = true;
-    }
-    if (item.destock_note !== undefined) {
-      patch.destock_note = item.destock_note ? String(item.destock_note).slice(0, 200) : null;
-      changed = true;
-    }
-    // The physical count belongs to the Final Stock step only.
-    if (day.status === "final_stock") {
-      if (item.counted_qty !== undefined) {
-        const counted = item.counted_qty === null || item.counted_qty === "" ? null : parseQty(item.counted_qty);
-        if (counted === null && item.counted_qty !== null && item.counted_qty !== "") {
-          throw new HttpError(400, "Count must be a whole number, 0 or more", "BAD_QTY", { sku_id: skuId, field: "counted_qty" });
-        }
-        patch.counted_qty = counted;
-        changed = true;
+  const unknownSku = (skuId: string) => new HttpError(400, `SKU ${skuId} is not on this desk for ${date}`, "ROW_NOT_FOUND", { sku_id: skuId });
+  const saveNote = async () => {
+    if (body.safe_drop_note !== undefined) await store.updateDeskDay(desk.desk_id, date, safeDropNote(body));
+  };
+
+  // Compare-and-set form. Changes already applied stay applied if a later row
+  // is refused; resending the whole request is safe (stored == to is success).
+  if (Array.isArray(body.changes)) {
+    const bySku = new Map<string, LedgerChange[]>();
+    for (const item of body.changes) {
+      const { sku_id, change } = parseChange(item);
+      if (!known.has(sku_id)) throw unknownSku(sku_id);
+      const list = bySku.get(sku_id) ?? [];
+      // Two assignments to one column would make the generated SQL repeat it (42601).
+      if (list.some((x) => x.field === change.field)) {
+        throw new HttpError(400, `Field ${change.field} appears twice for ${sku_id}`, "DUPLICATE_FIELD", { sku_id, field: change.field });
       }
-      if (item.counted_note !== undefined) {
-        patch.counted_note = item.counted_note ? String(item.counted_note).slice(0, 200) : null;
-        changed = true;
-      }
+      bySku.set(sku_id, [...list, change]);
     }
-    if (changed) patches.push({ ...patch, performed_by: user.accountId });
+    const rows: LedgerRow[] = [];
+    for (const [sku_id, changes] of bySku) {
+      const res = await store.applyLedgerChanges({ ledger_date: date, desk_id: desk.desk_id, sku_id }, changes);
+      if (!res.ok) {
+        if (res.code === "ROW_NOT_FOUND") throw unknownSku(sku_id);
+        throw new HttpError(409, "This row was changed on another device", "ROW_CHANGED", { row: res.row });
+      }
+      rows.push(res.row);
+    }
+    await saveNote();
+    return c.json({ ok: true, rows });
   }
 
-  await store.patchLedgerRows(patches);
-  if (body.safe_drop_note !== undefined) {
-    await store.updateDeskDay(desk.desk_id, date, { safe_drop_note: body.safe_drop_note ? String(body.safe_drop_note).slice(0, 500) : null });
-  }
-  return c.json({ ok: true, saved: patches.length });
+  // The old last-write-wins `rows` body is gone: its partial upsert fires the
+  // database's BEFORE INSERT negative guard on the proposed row. Use `changes`.
+  throw new HttpError(400, "Send the entries as changes: [{sku_id, field, from, to}]", "USE_CHANGES");
 });
 
 // ---------------------------------------------------------------------------
 // Status transitions — forward only, one step at a time.
 // ---------------------------------------------------------------------------
 r.post("/stock/desk/:deskId/transition", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const today = businessDate(c.env);
@@ -299,42 +471,43 @@ r.post("/stock/desk/:deskId/transition", async (c) => {
   const expected = toStatus === "final_stock" ? "check_in" : "final_stock";
   if (day.status !== expected) throw new HttpError(409, `Cannot move from ${day.status} to ${toStatus}`, "BAD_TRANSITION");
 
-  const note = body.safe_drop_note !== undefined ? { safe_drop_note: body.safe_drop_note ? String(body.safe_drop_note).slice(0, 500) : null } : {};
-
   if (toStatus === "final_stock") {
-    const updated = await store.updateDeskDay(desk.desk_id, date, { status: "final_stock", ...note }, "check_in");
+    const updated = await store.updateDeskDay(desk.desk_id, date, { status: "final_stock", ...safeDropNote(body) }, "check_in");
     if (!updated) throw new HttpError(409, "This desk was changed on another device — reload", "STALE");
     return c.json({ ok: true });
   }
 
-  const failures = validateDeskDay(await store.ledger({ date, deskId: desk.desk_id }));
-  if (failures.length > 0) {
-    throw new HttpError(422, "This desk cannot be closed yet", "DAY_INCOMPLETE", { failures });
-  }
-  const updated = await store.updateDeskDay(
-    desk.desk_id,
-    date,
-    { status: "done", done_by: user.accountId, done_at: new Date().toISOString(), ...note },
-    "final_stock"
-  );
-  if (!updated) throw new HttpError(409, "This desk was changed on another device — reload", "STALE");
-
-  // If the following day is already open (this day was reopened and closed
-  // again), its opening balances follow the corrected count.
-  const [next] = await store.deskDays({ deskId: desk.desk_id, after: date, order: "asc", limit: 1 });
-  if (next && next.status !== "done") await carryForward(store, updated, next.ledger_date, user.accountId);
+  await closeDeskDay(store, user, desk, date, safeDropNote(body));
   return c.json({ ok: true });
 });
 
-// Admin only: unlock the desk's most recent Done day so it can be corrected.
-r.post("/stock/desk/:deskId/reopen", requireAdmin, async (c) => {
-  const store = getStore(c.env);
+// One step to Done from check-in or final stock: every row must be counted.
+r.post("/stock/desk/:deskId/close", async (c) => {
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
-  const date = requireDate(body.date, businessDate(c.env));
+  const today = businessDate(c.env);
+  const date = requireDate(body.date, today);
+  const desk = await requireDesk(store, user, c.req.param("deskId"));
+  await requireOpenDay(store, user, desk.desk_id, date, today);
+  await closeDeskDay(store, user, desk, date, safeDropNote(body));
+  return c.json({ ok: true });
+});
+
+// Admin, or a manager of the desk's branch for a recent day: unlock the desk's
+// most recent Done day so it can be corrected. It goes back to check-in.
+r.post("/stock/desk/:deskId/reopen", requireManager, async (c) => {
+  const store = storeFor(c);
+  const user = c.get("user");
+  const body = await readBody(c);
+  const today = businessDate(c.env);
+  const date = requireDate(body.date, today);
   const reason = String(body.reason ?? "").trim();
   if (reason.length < 3) throw new HttpError(400, "A reason is required to reopen a day", "REASON_REQUIRED");
   const desk = await requireDesk(store, user, c.req.param("deskId"));
+  if (!mayReopen(user, desk.branch_id, date, today)) {
+    throw new HttpError(403, `A manager can reopen a day up to ${MANAGER_REOPEN_DAYS} days back. Ask an admin.`, "REOPEN_TOO_OLD");
+  }
   const day = await getDay(store, desk.desk_id, date);
   if (!day || day.status !== "done") throw new HttpError(409, "Only a Done day can be reopened", "NOT_DONE");
   const [laterDone] = await store.deskDays({ deskId: desk.desk_id, after: date, status: "done", limit: 1 });
@@ -343,9 +516,9 @@ r.post("/stock/desk/:deskId/reopen", requireAdmin, async (c) => {
       laterDate: laterDone.ledger_date,
     });
   }
-  const updated = await store.updateDeskDay(desk.desk_id, date, { status: "final_stock", done_by: null, done_at: null }, "done");
+  const updated = await store.updateDeskDay(desk.desk_id, date, { status: "check_in", done_by: null, done_at: null }, "done");
   if (!updated) throw new HttpError(409, "This desk was changed on another device — reload", "STALE");
-  await audit(store, user, "desk_day.reopen", `${desk.desk_id}/${date}`, { reason });
+  await audit(store, user, "desk_day.reopen", `${desk.desk_id}/${date}`, { reason }, { branchId: desk.branch_id, deskId: desk.desk_id });
   return c.json({ ok: true });
 });
 
@@ -353,7 +526,7 @@ r.post("/stock/desk/:deskId/reopen", requireAdmin, async (c) => {
 // Add / remove a SKU on a desk day
 // ---------------------------------------------------------------------------
 r.post("/stock/desk/:deskId/sku", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const today = businessDate(c.env);
@@ -389,7 +562,7 @@ r.post("/stock/desk/:deskId/sku", async (c) => {
 });
 
 r.delete("/stock/desk/:deskId/sku/:skuId", async (c) => {
-  const store = getStore(c.env);
+  const store = storeFor(c);
   const user = c.get("user");
   const today = businessDate(c.env);
   const date = requireDate(c.req.query("date"), today);

@@ -38,3 +38,17 @@ export function clearSession() {
 export function isAdmin(user) {
   return user?.role === "admin";
 }
+
+// Admin or branch manager.
+export function isManager(user) {
+  return user?.role === "admin" || user?.role === "manager";
+}
+
+// Only a branch manager (not an admin).
+export function isBranchManager(user) {
+  return user?.role === "manager";
+}
+
+export function roleLabelKey(role) {
+  return role === "admin" ? "settings.admins" : role === "manager" ? "settings.managerRole" : "settings.staffRole";
+}

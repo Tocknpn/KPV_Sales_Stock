@@ -6,7 +6,8 @@
 //   VT-D01  in final count today
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEMO_STAFF } from "../src/demoData";
-import { TODAY, YESTERDAY, TOMORROW, freshApp, call, login, asAdmin, asStaff, on, closeDay, countEverything } from "./helpers";
+import { getStore } from "../src/store";
+import { TODAY, YESTERDAY, TOMORROW, freshApp, call, login, asAdmin, asStaff, asManager, on, closeDay, countEverything } from "./helpers";
 
 beforeEach(freshApp);
 
@@ -63,7 +64,6 @@ describe("user level", () => {
       ["POST", "/skus/import", { rows: [] }],
       ["POST", "/sku-types", { name_en: "X" }],
       ["POST", "/settings/config", { spotLakPerBaht: 1 }],
-      ["POST", "/settings/run-rate/GB-001", { avgDailySales: 1 }],
       ["POST", "/users", { displayName: "X", branchId: "B-MM", pin: "1111" }],
       ["PATCH", `/users/${DEMO_STAFF["B-MM"]}`, { pin: "1111" }],
       ["DELETE", "/documents/a0000000-0000-0000-0000-000000000001", undefined],
@@ -95,7 +95,7 @@ describe("user level", () => {
     const created = await call(admin, "POST", "/users", { displayName: "Noy", branchId: "B-VT", pin: "2468" });
     expect(created.status).toBe(200);
     const noy = await login(created.json.id, "2468");
-    expect((await call(noy, "GET", "/meta")).json.branches.map((b: any) => b.branch_id)).toEqual(["B-VT"]);
+    expect((await call(noy, "GET", "/app-meta")).json.branches.map((b: any) => b.branch_id)).toEqual(["B-VT"]);
     const me = (await call(admin, "GET", "/auth/me")).json.user.accountId;
     expect((await call(admin, "PATCH", `/users/${me}`, { active: false })).status).toBe(409);
   });
@@ -120,10 +120,11 @@ describe("daily cycle", () => {
   it("Done is refused until every row is counted and explained", async () => {
     const staff = await asStaff("B-MM");
     const desk = "MM-D01";
-    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, rows: [{ sku_id: "GB-001", destock: 1 }] });
-    // Counts cannot be entered before the Final Stock step.
-    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, rows: [{ sku_id: "GB-001", counted_qty: 1 }] });
-    expect(rowOf(await detailOf(staff, desk, TODAY), "GB-001").counted_qty).toBeNull();
+    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "GB-001", field: "destock", to: 1 }] });
+    // Counts can be entered at any time, including at check-in.
+    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "GB-001", field: "counted_qty", to: 1 }] });
+    expect(rowOf(await detailOf(staff, desk, TODAY), "GB-001").counted_qty).toBe(1);
+    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "GB-001", field: "counted_qty", to: null }] });
     expect((await call(staff, "POST", `/stock/desk/${desk}/transition`, { date: TODAY, toStatus: "done" })).status).toBe(409);
     expect((await call(staff, "POST", `/stock/desk/${desk}/transition`, { date: TODAY, toStatus: "final_stock" })).status).toBe(200);
 
@@ -135,7 +136,7 @@ describe("daily cycle", () => {
 
     await countEverything(staff, desk, TODAY);
     const gb = rowOf(await detailOf(staff, desk, TODAY), "GB-001");
-    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, rows: [{ sku_id: "GB-001", counted_qty: gb.closing_qty - 1 }] });
+    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "GB-001", field: "counted_qty", to: gb.closing_qty - 1 }] });
     res = await call(staff, "POST", `/stock/desk/${desk}/transition`, { date: TODAY, toStatus: "done" });
     expect(res.json.failures).toEqual([
       { sku_id: "GB-001", rule: "destock_note_missing" },
@@ -144,7 +145,10 @@ describe("daily cycle", () => {
 
     await call(staff, "POST", `/stock/desk/${desk}/entries`, {
       date: TODAY,
-      rows: [{ sku_id: "GB-001", destock_note: "damaged", counted_note: "one missing, reported" }],
+      changes: [
+        { sku_id: "GB-001", field: "destock_note", to: "damaged" },
+        { sku_id: "GB-001", field: "counted_note", to: "one missing, reported" },
+      ],
     });
     expect((await call(staff, "POST", `/stock/desk/${desk}/transition`, { date: TODAY, toStatus: "done" })).status).toBe(200);
 
@@ -162,7 +166,7 @@ describe("daily cycle", () => {
     const before = await detailOf(staff, desk, TODAY);
     expect(before.status).toBe("done");
     const writes = [
-      ["POST", `/stock/desk/${desk}/entries`, { date: TODAY, rows: [{ sku_id: "GB-001", retail_sale: 5 }] }],
+      ["POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "GB-001", field: "retail_sale", to: 5 }] }],
       ["POST", `/stock/desk/${desk}/sku`, { date: TODAY, sku_id: "NK-010" }],
       ["DELETE", `/stock/desk/${desk}/sku/GB-001?date=${TODAY}`, undefined],
       ["POST", `/stock/desk/${desk}/transition`, { date: TODAY, toStatus: "done" }],
@@ -177,20 +181,28 @@ describe("daily cycle", () => {
 
   it("saving one field does not overwrite the others", async () => {
     const staff = await asStaff("B-MM");
-    await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, rows: [{ sku_id: "NK-010", stock_in: 7 }] });
-    await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, rows: [{ sku_id: "NK-010", wholesale: 2 }] });
+    await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, changes: [{ sku_id: "NK-010", field: "stock_in", to: 7 }] });
+    await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, changes: [{ sku_id: "NK-010", field: "wholesale", to: 2 }] });
     const row = rowOf(await detailOf(staff, "MM-D01", TODAY), "NK-010");
     expect([row.stock_in, row.wholesale]).toEqual([7, 2]);
     expect(row.closing_qty).toBe(row.opening_qty + 7 - row.retail_sale - 2);
   });
 
+  it("refuses a sale larger than the stock with NEGATIVE_CLOSING", async () => {
+    const staff = await asStaff("B-MM");
+    const row = rowOf(await detailOf(staff, "MM-D01", TODAY), "GB-001");
+    const res = await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, changes: [{ sku_id: "GB-001", field: "retail_sale", to: row.closing_qty + row.retail_sale + 1 }] });
+    expect(res.status).toBe(409);
+    expect(res.json.code).toBe("NEGATIVE_CLOSING");
+  });
+
   it("rejects bad quantities and unknown rows", async () => {
     const staff = await asStaff("B-MM");
     for (const bad of [-1, 1.5, "x"]) {
-      const res = await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, rows: [{ sku_id: "GB-001", retail_sale: bad }] });
+      const res = await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, changes: [{ sku_id: "GB-001", field: "retail_sale", to: bad }] });
       expect(res.status).toBe(400);
     }
-    expect((await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, rows: [{ sku_id: "SP-904", stock_in: 1 }] })).status).toBe(400);
+    expect((await call(staff, "POST", "/stock/desk/MM-D01/entries", { date: TODAY, changes: [{ sku_id: "SP-904", field: "stock_in", to: 1 }] })).status).toBe(400);
   });
 
   it("only an empty row can be removed from the day", async () => {
@@ -241,10 +253,14 @@ describe("admin reopen", () => {
     const openingBefore = rowOf(await detailOf(staff, desk, TODAY), "BR-020").opening_qty;
 
     expect((await call(admin, "POST", `/stock/desk/${desk}/reopen`, { date: YESTERDAY, reason: "wrong count" })).status).toBe(200);
-    expect((await detailOf(admin, desk, YESTERDAY)).status).toBe("final_stock");
+    expect((await detailOf(admin, desk, YESTERDAY)).status).toBe("check_in");
+    expect((await call(admin, "POST", `/stock/desk/${desk}/transition`, { date: YESTERDAY, toStatus: "final_stock" })).status).toBe(200);
     await call(admin, "POST", `/stock/desk/${desk}/entries`, {
       date: YESTERDAY,
-      rows: [{ sku_id: "BR-020", counted_qty: openingBefore - 2, counted_note: "recount" }],
+      changes: [
+        { sku_id: "BR-020", field: "counted_qty", to: openingBefore - 2 },
+        { sku_id: "BR-020", field: "counted_note", to: "recount" },
+      ],
     });
     expect((await call(admin, "POST", `/stock/desk/${desk}/transition`, { date: YESTERDAY, toStatus: "done" })).status).toBe(200);
     expect(rowOf(await detailOf(staff, desk, TODAY), "BR-020").opening_qty).toBe(openingBefore - 2);
@@ -252,36 +268,78 @@ describe("admin reopen", () => {
     const log = (await call(admin, "GET", "/audit")).json.entries;
     expect(log.find((e: any) => e.action === "desk_day.reopen")).toMatchObject({ target: `${desk}/${YESTERDAY}`, detail: { reason: "wrong count" } });
   });
+
+  // Re-closing yesterday with a lower count lowers today's opening. If today has
+  // already sold that stock, the close must be refused whole, not left half done.
+  const reopenAndRecount = async (admin: any, desk: string, sku: string, counted: number) => {
+    expect((await call(admin, "POST", `/stock/desk/${desk}/reopen`, { date: YESTERDAY, reason: "wrong count" })).status).toBe(200);
+    const res = await call(admin, "POST", `/stock/desk/${desk}/entries`, { date: YESTERDAY, changes: [{ sku_id: sku, field: "counted_qty", to: counted }, { sku_id: sku, field: "counted_note", to: "recount" }] });
+    expect(res.status).toBe(200);
+    return call(admin, "POST", `/stock/desk/${desk}/close`, { date: YESTERDAY });
+  };
+
+  it("refuses re-closing a day whose lower count would push the next day negative, and writes nothing", async () => {
+    const admin = await asAdmin();
+    const staff = await asStaff("B-MM");
+    const desk = "MM-D02";
+    await call(staff, "POST", `/stock/desk/${desk}/checkin`, { date: TODAY });
+    const open = rowOf(await detailOf(staff, desk, TODAY), "BR-020");
+    expect(open.opening_qty).toBeGreaterThanOrEqual(3);
+    // Today sells everything it opened with.
+    expect((await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "BR-020", field: "retail_sale", to: open.opening_qty }] })).status).toBe(200);
+
+    const res = await reopenAndRecount(admin, desk, "BR-020", open.opening_qty - 2);
+    expect(res.status).toBe(409);
+    expect(res.json.code).toBe("NEXT_DAY_NEGATIVE");
+    expect(res.json).toMatchObject({ sku_id: "BR-020", date: TODAY, available: 0 });
+    expect((await detailOf(admin, desk, YESTERDAY)).status).not.toBe("done");
+    expect(rowOf(await detailOf(staff, desk, TODAY), "BR-020").opening_qty).toBe(open.opening_qty);
+  });
+
+  it("closes fine when the lower count keeps the next day non-negative, and today's opening follows", async () => {
+    const admin = await asAdmin();
+    const staff = await asStaff("B-MM");
+    const desk = "MM-D02";
+    await call(staff, "POST", `/stock/desk/${desk}/checkin`, { date: TODAY });
+    const open = rowOf(await detailOf(staff, desk, TODAY), "BR-020");
+    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "BR-020", field: "stock_in", to: 5 }] });
+    await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "BR-020", field: "retail_sale", to: open.opening_qty }] });
+
+    const res = await reopenAndRecount(admin, desk, "BR-020", open.opening_qty - 2);
+    expect(res.status).toBe(200);
+    expect((await detailOf(admin, desk, YESTERDAY)).status).toBe("done");
+    expect(rowOf(await detailOf(staff, desk, TODAY), "BR-020").opening_qty).toBe(open.opening_qty - 2);
+  });
 });
 
 describe("linked transfers", () => {
   it("gold leaves the sender, stays in the company total while in transit, and lands when confirmed", async () => {
+    // Same-branch hand-overs are instant Moves (test/moves.test.ts); this is the cross-branch send / receive flow.
     const staff = await asStaff("B-MM");
+    const ts = await asStaff("B-TS");
     const admin = await asAdmin();
     const total = async () => (await call(admin, "GET", "/dashboard")).json.portfolio.total_pcs;
     const totalBefore = await total();
     const fromBefore = rowOf(await detailOf(staff, "MM-D01", TODAY), "GB-001");
 
-    expect((await call(staff, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "MM-D02", skuId: "GB-001", qty: 999 })).json.code).toBe("NOT_ENOUGH_STOCK");
-    const sent = await call(staff, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "MM-D02", skuId: "GB-001", qty: 3 });
+    expect((await call(staff, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "TS-D02", skuId: "GB-001", qty: 999 })).json.code).toBe("NOT_ENOUGH_STOCK");
+    const sent = await call(staff, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "TS-D02", skuId: "GB-001", qty: 3 });
     expect(sent.status).toBe(200);
-    expect(sent.json.kind).toBe("move"); // same branch
+    expect(sent.json.kind).toBe("transfer"); // another branch
 
     const fromAfter = rowOf(await detailOf(staff, "MM-D01", TODAY), "GB-001");
-    expect(fromAfter.move).toBe(3);
+    expect(fromAfter.transfer_out).toBe(fromBefore.transfer_out + 3);
     expect(fromAfter.closing_qty).toBe(fromBefore.closing_qty - 3);
     expect(await total()).toBe(totalBefore);
     expect((await call(admin, "GET", "/dashboard")).json.transit).toMatchObject({ count: 1, pcs: 3 });
 
     // The receiving desk must have an open day to receive into.
-    expect((await call(staff, "POST", `/transfers/${sent.json.id}/receive`, { date: TODAY })).json.code).toBe("NOT_CHECKED_IN");
-    await call(staff, "POST", "/stock/desk/MM-D02/checkin", { date: TODAY });
-    const incoming = (await detailOf(staff, "MM-D02", TODAY)).incoming;
-    expect(incoming).toHaveLength(1);
-    expect((await call(staff, "POST", `/transfers/${sent.json.id}/receive`, { date: TODAY })).status).toBe(200);
-    expect((await call(staff, "POST", `/transfers/${sent.json.id}/receive`, { date: TODAY })).json.code).toBe("NOT_IN_TRANSIT");
+    expect((await call(ts, "POST", `/transfers/${sent.json.id}/receive`, { date: TODAY })).json.code).toBe("NOT_CHECKED_IN");
+    await call(ts, "POST", "/stock/desk/TS-D02/checkin", { date: TODAY });
+    expect((await call(ts, "POST", `/transfers/${sent.json.id}/receive`, { date: TODAY })).status).toBe(200);
+    expect((await call(ts, "POST", `/transfers/${sent.json.id}/receive`, { date: TODAY })).json.code).toBe("NOT_IN_TRANSIT");
 
-    const received = rowOf(await detailOf(staff, "MM-D02", TODAY), "GB-001");
+    const received = rowOf(await detailOf(ts, "TS-D02", TODAY), "GB-001");
     expect(received.transfer_in).toBe(3);
     expect(received.closing_qty).toBe(3);
     expect(await total()).toBe(totalBefore);
@@ -374,16 +432,13 @@ describe("numbers agree across screens", () => {
     expect(after.usd_value).toBe(after.lak_value / 20000);
   });
 
-  it("low stock uses the computed reorder point everywhere", async () => {
+  it("low stock follows the branch status everywhere", async () => {
     const admin = await asAdmin();
-    // GB-001: avg 2.5/day, lead 3 days, buffer 2 days -> reorder point 13.
     const row = rowOf(await detailOf(admin, "IT-D01", TODAY), "GB-001");
-    expect(row.threshold).toBe(13);
-    expect(row.low_stock).toBe(row.closing_qty < 13);
-    await call(admin, "POST", "/settings/config", { safetyBufferDays: 0 });
-    expect(rowOf(await detailOf(admin, "IT-D01", TODAY), "GB-001").threshold).toBe(8);
+    expect(row.threshold).toBeUndefined();
+    expect(["critical", "warning", "ok", "no_data"]).toContain(row.branch_status);
     const low = (await call(admin, "GET", "/dashboard?deskId=IT-D01")).json.watchlist.topLow;
-    for (const item of low) expect(item.closing).toBeLessThan(item.reorder_level);
+    for (const item of low) expect(item.closing).toBeLessThanOrEqual(item.reorder_level);
   });
 
   it("the report works for short months", async () => {
@@ -422,6 +477,39 @@ describe("SKU master data", () => {
     expect(ring).toMatchObject({ category: "Rings & Accessories", std_gram_weight: 7.622, baht_weight: 0.5, avg_daily_sales: 1.5 });
   });
 
+  it("avg/day and lead time on create and import become company-wide SKU rules", async () => {
+    const admin = await asAdmin();
+    const row = async (id: string) => {
+      const rule = (await getStore({} as any).rules()).find((x) => x.scope === "sku" && x.scope_key === id && x.branch_id === null);
+      return rule ? { avg: { value: rule.avg_daily_sell, source: "sku" }, lead: { value: rule.lead_time_days, source: "sku" } } : undefined;
+    };
+
+    const made = await call(admin, "POST", "/skus", { sku_id: "NEW-1", name_en: "New A", type_id: "GOLD_BARS", weight_id: "BAHT_1", avg_daily_sales: 4, order_lead_time_days: 6, group: "Fresh" });
+    expect(made.status).toBe(200);
+    expect(made.json.group_name).toBe("Fresh");
+    expect(await row("NEW-1")).toMatchObject({ avg: { value: 4 }, lead: { value: 6 } });
+
+    // A bad row imports nothing, and writes no rule.
+    const bad = await call(admin, "POST", "/skus/import", {
+      rows: [
+        { sku_id: "IMP-1", name_en: "Imp 1", type: "Gold Bars", avg_daily_sales: "2" },
+        { sku_id: "IMP-2", name_en: "Imp 2", type: "Gold Bars", order_lead_time_days: "99999" },
+      ],
+    });
+    expect(bad.status).toBe(422);
+    expect(await row("IMP-1")).toBeUndefined();
+
+    const good = await call(admin, "POST", "/skus/import", {
+      rows: [
+        { sku_id: "IMP-1", name_en: "Imp 1", type: "Gold Bars", avg_daily_sales: "2", order_lead_time_days: "3", group: "Imp" },
+        { sku_id: "IMP-3", name_en: "Imp 3", type: "Gold Bars", group: "Imp" },
+      ],
+    });
+    expect(good.json.imported).toBe(2);
+    expect(await row("IMP-1")).toMatchObject({ avg: { value: 2 }, lead: { value: 3 } });
+    expect(await row("IMP-3")).toBeUndefined();
+  });
+
   it("an inactive SKU cannot be added to a desk", async () => {
     const admin = await asAdmin();
     await call(admin, "PATCH", "/skus/SP-904", { active: false });
@@ -433,5 +521,291 @@ describe("SKU master data", () => {
     await call(admin, "PATCH", "/sku-types/GOLD_BARS", { name_en: "Bars" });
     const bar = (await call(admin, "GET", "/skus")).json.skus.find((s: any) => s.sku_id === "GB-001");
     expect(bar.category).toBe("Bars");
+  });
+});
+
+describe("branch manager", () => {
+  it("sees only own branch", async () => {
+    const manager = await asManager("B-MM");
+    const cards = (await call(manager, "GET", "/stock/desks?branchId=B-TS")).json.desks;
+    expect(new Set(cards.map((d: any) => d.branch_id))).toEqual(new Set(["B-MM"]));
+    expect((await call(manager, "GET", `/stock/desk/TS-D01?date=${TODAY}`)).status).toBe(403);
+    const meta = (await call(manager, "GET", "/app-meta")).json;
+    expect(new Set(meta.desks.map((d: any) => d.branch_id))).toEqual(new Set(["B-MM"]));
+    expect(meta.user.role).toBe("manager");
+  });
+
+  it("reopens the latest Done day within 3 days with a reason", async () => {
+    const manager = await asManager("B-MM");
+    const desk = "MM-D02";
+    expect((await call(manager, "POST", `/stock/desk/${desk}/reopen`, { date: YESTERDAY })).json.code).toBe("REASON_REQUIRED");
+    expect((await call(manager, "POST", `/stock/desk/${desk}/reopen`, { date: YESTERDAY, reason: "wrong count" })).status).toBe(200);
+    expect((await detailOf(manager, desk, YESTERDAY)).status).toBe("check_in");
+    const log = (await call(await asAdmin(), "GET", "/audit")).json.entries;
+    expect(log.find((e: any) => e.action === "desk_day.reopen")).toMatchObject({ actor_name: "Manivone M." });
+  });
+
+  it("cannot reopen a day older than 3 days, or another branch", async () => {
+    // Ten days later, yesterday's Done day is far too old.
+    const late = await asManager("B-MM", "2026-11-22");
+    const old = await call(late, "POST", "/stock/desk/MM-D02/reopen", { date: YESTERDAY, reason: "too late" });
+    expect(old.status).toBe(403);
+    expect(old.json.code).toBe("REOPEN_TOO_OLD");
+    const manager = await asManager("B-MM");
+    expect((await call(manager, "POST", "/stock/desk/TS-D01/reopen", { date: YESTERDAY, reason: "other branch" })).status).toBe(403);
+  });
+
+  it("staff still cannot reopen; admin can reopen any age", async () => {
+    const staff = await asStaff("B-MM");
+    expect((await call(staff, "POST", "/stock/desk/MM-D02/reopen", { date: YESTERDAY, reason: "nope" })).status).toBe(403);
+    const admin = await asAdmin("2026-11-22");
+    expect((await call(admin, "POST", "/stock/desk/MM-D02/reopen", { date: YESTERDAY, reason: "old fix" })).status).toBe(200);
+  });
+
+  it("cannot create users or change master data", async () => {
+    const manager = await asManager("B-MM");
+    expect((await call(manager, "POST", "/users", { displayName: "X", branchId: "B-MM", pin: "1111" })).status).toBe(403);
+    expect((await call(manager, "PATCH", `/users/${DEMO_STAFF["B-MM"]}`, { pin: "1111" })).status).toBe(403);
+    expect((await call(manager, "PATCH", "/skus/GB-001", { active: false })).status).toBe(403);
+    expect((await call(manager, "GET", "/audit?branchId=B-IT")).status).toBe(403);
+  });
+
+  it("can unlock own-branch staff but nothing else about them", async () => {
+    const manager = await asManager("B-MM");
+    const id = DEMO_STAFF["B-MM"];
+    for (let i = 0; i < 5; i++) await call(null, "POST", "/auth/login", { accountId: id, pin: "0000" });
+    expect((await call(null, "POST", "/auth/login", { accountId: id, pin: "1234" })).status).toBe(423);
+    expect((await call(manager, "PATCH", `/users/${id}`, { pin: "1111" })).status).toBe(403);
+    expect((await call(manager, "PATCH", `/users/${id}`, { unlock: true, active: false })).status).toBe(403);
+    expect((await call(manager, "PATCH", `/users/${id}`, { unlock: true })).status).toBe(200);
+    expect((await call(null, "POST", "/auth/login", { accountId: id, pin: "1234" })).status).toBe(200);
+    // another branch's staff are out of reach
+    expect((await call(manager, "PATCH", `/users/${DEMO_STAFF["B-TS"]}`, { unlock: true })).status).toBe(403);
+  });
+
+  it("admin can create a manager; a manager without a branch is refused", async () => {
+    const admin = await asAdmin();
+    const bad = await call(admin, "POST", "/users", { displayName: "Boss", role: "manager", pin: "2222" });
+    expect(bad.status).toBe(400);
+    expect(bad.json.code).toBe("BAD_BRANCH");
+    const ok = await call(admin, "POST", "/users", { displayName: "Boss", role: "manager", branchId: "B-TS", pin: "2222" });
+    expect(ok.status).toBe(200);
+    const session = await login(ok.json.id, "2222");
+    expect((await call(session, "GET", "/auth/me")).json.user.role).toBe("manager");
+    const summary = (await call(admin, "GET", "/settings/summary")).json.staff;
+    expect(summary.roleCounts.manager).toBe(2);
+  });
+});
+
+describe("compare-and-set entries, counts any time, one-step close", () => {
+  const entries = (s: any, body: object, desk = "MM-D01") => call(s, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, ...body });
+
+  it("two devices: the second stale change gets 409 ROW_CHANGED with the current row", async () => {
+    const a = await asStaff("B-MM");
+    const b = await asStaff("B-MM");
+    const before = rowOf(await detailOf(a, "MM-D01", TODAY), "NK-010");
+    const first = await entries(a, { changes: [{ sku_id: "NK-010", field: "retail_sale", from: before.retail_sale, to: before.retail_sale + 1 }] });
+    expect(first.status).toBe(200);
+    expect(first.json.ok).toBe(true);
+    expect(first.json.rows[0].retail_sale).toBe(before.retail_sale + 1);
+    const second = await entries(b, { changes: [{ sku_id: "NK-010", field: "retail_sale", from: before.retail_sale, to: before.retail_sale + 5 }] });
+    expect(second.status).toBe(409);
+    expect(second.json.code).toBe("ROW_CHANGED");
+    expect(second.json.row.retail_sale).toBe(before.retail_sale + 1);
+    expect(rowOf(await detailOf(a, "MM-D01", TODAY), "NK-010").retail_sale).toBe(before.retail_sale + 1);
+  });
+
+  it("a retried change that already applied returns ok", async () => {
+    const staff = await asStaff("B-MM");
+    const before = rowOf(await detailOf(staff, "MM-D01", TODAY), "NK-010");
+    const change = { sku_id: "NK-010", field: "stock_in", from: before.stock_in, to: before.stock_in + 3 };
+    expect((await entries(staff, { changes: [change] })).status).toBe(200);
+    const retry = await entries(staff, { changes: [change] });
+    expect(retry.status).toBe(200);
+    expect(retry.json.ok).toBe(true);
+    expect(rowOf(await detailOf(staff, "MM-D01", TODAY), "NK-010").stock_in).toBe(before.stock_in + 3);
+  });
+
+  it("a change that would make closing negative gets 409 NEGATIVE_CLOSING with available", async () => {
+    const staff = await asStaff("B-MM");
+    const row = rowOf(await detailOf(staff, "MM-D01", TODAY), "GB-001");
+    const res = await entries(staff, { changes: [{ sku_id: "GB-001", field: "retail_sale", from: row.retail_sale, to: row.retail_sale + row.closing_qty + 1 }] });
+    expect(res.status).toBe(409);
+    expect(res.json.code).toBe("NEGATIVE_CLOSING");
+    expect(res.json.available).toBe(row.closing_qty);
+  });
+
+  it("the legacy rows body is gone: USE_CHANGES", async () => {
+    const staff = await asStaff("B-MM");
+    const res = await entries(staff, { rows: [{ sku_id: "GB-001", retail_sale: 1 }] });
+    expect(res.status).toBe(400);
+    expect(res.json.code).toBe("USE_CHANGES");
+    // a body with neither form is refused the same way
+    expect((await entries(staff, {})).json.code).toBe("USE_CHANGES");
+  });
+
+  it("two changes to the same field of one SKU in one request get DUPLICATE_FIELD", async () => {
+    const staff = await asStaff("B-MM");
+    const before = rowOf(await detailOf(staff, "MM-D01", TODAY), "NK-010");
+    const res = await entries(staff, {
+      changes: [
+        { sku_id: "NK-010", field: "stock_in", to: 1 },
+        { sku_id: "NK-010", field: "stock_in", to: 2 },
+      ],
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.code).toBe("DUPLICATE_FIELD");
+    expect(res.json).toMatchObject({ sku_id: "NK-010", field: "stock_in" });
+    expect(rowOf(await detailOf(staff, "MM-D01", TODAY), "NK-010").stock_in).toBe(before.stock_in);
+  });
+
+  it("validates fields, quantities and rows of a change", async () => {
+    const staff = await asStaff("B-MM");
+    expect((await entries(staff, { changes: [{ sku_id: "GB-001", field: "opening_qty", to: 5 }] })).json.code).toBe("BAD_FIELD");
+    expect((await entries(staff, { changes: [{ sku_id: "GB-001", field: "retail_sale", to: -1 }] })).json.code).toBe("BAD_QTY");
+    expect((await entries(staff, { changes: [{ sku_id: "GB-001", field: "retail_sale", from: "x", to: 1 }] })).json.code).toBe("BAD_QTY");
+    expect((await entries(staff, { changes: [{ sku_id: "NOPE", field: "retail_sale", to: 1 }] })).json.code).toBe("ROW_NOT_FOUND");
+  });
+
+  it("counted_qty saves while the day is check_in, and may be cleared with from set", async () => {
+    const staff = await asStaff("B-MM");
+    expect((await detailOf(staff, "MM-D01", TODAY)).status).toBe("check_in");
+    const saved = await entries(staff, { changes: [{ sku_id: "GB-001", field: "counted_qty", from: null, to: 3 }, { sku_id: "GB-001", field: "counted_note", from: null, to: "ok" }] });
+    expect(saved.status).toBe(200);
+    expect(rowOf(await detailOf(staff, "MM-D01", TODAY), "GB-001")).toMatchObject({ counted_qty: 3, counted_note: "ok" });
+    expect((await entries(staff, { changes: [{ sku_id: "GB-001", field: "counted_qty", from: 3, to: null }] })).status).toBe(200);
+    expect(rowOf(await detailOf(staff, "MM-D01", TODAY), "GB-001").counted_qty).toBeNull();
+  });
+
+  it("close goes straight from check_in to done when everything is counted", async () => {
+    const staff = await asStaff("B-MM");
+    await countEverything(staff, "MM-D01", TODAY);
+    const res = await call(staff, "POST", "/stock/desk/MM-D01/close", { date: TODAY, safe_drop_note: "dropped" });
+    expect(res.status).toBe(200);
+    expect((await detailOf(staff, "MM-D01", TODAY)).status).toBe("done");
+    const tomorrow = on(staff, TOMORROW);
+    expect((await call(tomorrow, "POST", "/stock/desk/MM-D01/checkin", { date: TOMORROW })).status).toBe(200);
+  });
+
+  it("close refuses with DAY_INCOMPLETE listing count_missing", async () => {
+    const staff = await asStaff("B-MM");
+    const res = await call(staff, "POST", "/stock/desk/MM-D01/close", { date: TODAY });
+    expect(res.status).toBe(422);
+    expect(res.json.code).toBe("DAY_INCOMPLETE");
+    expect(res.json.failures.filter((f: any) => f.rule === "count_missing")).toHaveLength(4);
+    expect((await detailOf(staff, "MM-D01", TODAY)).status).toBe("check_in");
+  });
+
+  it("close also works from final_stock and refuses a Done day", async () => {
+    const staff = await asStaff("B-MM");
+    await call(staff, "POST", "/stock/desk/MM-D01/transition", { date: TODAY, toStatus: "final_stock" });
+    await countEverything(staff, "MM-D01", TODAY);
+    expect((await call(staff, "POST", "/stock/desk/MM-D01/close", { date: TODAY })).status).toBe(200);
+    expect((await call(staff, "POST", "/stock/desk/MM-D01/close", { date: TODAY })).status).toBe(423);
+  });
+});
+
+describe("cards: streak, tier, holder and branch summary (CR3)", () => {
+  const db = () => (getStore({} as any) as any).db;
+
+  it("overdue case is first; branchSummary counts", async () => {
+    const staff = await asStaff("B-MM"); // builds the demo store on the pinned date
+    // Morning Market: the two spare cases are brand new, MM-D02 was last done 4 days ago.
+    for (const d of db().desks) if (d.desk_id === "MM-D03" || d.desk_id === "MM-D04") d.created_at = `${TODAY}T03:00:00.000Z`;
+    db().deskDays = db().deskDays.filter((d: any) => d.desk_id !== "MM-D02");
+    db().deskDays.push({ ...db().deskDays.find((d: any) => d.desk_id === "MM-D01"), desk_id: "MM-D02", ledger_date: "2026-11-08", status: "done" });
+    const res = await call(staff, "GET", "/stock/desks");
+    const cards = res.json.desks.filter((d: any) => d.branch_id === "B-MM");
+    expect(cards[0].desk_id).toBe("MM-D02");
+    expect(cards[0]).toMatchObject({ tier: "overdue", daysBehind: 3, lastDoneDate: "2026-11-08", streak: 0 });
+    const d01 = cards.find((d: any) => d.desk_id === "MM-D01");
+    expect(d01).toMatchObject({ tier: "on_track", streak: 3, daysBehind: 0, lastDoneByName: "Somchai S." });
+    expect(cards.find((d: any) => d.desk_id === "MM-D03")).toMatchObject({ tier: "on_track", streak: 0, daysBehind: 0, assignee: null });
+    expect(res.json.branchSummary).toEqual({ cases: 4, checkedToday: 0, behind1: 0, overdue: 1 });
+  });
+
+  it("a closed day keeps the streak and is not behind", async () => {
+    await call(await asAdmin(), "POST", "/closed-days", { branchId: "B-IT", date: YESTERDAY, reason: "Holiday" });
+    const cards = (await call(await asStaff("B-IT"), "GET", "/stock/desks")).json.desks;
+    // IT-D01 was Done the last 4 days including today; yesterday is closed.
+    expect(cards.find((d: any) => d.desk_id === "IT-D01")).toMatchObject({ tier: "done_today", streak: 3 });
+  });
+
+  it("assignee started yesterday is stale; today is not", async () => {
+    const m = await asManager("B-MM");
+    await call(m, "POST", "/desks/MM-D01/assign", { staffId: DEMO_STAFF["B-MM"] });
+    await call(m, "POST", "/desks/MM-D02/assign", { staffId: DEMO_STAFF["B-MM"] });
+    const a = db().assignments.find((x: any) => x.desk_id === "MM-D01");
+    a.started_at = `${YESTERDAY}T05:00:00.000Z`;
+    const cards = (await call(m, "GET", "/stock/desks?branchId=B-MM")).json.desks;
+    expect(cards.find((d: any) => d.desk_id === "MM-D01").assignee).toMatchObject({ staffId: DEMO_STAFF["B-MM"], name: "Somchai S.", stale: true });
+    expect(cards.find((d: any) => d.desk_id === "MM-D02").assignee.stale).toBe(false);
+  });
+});
+
+describe("data mode and /api/meta (Task 18)", () => {
+  const db = () => (getStore({} as any) as any).db;
+  const seedStaff = () => {
+    db().staffAccounts.find((a: any) => a.id === DEMO_STAFF["B-MM"]).is_seed = true;
+  };
+
+  it("production mode refuses a seed account login", async () => {
+    seedStaff();
+    const res = await call(null, "POST", "/auth/login", { accountId: DEMO_STAFF["B-MM"], pin: "1234" }, TODAY, { KPV_DATA_MODE: "production" });
+    expect(res.status).toBe(403);
+    expect(res.json.code).toBe("SEED_ACCOUNT_DISABLED");
+    const list = await call(null, "GET", "/auth/accounts?branchId=B-MM", undefined, TODAY, { KPV_DATA_MODE: "production" });
+    expect(list.json.accounts.map((a: any) => a.id)).not.toContain(DEMO_STAFF["B-MM"]);
+  });
+
+  it("test mode allows it and meta says test", async () => {
+    seedStaff();
+    const res = await call(null, "POST", "/auth/login", { accountId: DEMO_STAFF["B-MM"], pin: "1234" }, TODAY, { KPV_DATA_MODE: "test" });
+    expect(res.status).toBe(200);
+    const list = await call(null, "GET", "/auth/accounts?branchId=B-MM", undefined, TODAY, { KPV_DATA_MODE: "test" });
+    expect(list.json.accounts.map((a: any) => a.id)).toContain(DEMO_STAFF["B-MM"]);
+    const meta = await call(null, "GET", "/meta", undefined, TODAY, { KPV_DATA_MODE: "test" });
+    expect(meta.status).toBe(200);
+    expect(meta.json).toEqual({ dataMode: "test", seedRows: null });
+  });
+
+  it("defaults to demo without Supabase", async () => {
+    expect((await call(null, "GET", "/meta")).json.dataMode).toBe("demo");
+  });
+
+  it("admin meta reports seedRows > 0 when seed rows exist; others see null (unknown)", async () => {
+    seedStaff();
+    const admin = await asAdmin();
+    const staff = await asStaff("B-TS");
+    const env = { KPV_DATA_MODE: "test" };
+    const a = await call(admin, "GET", "/meta", undefined, TODAY, env);
+    expect(a.json.dataMode).toBe("test");
+    expect(a.json.seedRows).toBeGreaterThan(0);
+    expect((await call(staff, "GET", "/meta", undefined, TODAY, env)).json.seedRows).toBeNull();
+    expect((await call(null, "GET", "/meta", undefined, TODAY, env)).json.seedRows).toBeNull();
+  });
+
+  it("refuses a transfer or move between a real case and a mock case (MIXED_TEST_TRANSFER)", async () => {
+    const staff = await asStaff("B-MM"); // first request builds the demo store for TODAY
+    db().desks.find((d: any) => d.desk_id === "TS-D02").is_seed = true;
+    const sent = await call(staff, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "TS-D02", skuId: "GB-001", qty: 1 });
+    expect(sent.status).toBe(400);
+    expect(sent.json.code).toBe("MIXED_TEST_TRANSFER");
+    // nothing left the sender
+    expect(rowOf(await detailOf(staff, "MM-D01", TODAY), "GB-001").transfer_out).toBe(0);
+
+    // a real desk of the same branch marked as mock: a move is refused too
+    db().desks.find((d: any) => d.desk_id === "MM-D03").is_seed = true;
+    const moved = await call(staff, "POST", "/moves", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "MM-D03", lines: [{ skuId: "GB-001", qty: 1 }], clientRef: "00000000-0000-4000-8000-0000000000bb" });
+    expect(moved.status).toBe(400);
+    expect(moved.json.code).toBe("MIXED_TEST_TRANSFER");
+  });
+
+  it("the signed-in screen data moved to /app-meta", async () => {
+    const admin = await asAdmin();
+    const res = await call(admin, "GET", "/app-meta");
+    expect(res.status).toBe(200);
+    expect(res.json).toHaveProperty("branches");
+    expect(res.json).toHaveProperty("today");
   });
 });

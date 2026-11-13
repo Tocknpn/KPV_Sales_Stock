@@ -784,8 +784,8 @@ async function openReorderProposalPage() {
   };
 
   const reasonFor = (r) =>
-    r.low_stock
-      ? `${t("documents.proposalReasonLow")} (${r.closing_qty}/${r.threshold})`
+    r.branch_status === "critical" || r.branch_status === "warning"
+      ? `${t("documents.proposalReasonLow")} (${r.runway_days ?? "–"}${t("stock.daysShort")})`
       : r.lifetime_alert
       ? `${t("documents.proposalReasonLifetime")} (${r.est_lifetime_days}${t("stock.daysShort")})`
       : null;
@@ -824,7 +824,7 @@ async function openReorderProposalPage() {
         item: pickName(r.name_en, r.name_lo),
         skuIcon: r.icon,
         gramEach: r.gram_weight_each ?? 0,
-        attention: r.low_stock || r.lifetime_alert,
+        attention: r.branch_status === "critical" || r.branch_status === "warning" || r.lifetime_alert,
         reason: reasonFor(r),
         qty: "",
         weight_g: "",

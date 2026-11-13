@@ -15,6 +15,7 @@ let activeTab = "sku";
 let skuGroupFilter = "all"; // "all" | type_id
 let skuSizeFilter = "all"; // "all" | weight_id
 let skuSearchQuery = "";
+let knownGroups = []; // existing product groups, suggested in the SKU form
 
 export async function renderSku(root) {
   skuGroupFilter = "all";
@@ -211,6 +212,7 @@ async function renderSkuTab(body) {
   const [{ skus }, { types }, { weights }] = await Promise.all([api.skus(true), api.skuTypes(), api.skuWeights()]);
   const activeTypes = types.filter((ty) => ty.active);
   const activeWeights = weights.filter((w) => w.active);
+  knownGroups = [...new Set(skus.map((s) => s.group_name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 
   const searchOpen = skuSearchQuery.trim().length > 0;
 
@@ -336,7 +338,7 @@ function renderSkuList(body, skus, types, weights, activeTypes, activeWeights) {
 }
 
 function skuRow(s) {
-  const subtitle = [s.weight_name, s.purity, s.baht_weight > 0 ? `${s.baht_weight} Baht` : null].filter(Boolean).join(" · ") || s.sku_id;
+  const subtitle = [s.group_name, s.weight_name, s.purity, s.baht_weight > 0 ? `${s.baht_weight} Baht` : null].filter(Boolean).join(" · ") || s.sku_id;
   return `
     <div class="flex items-center gap-2.5 px-4 py-3">
       <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">${icon(s.icon, "h-4 w-4")}</span>
@@ -379,6 +381,10 @@ function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights,
         </select>
       </div>
     </div>
+    <label for="new-sku-group" class="mb-1.5 mt-3 block text-xs font-bold text-gray-600">${t("settings.groupLabel")}</label>
+    <input id="new-sku-group" type="text" maxlength="80" list="sku-group-list" autocomplete="off" value="${existing?.group_name ? escapeHtml(existing.group_name) : ""}" class="input-filled" />
+    <datalist id="sku-group-list">${knownGroups.map((g) => `<option value="${escapeHtml(g)}"></option>`).join("")}</datalist>
+    <p class="mt-1.5 text-[11px] text-gray-500">${t("settings.groupHint")}</p>
     <div class="mt-3 grid grid-cols-2 gap-2">
       <div>
         <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.purityLabel")}</label>
@@ -430,6 +436,7 @@ function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights,
             name_lo: sheetBody.querySelector("#new-sku-name-lo").value.trim() || null,
             type_id: sheetBody.querySelector("#new-sku-type").value,
             weight_id: sheetBody.querySelector("#new-sku-weight").value,
+            group_name: sheetBody.querySelector("#new-sku-group").value.trim() || null,
             purity: sheetBody.querySelector("#new-sku-purity").value || null,
             baht_weight: Math.max(0, Number(bahtInput.value) || 0),
             unit_price_lak: Math.max(0, Number(sheetBody.querySelector("#new-sku-price").value) || 0),

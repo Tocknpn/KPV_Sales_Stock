@@ -13,9 +13,10 @@ export const CSV_COLUMNS = [
   "reorder_level",
   "avg_daily_sales",
   "order_lead_time_days",
+  "group",
 ];
 
-export const CSV_TEMPLATE = `${CSV_COLUMNS.join(",")}\r\n,Gold Bar 1 Baht,ທອງຄຳແທ່ງ 1 ບາດ,Gold Bars,1 Baht,99.99%,1,0,5,2.5,3\r\n`;
+export const CSV_TEMPLATE = `${CSV_COLUMNS.join(",")}\r\n,Gold Bar 1 Baht,ທອງຄຳແທ່ງ 1 ບາດ,Gold Bars,1 Baht,99.99%,1,0,5,2.5,3,\r\n`;
 
 export function parseCsv(text) {
   const src = text.replace(/^﻿/, "");

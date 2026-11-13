@@ -1,4 +1,4 @@
-export function toast(message, tone = "default") {
+export function toast(message, tone = "default", ms = 2200) {
   const host = document.getElementById("toast");
   const toneCls =
     tone === "success"
@@ -14,7 +14,7 @@ export function toast(message, tone = "default") {
   setTimeout(() => {
     el.classList.add("opacity-0");
     setTimeout(() => el.remove(), 300);
-  }, 2200);
+  }, ms);
 }
 
 const sheetHost = () => document.getElementById("sheet-host");
@@ -128,4 +128,31 @@ export function chip(label, active, extra = "") {
 
 export function pillDot(color) {
   return `<span class="h-1.5 w-1.5 rounded-full" style="background:${color}"></span>`;
+}
+
+// Toast with one action button that disappears after `ms` (default 6 s).
+export function toastAction(message, actionLabel, onAction, ms = 6000) {
+  const host = document.getElementById("toast");
+  const el = document.createElement("div");
+  el.className = "pointer-events-auto flex max-w-full items-center gap-3 rounded-2xl bg-gray-900 py-1 pl-4 pr-1 text-sm font-semibold text-white shadow-pop";
+  const msg = document.createElement("span");
+  msg.className = "min-w-0 break-words py-2";
+  msg.textContent = message;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "tap-target shrink-0 rounded-full px-4 font-extrabold text-brand-100 underline";
+  btn.textContent = actionLabel;
+  el.append(msg, btn);
+  host.appendChild(el);
+  let timer = setTimeout(() => el.remove(), ms);
+  btn.addEventListener("click", async () => {
+    clearTimeout(timer);
+    btn.disabled = true;
+    try {
+      await onAction();
+    } finally {
+      el.remove();
+    }
+  });
+  return el;
 }
