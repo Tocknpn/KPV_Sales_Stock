@@ -784,6 +784,7 @@ export function staffAccountSummary(staffAccounts: StaffAccount[], branches: Bra
       branch_id: a.branch_id,
       branch_name: a.branch_id ? branchById.get(a.branch_id)?.name_en ?? a.branch_id : "All branches",
       display_name: a.display_name,
+      username: a.username,
       role: a.role,
       active: a.active,
       locked: Boolean(a.locked_until && a.locked_until > nowIso),

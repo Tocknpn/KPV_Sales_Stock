@@ -1,5 +1,6 @@
 // Settings > Users. Everyone can see the accounts of their branch; an admin
-// can add people, move them between branches, reset a PIN, unlock a locked
+// can add people, set their username, move them between branches, reset a
+// password, unlock a locked
 // account and deactivate someone who has left.
 import { api } from "../../api.js";
 import { t } from "../../i18n.js";
@@ -45,7 +46,7 @@ function userRow(a, admin, canUnlock) {
     <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-50 text-[11px] font-extrabold text-brand-700">${escapeHtml(a.display_name.slice(0, 2).toUpperCase())}</span>
     <span class="min-w-0 flex-1 text-left">
       <span class="block truncate text-xs font-bold ${a.active ? "text-gray-900" : "text-gray-400"}">${escapeHtml(a.display_name)}</span>
-      <span class="block truncate text-[10px] text-gray-500">${a.branch_id ? escapeHtml(branchName(a.branch_id)) : t("topbar.allBranches")}</span>
+      <span class="block truncate text-[10px] text-gray-500">${a.username ? `@${escapeHtml(a.username)} · ` : `<span class="text-danger">${t("users.noUsername")}</span> · `}${a.branch_id ? escapeHtml(branchName(a.branch_id)) : t("topbar.allBranches")}</span>
     </span>
     <span class="flex shrink-0 items-center gap-1">${chips}</span>`;
   return admin || canUnlock
@@ -53,10 +54,13 @@ function userRow(a, admin, canUnlock) {
     : `<div class="flex items-center gap-2.5 py-2.5">${inner}</div>`;
 }
 
-function pinField(id, labelKey) {
+const MIN_PASSWORD = 6;
+const USERNAME_RE = /^[a-z0-9._-]{3,30}$/;
+
+function passwordField(id, labelKey) {
   return `
     <label for="${id}" class="mb-1.5 mt-3 block text-xs font-bold text-gray-600">${t(labelKey)}</label>
-    <input id="${id}" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" placeholder="••••" class="input-filled text-center text-base font-extrabold tracking-[0.5em]" />`;
+    <input id="${id}" type="text" maxlength="72" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" class="input-filled" />`;
 }
 
 function openUserForm(existing, root) {
@@ -67,6 +71,11 @@ function openUserForm(existing, root) {
     `
     <label for="user-name" class="mb-1.5 block text-xs font-bold text-gray-600">${t("users.name")}</label>
     <input id="user-name" type="text" maxlength="60" value="${existing ? escapeHtml(existing.display_name) : ""}" class="input-filled" />
+
+    <label for="user-username" class="mb-1.5 mt-3 block text-xs font-bold text-gray-600">${t("users.username")}</label>
+    <input id="user-username" type="text" maxlength="30" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"
+           value="${existing?.username ? escapeHtml(existing.username) : ""}" placeholder="somchai" class="input-filled" />
+    <p class="mt-1.5 text-[11px] text-gray-500">${t("users.usernameHint")}</p>
 
     ${
       existing
@@ -90,8 +99,8 @@ function openUserForm(existing, root) {
         : ""
     }
 
-    ${pinField("user-pin", existing ? "users.newPin" : "users.pin")}
-    ${existing ? `<p class="mt-1.5 text-[11px] text-gray-500">${t("users.newPinHint")}</p>` : ""}
+    ${passwordField("user-password", existing ? "users.newPassword" : "users.password")}
+    <p class="mt-1.5 text-[11px] text-gray-500">${existing ? t("users.newPasswordHint") : t("users.passwordHint")}</p>
 
     <button id="user-save" class="btn-primary mt-4 w-full">${t("settings.save")}</button>
 
@@ -123,19 +132,22 @@ function openUserForm(existing, root) {
 
         body.querySelector("#user-save").addEventListener("click", async () => {
           const displayName = body.querySelector("#user-name").value.trim();
-          const pin = body.querySelector("#user-pin").value;
+          const username = body.querySelector("#user-username").value.trim().toLowerCase();
+          const password = body.querySelector("#user-password").value;
           if (!displayName) return toast(t("users.needName"), "error");
-          if ((!existing || pin) && !/^[0-9]{4}$/.test(pin)) return toast(t("users.needPin"), "error");
+          if (!USERNAME_RE.test(username)) return toast(t("err.BAD_USERNAME"), "error");
+          if ((!existing || password) && password.length < MIN_PASSWORD) return toast(t("err.BAD_PASSWORD"), "error");
           const branchId = body.querySelector("#user-branch")?.value;
           if (existing) {
             const payload = {};
             if (displayName !== existing.display_name) payload.displayName = displayName;
+            if (username !== existing.username) payload.username = username;
             if (existing.role !== "admin" && branchId !== existing.branch_id) payload.branchId = branchId;
-            if (pin) payload.pin = pin;
+            if (password) payload.password = password;
             await api.updateUser(existing.id, payload);
           } else {
             const role = body.querySelector("#user-role").value;
-            await api.createUser({ displayName, role, branchId: role === "admin" ? null : branchId, pin });
+            await api.createUser({ displayName, username, role, branchId: role === "admin" ? null : branchId, password });
           }
           await done("settings.savedToast");
         });

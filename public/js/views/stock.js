@@ -90,7 +90,7 @@ function renderTopbar() {
   }
 
   document.getElementById("date-select").addEventListener("click", (e) => openCalendarSheet(e.currentTarget));
-  document.getElementById("switch-user").addEventListener("click", () => switchUser(state.user.branchId));
+  document.getElementById("switch-user").addEventListener("click", () => switchUser());
   wireCasesChip(() => state.stock.branch, () => refreshCards(false));
   refreshCasesChip(state.stock.branch);
 }

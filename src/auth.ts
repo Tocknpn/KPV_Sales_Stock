@@ -1,4 +1,4 @@
-// PIN hashing + stateless session tokens for staff login. Uses only Web
+// Password hashing + stateless session tokens for staff login. Uses only Web
 // Crypto (available natively in Workers) so no new dependency is needed
 // beyond hono.
 import type { Context, Next } from "hono";
@@ -15,11 +15,23 @@ export function authSecret(env: Env): string {
   return "dev-insecure-secret";
 }
 
-export const MAX_FAILED_PINS = 5;
+export const MAX_FAILED_LOGINS = 5;
 export const LOCK_MINUTES = 15;
 
-export function isValidPin(pin: unknown): pin is string {
-  return typeof pin === "string" && /^[0-9]{4}$/.test(pin);
+// New or reset passwords: 6-72 characters, anything allowed. (Older 4-digit
+// PINs still verify — they simply stay that person's password until reset.)
+export const MIN_PASSWORD = 6;
+export function isValidPassword(pw: unknown): pw is string {
+  return typeof pw === "string" && pw.length >= MIN_PASSWORD && pw.length <= 72;
+}
+
+// Usernames are stored lower-case: 3-30 of a-z 0-9 . _ - (matches the
+// staff_username_format check in the database).
+export function normalizeUsername(u: unknown): string {
+  return typeof u === "string" ? u.trim().toLowerCase() : "";
+}
+export function isValidUsername(u: string): boolean {
+  return /^[a-z0-9._-]{3,30}$/.test(u);
 }
 
 const PBKDF2_ITERATIONS = 100_000;
@@ -34,8 +46,8 @@ function fromHex(hex: string) {
   return bytes;
 }
 
-async function pbkdf2(pin: string, salt: Uint8Array, iterations: number) {
-  const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(pin), "PBKDF2", false, ["deriveBits"]);
+async function pbkdf2(secret: string, salt: Uint8Array, iterations: number) {
+  const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits(
     { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
     keyMaterial,
@@ -44,19 +56,19 @@ async function pbkdf2(pin: string, salt: Uint8Array, iterations: number) {
   return toHex(bits);
 }
 
-export async function hashPin(pin: string): Promise<string> {
+export async function hashPassword(password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const hash = await pbkdf2(pin, salt, PBKDF2_ITERATIONS);
+  const hash = await pbkdf2(password, salt, PBKDF2_ITERATIONS);
   return `pbkdf2$${PBKDF2_ITERATIONS}$${toHex(salt.buffer as ArrayBuffer)}$${hash}`;
 }
 
-export async function verifyPin(pin: string, stored: string): Promise<boolean> {
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const parts = stored.split("$");
   if (parts.length !== 4 || parts[0] !== "pbkdf2") return false;
   const iterations = Number(parts[1]);
   const salt = fromHex(parts[2]);
   const expected = parts[3];
-  const actual = await pbkdf2(pin, salt, iterations);
+  const actual = await pbkdf2(password, salt, iterations);
   if (actual.length !== expected.length) return false;
   // Constant-time-ish compare — short hex strings, not perf-sensitive here.
   let diff = 0;
@@ -127,7 +139,7 @@ export async function verifyToken(token: string, secret: string): Promise<TokenP
 }
 
 // Verifies the bearer token's signature/expiry, then checks the live account
-// (active, token_version) so a PIN change or deactivation invalidates
+// (active, token_version) so a password change or deactivation invalidates
 // already-issued tokens without needing a session table.
 export async function requireAuth(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, next: Next) {
   const header = c.req.header("Authorization") || "";

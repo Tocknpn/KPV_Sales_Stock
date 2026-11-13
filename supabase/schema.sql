@@ -50,7 +50,7 @@ create table desks (
 create index idx_desks_branch on desks(branch_id);
 
 -- ---------------------------------------------------------------------------
--- Staff accounts — name + PIN login, scoped to one branch; role 'admin'
+-- Staff accounts — scoped to one branch; role 'admin'
 -- accounts have branch_id null (all branches).
 -- ---------------------------------------------------------------------------
 create table staff_accounts (

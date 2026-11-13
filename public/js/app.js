@@ -136,10 +136,8 @@ async function boot() {
     }
   }
   await loadDataMeta();
-  // No valid session — show the login gate. It needs the branch list, which
-  // is public (no auth) since you haven't logged in yet.
-  const { branches } = await api.branches();
-  await mountLogin(branches, async (user) => {
+  // No valid session — show the username + password login gate.
+  await mountLogin(async (user) => {
     state.user = user;
     await loadMetaAndEnter();
   });
