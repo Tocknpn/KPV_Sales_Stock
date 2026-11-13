@@ -4,6 +4,7 @@ import { storeFor, newRouter, HttpError, scopeBranch } from "../app";
 import { assertBranchAccess } from "../auth";
 import { businessDate, addDays, isValidMonth, monthRange } from "../time";
 import { buildDashboard, buildReport, AGING_LOOKBACK_DAYS } from "../logic";
+import { loadBranchStatuses } from "../replenishment";
 import type { Desk, SessionUser } from "../types";
 
 const r = newRouter();
@@ -40,6 +41,7 @@ r.get("/dashboard", async (c) => {
     store.transfers({ branchId, status: "in_transit" }),
     store.config(),
   ]);
+  const statuses = await loadBranchStatuses(store, branchId ? [branchId] : branches.map((b) => b.branch_id), today);
   return c.json(
     buildDashboard({
       today,
@@ -52,6 +54,7 @@ r.get("/dashboard", async (c) => {
       agingRows: windowRows,
       inTransit,
       config,
+      statuses,
       filter: { branchId, deskId, category: c.req.query("category") || undefined, stockFlag },
     })
   );

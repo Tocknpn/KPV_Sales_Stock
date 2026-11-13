@@ -23,6 +23,12 @@ function newSkuId() {
   return `SKU-${Date.now().toString(36).toUpperCase()}${[...rand].map((b) => (b % 36).toString(36)).join("").toUpperCase()}`;
 }
 
+// Product group: free text, blank = none.
+function groupName(value: unknown): string | null {
+  const g = String(value ?? "").trim().slice(0, 80);
+  return g || null;
+}
+
 function nonNegative(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
@@ -87,6 +93,7 @@ function buildSku(input: Record<string, any>, types: SkuType[], weights: SkuWeig
     reorder_level: numbers.reorder_level ?? 5,
     avg_daily_sales: numbers.avg_daily_sales,
     order_lead_time_days: numbers.order_lead_time_days,
+    group_name: groupName(input.group_name ?? input.group),
     icon: input.icon ? String(input.icon) : type.icon,
   };
 }
@@ -142,6 +149,7 @@ r.patch("/skus/:id", requireAdmin, async (c) => {
   }
   if (body.name_lo !== undefined) patch.name_lo = body.name_lo ? String(body.name_lo).trim().slice(0, 120) : null;
   if (body.active !== undefined) patch.active = Boolean(body.active);
+  if (body.group_name !== undefined || body.group !== undefined) patch.group_name = groupName(body.group_name ?? body.group);
   if (body.purity !== undefined) {
     if (body.purity && !PURITIES.includes(body.purity)) throw new HttpError(400, "purity must be 96.5% or 99.99%", "BAD_SKU");
     patch.purity = body.purity || null;
@@ -326,6 +334,8 @@ r.post("/settings/run-rate/:skuId", requireAdmin, async (c) => {
   if (Number.isNaN(avg) || Number.isNaN(lead)) throw new HttpError(400, "Values must be numbers, 0 or more", "BAD_RUN_RATE");
   const sku = await store.updateSku((c.req.param("skuId") ?? ""), { avg_daily_sales: avg, order_lead_time_days: lead });
   if (!sku) throw new HttpError(404, "SKU not found", "NOT_FOUND");
+  // The planning engine reads rules, so keep the company-wide SKU rule in step until Task 15 retires this screen.
+  await store.upsertRule({ scope: "sku", scope_key: sku.sku_id, branch_id: null, avg_daily_sell: avg, lead_time_days: lead });
   await audit(store, c.get("user"), "sku.run_rate", sku.sku_id, { avg_daily_sales: avg, order_lead_time_days: lead });
   return c.json(sku);
 });

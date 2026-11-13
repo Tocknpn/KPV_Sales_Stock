@@ -302,7 +302,7 @@ function renderCard(d) {
       </div>
       <div class="flex items-center justify-between text-[11px] text-gray-600">
         <span>${fmtInt(d.totalPcs)} pcs</span>
-        ${d.lowStockCount > 0 ? `<span class="font-bold text-danger">⚠ ${d.lowStockCount} ${t("stock.lowShort")}</span>` : ""}
+        ${d.criticalCount > 0 ? `<span class="font-bold text-danger">⚠ ${d.criticalCount} ${t("stock.lowShort")}</span>` : ""}
       </div>
 
       <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">

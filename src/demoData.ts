@@ -17,6 +17,7 @@ import type {
   AuditEntry,
   ClosedDay,
   DeskAssignment,
+  ReplenishmentRule,
 } from "./types";
 
 export interface DemoData {
@@ -35,6 +36,7 @@ export interface DemoData {
   audit: AuditEntry[];
   closedDays: ClosedDay[];
   assignments: DeskAssignment[];
+  rules: ReplenishmentRule[];
 }
 
 export const DEMO_ADMIN_ID = "11111111-0000-0000-0000-000000000001";
@@ -87,6 +89,7 @@ function sku(
     avg_daily_sales,
     order_lead_time_days,
     active: true,
+    group_name: null,
     icon: icon ?? type.icon,
   };
 }
@@ -189,6 +192,28 @@ export function buildDemoData(today: string): DemoData {
     sku("SP-902", "Logo Paper Bag", "ຖົງເຈ້ຍໂລໂກ້", T.supplies, null, null, null, 0, 3500, 8000, 30, null, null, "bag"),
     sku("SP-903", "Branded Pen", "ປາກກາ", T.supplies, null, null, null, 0, 5000, 12000, 30, null, null, "pen"),
     sku("SP-904", "Ceramic Mug", "ຈອກເຊລາມິກ", T.supplies, null, null, null, 0, 32000, 65000, 15, null, null, "mug"),
+  ];
+
+  // The demo necklaces form one product family.
+  for (const s of skus) if (s.type_id === T.necklaces.type_id) s.group_name = "Snake Necklace";
+
+  // Replenishment rules: the per-SKU numbers above as company-wide SKU rules (what the
+  // migration does for a live database), plus one group rule for the necklace family.
+  const rule = (scope: ReplenishmentRule["scope"], scope_key: string, avg: number | null, lead: number | null): ReplenishmentRule => ({
+    id: `00000000-0000-0000-0000-${String(1000 + ruleSeq++).padStart(12, "0")}`,
+    scope,
+    scope_key,
+    branch_id: null,
+    avg_daily_sell: avg,
+    lead_time_days: lead,
+    updated_by: null,
+    updated_at: startedAt,
+    is_seed: false,
+  });
+  let ruleSeq = 0;
+  const rules: ReplenishmentRule[] = [
+    ...skus.filter((s) => s.avg_daily_sales != null || s.order_lead_time_days != null).map((s) => rule("sku", s.sku_id, s.avg_daily_sales, s.order_lead_time_days)),
+    rule("group", "Snake Necklace", 1.5, 7),
   ];
 
   // Four demo days per desk, oldest first; the last one is today.
@@ -330,10 +355,11 @@ export function buildDemoData(today: string): DemoData {
     ledger,
     documents,
     docCounters: { [`B-MM/${year}`]: 2, [`B-TS/${year}`]: 1 },
-    config: { id: 1, safety_buffer_days: 2, spot_lak_per_baht: 32500000, usd_to_lak_rate: 20800, updated_at: startedAt },
+    config: { id: 1, safety_buffer_days: 2, spot_lak_per_baht: 32500000, usd_to_lak_rate: 20800, default_lead_time_days: 7, warning_margin_days: 3, velocity_window_days: 28, updated_at: startedAt },
     transfers: [],
     audit: [],
     closedDays: [],
     assignments: [],
+    rules,
   };
 }

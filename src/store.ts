@@ -23,8 +23,11 @@ import type {
   AuditEntry,
   ClosedDay,
   DeskAssignment,
+  ReplenishmentRule,
+  RuleScope,
   Env,
 } from "./types";
+import { computeVelocity, type VelocityRow } from "./replenishment";
 import { buildDemoData, type DemoData } from "./demoData";
 import { businessDate, isLive, laosDate } from "./time";
 import { computeClosing } from "./logic";
@@ -121,6 +124,16 @@ export interface ClosedDayFilter {
   to?: string;
 }
 
+export interface RuleTarget {
+  scope: RuleScope;
+  scope_key: string;
+  branch_id: string | null;
+}
+export interface RuleInput extends RuleTarget {
+  avg_daily_sell: number | null;
+  lead_time_days: number | null;
+}
+
 export interface Store {
   branches(): Promise<Branch[]>;
   desks(): Promise<Desk[]>;
@@ -190,6 +203,16 @@ export interface Store {
   addClosedDays(rows: ClosedDay[]): Promise<ClosedDay[]>;
   removeClosedDay(branchId: string, date: string): Promise<boolean>;
 
+  // Replenishment rules. upsertRule writes one (scope, key, branch) rule; a null value
+  // inherits, and a rule left with both values null is deleted. deleteRules returns how
+  // many rows it removed. Company-wide rules need an admin, branch rules an admin or that
+  // branch's manager (DENIED otherwise).
+  rules(): Promise<ReplenishmentRule[]>;
+  upsertRule(input: RuleInput): Promise<ReplenishmentRule | null>;
+  deleteRules(targets: RuleTarget[]): Promise<number>;
+  // Automatic sales velocity per SKU for one branch (the branch_velocity RPC).
+  branchVelocity(branchId: string, to: string, days: number): Promise<VelocityRow[]>;
+
   // Case assignment. activeAssignments = the current holder of each case.
   // assignDesk ends the current holder and starts the new one atomically (no-op
   // when already the holder); releaseDesk ends without a successor.
@@ -227,6 +250,7 @@ const SKU_DEFAULTS = {
   order_lead_time_days: null,
   active: true,
   icon: "ring",
+  group_name: null,
 };
 
 // ============================================================================
@@ -843,6 +867,79 @@ export class DemoStore implements Store {
     return true;
   }
 
+  // Mirrors guard_replenishment_rule: a company-wide rule needs an admin, a branch
+  // rule an admin or that branch's manager. System writes are not restricted.
+  private assertMayEditRule(branchId: string | null) {
+    const id = this.actorId();
+    if (!id) return;
+    const me = this.db.staffAccounts.find((a) => a.id === id);
+    if (me?.role === "admin") return;
+    if (branchId !== null && me?.role === "manager" && me.branch_id === branchId) return;
+    throw new StoreError("DENIED", "ROLE_DENIED");
+  }
+  private sameRule(r: ReplenishmentRule, t: RuleTarget) {
+    return r.scope === t.scope && r.scope_key === t.scope_key && r.branch_id === t.branch_id;
+  }
+  async rules() {
+    return this.db.rules;
+  }
+  async upsertRule(input: RuleInput) {
+    this.guard();
+    this.assertMayEditRule(input.branch_id);
+    const i = this.db.rules.findIndex((r) => this.sameRule(r, input));
+    if (input.avg_daily_sell === null && input.lead_time_days === null) {
+      if (i >= 0) {
+        const [gone] = this.db.rules.splice(i, 1);
+        this.log("replenishment_rule", "DELETE", gone, null);
+      }
+      return null;
+    }
+    if (i >= 0) {
+      const row = this.db.rules[i];
+      const before = { ...row };
+      Object.assign(row, { avg_daily_sell: input.avg_daily_sell, lead_time_days: input.lead_time_days, updated_by: this.actorId(), updated_at: this.now() });
+      this.log("replenishment_rule", "UPDATE", before, row);
+      return row;
+    }
+    const row: ReplenishmentRule = {
+      id: crypto.randomUUID(),
+      scope: input.scope,
+      scope_key: input.scope_key,
+      branch_id: input.branch_id,
+      avg_daily_sell: input.avg_daily_sell,
+      lead_time_days: input.lead_time_days,
+      updated_by: this.actorId(),
+      updated_at: this.now(),
+      is_seed: false,
+    };
+    this.db.rules.push(row);
+    this.log("replenishment_rule", "INSERT", null, row);
+    return row;
+  }
+  async deleteRules(targets: RuleTarget[]) {
+    this.guard();
+    let removed = 0;
+    for (const t of targets) {
+      const i = this.db.rules.findIndex((r) => this.sameRule(r, t));
+      if (i < 0) continue;
+      this.assertMayEditRule(t.branch_id);
+      const [gone] = this.db.rules.splice(i, 1);
+      this.log("replenishment_rule", "DELETE", gone, null);
+      removed++;
+    }
+    return removed;
+  }
+  async branchVelocity(branchId: string, to: string, days: number) {
+    const closed = this.db.closedDays.filter((d) => d.branch_id === branchId).map((d) => d.closed_date);
+    return computeVelocity(
+      this.db.ledger.filter((r) => r.branch_id === branchId),
+      this.db.deskDays.filter((d) => d.branch_id === branchId),
+      closed,
+      to,
+      days
+    );
+  }
+
   private actorId() {
     return this.actor && "id" in this.actor ? this.actor.id : null;
   }
@@ -1273,6 +1370,39 @@ class SupabaseStore implements Store {
   async removeClosedDay(branchId: string, date: string) {
     const rows = await this.rest<ClosedDay[]>(`branch_closed_day?branch_id=eq.${enc(branchId)}&closed_date=eq.${enc(date)}`, { method: "DELETE" });
     return rows.length > 0;
+  }
+
+  async rules() {
+    return this.restAll<ReplenishmentRule>("replenishment_rule?select=*&order=scope,scope_key,branch_id");
+  }
+  private ruleFilter(t: RuleTarget) {
+    return `scope=eq.${enc(t.scope)}&scope_key=eq.${enc(t.scope_key)}&branch_id=${t.branch_id === null ? "is.null" : `eq.${enc(t.branch_id)}`}`;
+  }
+  async upsertRule(input: RuleInput) {
+    // The unique index is on an expression, so on_conflict cannot name it: look first.
+    if (input.avg_daily_sell === null && input.lead_time_days === null) {
+      await this.deleteRules([input]);
+      return null;
+    }
+    const values = { avg_daily_sell: input.avg_daily_sell, lead_time_days: input.lead_time_days };
+    const [existing] = await this.rest<ReplenishmentRule[]>(`replenishment_rule?select=*&${this.ruleFilter(input)}`);
+    if (existing) return this.patchOne<ReplenishmentRule>(`replenishment_rule?id=eq.${enc(existing.id)}`, values);
+    const [row] = await this.rest<ReplenishmentRule[]>("replenishment_rule", {
+      method: "POST",
+      body: JSON.stringify({ scope: input.scope, scope_key: input.scope_key, branch_id: input.branch_id, ...values }),
+    });
+    return row ?? null;
+  }
+  async deleteRules(targets: RuleTarget[]) {
+    let removed = 0;
+    for (const t of targets) {
+      const rows = await this.rest<ReplenishmentRule[]>(`replenishment_rule?${this.ruleFilter(t)}`, { method: "DELETE" });
+      removed += rows.length;
+    }
+    return removed;
+  }
+  async branchVelocity(branchId: string, to: string, days: number) {
+    return this.rpc<VelocityRow[]>("branch_velocity", { p_branch: branchId, p_to: to, p_days: days });
   }
 
   async activeAssignments(filter: { branchId?: string }) {

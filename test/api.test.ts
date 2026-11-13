@@ -394,7 +394,7 @@ describe("numbers agree across screens", () => {
     await call(admin, "POST", "/settings/config", { safetyBufferDays: 0 });
     expect(rowOf(await detailOf(admin, "IT-D01", TODAY), "GB-001").threshold).toBe(8);
     const low = (await call(admin, "GET", "/dashboard?deskId=IT-D01")).json.watchlist.topLow;
-    for (const item of low) expect(item.closing).toBeLessThan(item.reorder_level);
+    for (const item of low) expect(item.closing).toBeLessThanOrEqual(item.reorder_level);
   });
 
   it("the report works for short months", async () => {

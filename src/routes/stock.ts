@@ -7,6 +7,7 @@ import type { Store, LedgerRowPatch, NewLedgerRow, LedgerChange, LedgerChangeFie
 import { requireManager, assertBranchAccess, isManagerOf } from "../auth";
 import { addDays, businessDate, datesInMonth, isValidMonth, laosDate } from "../time";
 import { buildDayStatus } from "../dayStatus";
+import { loadBranchStatuses } from "../replenishment";
 import { buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, parseQty, validateDeskDay } from "../logic";
 import type { Desk, DeskDay, LedgerRow, SessionUser } from "../types";
 
@@ -110,6 +111,7 @@ r.get("/stock/desks", async (c) => {
     store.activeAssignments({ branchId }),
   ]);
   const scopedDesks = branchId ? desks.filter((d) => d.branch_id === branchId) : desks;
+  const statuses = await loadBranchStatuses(store, [...new Set(scopedDesks.map((d) => d.branch_id))], today);
   // Earliest unfinished earlier day per desk — check-in is blocked until it is closed.
   const blockedBy = new Map<string, string>();
   for (const d of openEarlier) if (!blockedBy.has(d.desk_id)) blockedBy.set(d.desk_id, d.ledger_date);
@@ -122,7 +124,7 @@ r.get("/stock/desks", async (c) => {
   const deskById = new Map(desks.map((d) => [d.desk_id, d]));
   const none = new Set<string>();
 
-  const cards = buildDeskCards(scopedDesks, branches, skus, days, ledgerRows, staffAccounts, config).map((card) => {
+  const cards = buildDeskCards(scopedDesks, branches, skus, days, ledgerRows, staffAccounts, config, statuses).map((card) => {
     const desk = deskById.get(card.desk_id)!;
     const status = buildDayStatus({
       deskCreatedDate: laosDate(new Date(desk.created_at)),

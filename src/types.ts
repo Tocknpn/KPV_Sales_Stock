@@ -55,8 +55,26 @@ export interface MasterSku {
   // Per-SKU run-rate inputs. null = not yet filled in by the admin.
   avg_daily_sales: number | null;
   order_lead_time_days: number | null;
+  // Product family ("Snake Necklace"); lets one replenishment rule cover all sizes.
+  group_name: string | null;
   active: boolean;
   icon: string;
+}
+
+export type RuleScope = "sku" | "group" | "type";
+
+// Average daily sell and/or lead time for a SKU, group or type; company-wide
+// (branch_id null) or for one branch. A null value inherits.
+export interface ReplenishmentRule {
+  id: string;
+  scope: RuleScope;
+  scope_key: string;
+  branch_id: string | null;
+  avg_daily_sell: number | null;
+  lead_time_days: number | null;
+  updated_by: string | null;
+  updated_at: string;
+  is_seed: boolean;
 }
 
 export type DeskStatus = "check_in" | "final_stock" | "done";
@@ -169,6 +187,9 @@ export interface SystemConfig {
   safety_buffer_days: number;
   spot_lak_per_baht: number;
   usd_to_lak_rate: number;
+  default_lead_time_days: number;
+  warning_margin_days: number;
+  velocity_window_days: number;
   updated_at: string;
 }
 
