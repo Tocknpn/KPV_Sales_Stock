@@ -6,7 +6,7 @@
 -- (is_seed = false), so the mock-data purge keeps them.
 -- One SKU = product + weight. 1 Baht = 4 Salueng = 40 Hun = 15 g (shop sheet).
 -- One-of-a-kind pieces (weights in g) have reorder level 0: no low-stock alert.
--- 212 SKUs. Generated from the sheet; edit names or types here freely.
+-- 213 SKUs. Generated from the sheet; edit names or types here freely.
 -- ============================================================================
 
 insert into master_sku (sku_id, name_en, name_lo, category, type_id, weight_id, purity,
@@ -28,6 +28,7 @@ values
   ('SWISS-1000G', 'Swiss Gold Bar 1000g', 'ຄຳແທ່ງສະວິດ 1000 g', 'Gold Bars', 'GOLD_BARS', 'KG_1', '99.99%', 1000, 66.6667, 5, 'Swiss Gold Bar', 'bar'),
   ('NECK-1S', 'Necklace 1 Salueng', 'ສາຍຄໍ 1 ສະຫຼຶງ', 'Necklaces', 'NECKLACES', 'BAHT_025', '96.5%', 3.811, 0.25, 5, 'Necklace', 'necklace'),
   ('NECK-2S', 'Necklace 2 Salueng', 'ສາຍຄໍ 2 ສະຫຼຶງ', 'Necklaces', 'NECKLACES', 'BAHT_05', '96.5%', 7.622, 0.5, 5, 'Necklace', 'necklace'),
+  ('NECK-3S', 'Necklace 3 Salueng', 'ສາຍຄໍ 3 ສະຫຼຶງ', 'Necklaces', 'NECKLACES', null, '96.5%', 11.25, 0.75, 5, 'Necklace', 'necklace'),
   ('NECK-1B', 'Necklace 1 Baht', 'ສາຍຄໍ 1 ບາດ', 'Necklaces', 'NECKLACES', 'BAHT_1', '96.5%', 15.244, 1, 5, 'Necklace', 'necklace'),
   ('NECK-1_5B', 'Necklace 1.5 Baht', 'ສາຍຄໍ 1.5 ບາດ', 'Necklaces', 'NECKLACES', null, '96.5%', 22.5, 1.5, 5, 'Necklace', 'necklace'),
   ('NECK-2B', 'Necklace 2 Baht', 'ສາຍຄໍ 2 ບາດ', 'Necklaces', 'NECKLACES', 'BAHT_2', '96.5%', 30.488, 2, 5, 'Necklace', 'necklace'),

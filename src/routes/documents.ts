@@ -5,6 +5,7 @@ import { storeFor, newRouter, readBody, HttpError, scopeBranch, requireDate, aud
 import { requireAdmin, assertBranchAccess } from "../auth";
 import { businessDate, isValidDate } from "../time";
 import { enrichDocuments } from "../logic";
+import { renderDocumentSheet } from "../print/documentSheet";
 
 const r = newRouter();
 
@@ -43,7 +44,8 @@ r.post("/documents", async (c) => {
   const user = c.get("user");
   const body = await readBody(c);
   const branchId = String(body.branchId ?? "");
-  const [branches, desks] = await Promise.all([store.branches(), store.desks()]);
+  const [branches, desks, skus] = await Promise.all([store.branches(), store.desks(), store.skus()]);
+  const skuIds = new Set(skus.map((s) => s.sku_id));
   if (!branches.some((b) => b.branch_id === branchId)) throw new HttpError(400, "Unknown branch", "BAD_BRANCH");
   if (!assertBranchAccess(user, branchId)) throw new HttpError(403, "Branch access denied", "BRANCH_DENIED");
   const deskId = body.deskId ? String(body.deskId) : null;
@@ -56,6 +58,7 @@ r.post("/documents", async (c) => {
 
   const rows = (Array.isArray(body.rows) ? body.rows : []).map((row: Record<string, unknown>, i: number) => ({
     sort_order: i,
+    sku_id: typeof row?.sku_id === "string" && skuIds.has(row.sku_id) ? row.sku_id : null,
     item: String(row?.item ?? "").slice(0, 200),
     qty: cleanNumber(row?.qty),
     weight_g: cleanNumber(row?.weight_g),
@@ -106,73 +109,16 @@ r.delete("/documents/:id", requireAdmin, async (c) => {
   return c.json({ ok: true });
 });
 
-function escapeHtml(s: string) {
-  return s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch] as string));
-}
-
-const STATUS_LABEL: Record<string, string> = {
-  pending: "ລໍຖ້າອະນຸມັດ · Pending approval",
-  approved: "ອະນຸມັດແລ້ວ · Approved",
-  rejected: "ບໍ່ອະນຸມັດ · Rejected",
-};
-
+// Printable sheet in the shop's case-sheet layout (see src/print/documentSheet.ts).
 r.get("/documents/:id/print", async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
   const raw = await store.getDocument((c.req.param("id") ?? ""));
   if (!raw) return c.text("Document not found", 404);
   if (!assertBranchAccess(user, raw.branch_id)) return c.text("Branch access denied", 403);
-  const [branches, desks] = await Promise.all([store.branches(), store.desks()]);
+  const [branches, desks, skus, types] = await Promise.all([store.branches(), store.desks(), store.skus(), store.skuTypes()]);
   const doc = enrichDocuments([raw], branches, desks)[0];
-  const rowsHtml = doc.rows
-    .map(
-      (row) => `<tr>
-        <td>${escapeHtml(row.item)}</td>
-        <td style="text-align:right">${row.qty ?? ""}</td>
-        <td style="text-align:right">${row.weight_g ?? ""}</td>
-        <td>${row.note ? escapeHtml(row.note) : ""}</td>
-      </tr>`
-    )
-    .join("");
-  const statusHtml = doc.status
-    ? `<p><span class="pill">${STATUS_LABEL[doc.status]}</span>${
-        doc.decided_by ? ` &nbsp;·&nbsp; ${escapeHtml(doc.decided_by)} &nbsp;·&nbsp; ${new Date(doc.decided_at ?? "").toLocaleString("en-GB", { timeZone: "Asia/Vientiane" })}` : ""
-      }</p>`
-    : "";
-  const html = `<!doctype html>
-<html lang="lo"><head><meta charset="utf-8">
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Lao:wght@400;500;600;700&display=swap" rel="stylesheet" />
-<title>${escapeHtml(doc.doc_no)} — ${escapeHtml(doc.title)}</title>
-<style>
-  body{font-family:'Plus Jakarta Sans','Noto Sans Lao',Arial,sans-serif;color:#111;padding:32px;max-width:720px;margin:auto}
-  h1{color:#990000;font-size:20px;margin-bottom:4px}
-  .meta{color:#555;font-size:13px;margin-bottom:16px}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{border-bottom:1px solid #e5e7eb;padding:8px 6px;text-align:left}
-  th{color:#888;text-transform:uppercase;font-size:11px}
-  .totals{margin-top:16px;text-align:right;font-weight:700}
-  .pill{display:inline-block;padding:4px 10px;border-radius:999px;background:#ffebeb;color:#990000;font-size:12px;font-weight:700}
-  @media print{ .no-print{display:none} }
-</style></head>
-<body>
-  <h1>${escapeHtml(doc.title)}</h1>
-  <div class="meta">
-    <strong>${escapeHtml(doc.doc_no)}</strong> &nbsp;·&nbsp; ${doc.doc_date} &nbsp;·&nbsp; ${escapeHtml(doc.branch_name)}
-    ${doc.desk_id ? ` (${escapeHtml(doc.desk_id)})` : ""} &nbsp;·&nbsp; By ${escapeHtml(doc.created_by)}
-    &nbsp;·&nbsp; ${new Date(doc.created_at).toLocaleString("en-GB", { timeZone: "Asia/Vientiane" })}
-  </div>
-  ${statusHtml}
-  <table>
-    <thead><tr><th>Item</th><th style="text-align:right">Qty</th><th style="text-align:right">Weight (g)</th><th>Note</th></tr></thead>
-    <tbody>${rowsHtml}</tbody>
-  </table>
-  <div class="totals">${doc.rowCount} rows · ${doc.totalWeightG.toFixed(2)} g total</div>
-  ${doc.notes ? `<p style="margin-top:20px;color:#555;font-size:13px">Notes: ${escapeHtml(doc.notes)}</p>` : ""}
-  <p class="no-print" style="margin-top:32px"><button onclick="window.print()">Print / Save as PDF</button></p>
-</body></html>`;
-  return c.html(html);
+  return c.html(renderDocumentSheet({ doc, skus, types }));
 });
 
 export default r;

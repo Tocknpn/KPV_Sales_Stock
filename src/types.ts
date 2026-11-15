@@ -161,6 +161,8 @@ export interface DocumentRow {
   id: string;
   document_id: string;
   sort_order: number;
+  // The product this row is about (groups the printed sheet); null = free text.
+  sku_id?: string | null;
   item: string;
   qty: number | null;
   weight_g: number | null;

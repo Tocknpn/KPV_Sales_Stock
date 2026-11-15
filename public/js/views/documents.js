@@ -393,7 +393,7 @@ function openDocumentDetail(doc) {
 // re-check the stock screen separately.
 // ---------------------------------------------------------------------------
 function blankRow() {
-  return { sku_id: null, item: "", skuIcon: null, qty: "", weight_g: "", note: "", gramEach: 0, attention: false, reason: null };
+  return { sku_id: null, item: "", pattern: "", skuIcon: null, qty: "", weight_g: "", note: "", gramEach: 0, attention: false, reason: null };
 }
 
 function openSkuPicker(skuCatalog, selectedId, onPick) {
@@ -413,7 +413,8 @@ function buildRowCardHtml(r, i, balanceMap) {
            <span class="truncate text-xs font-bold text-gray-900">${escapeHtml(r.item)}</span>
          </span>
          <svg class="h-3 w-3 shrink-0 text-brand-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
-       </button>`
+       </button>
+       <input data-field="pattern" type="text" maxlength="200" placeholder="${t("documents.pattern")}" value="${escapeHtml(r.pattern ?? "")}" class="input-filled mt-1.5 w-full px-2 py-1.5 text-xs" />`
     : `<div class="flex items-center gap-1">
          <input data-field="item" type="text" placeholder="${t("documents.item")}" value="${escapeHtml(r.item)}" class="input-filled min-w-0 flex-1 px-2 py-1.5 text-xs" />
          <button type="button" data-link-item="${i}" aria-label="${t("documents.pickSkuTitle")}" class="tap-target shrink-0 text-gray-500 hover:text-brand-600">${icon(
@@ -499,7 +500,9 @@ function cleanRowsFor(rows) {
   return rows
     .filter((r) => r.item.trim() !== "")
     .map((r) => ({
-      item: r.item.trim(),
+      sku_id: r.sku_id ?? null,
+      // A product row prints its pattern (ລາຍ) when one is typed, else the product name.
+      item: (r.sku_id && r.pattern?.trim()) || r.item.trim(),
       qty: r.qty === "" ? null : Number(r.qty),
       weight_g: r.weight_g === "" ? null : Number(r.weight_g),
       note: [r.reason, r.note.trim()].filter(Boolean).join(" — ") || null,
@@ -759,6 +762,7 @@ function cleanProposalRows(rows) {
   return rows
     .filter((r) => r.item.trim() !== "" && r.qty !== "" && Number(r.qty) > 0)
     .map((r) => ({
+      sku_id: r.sku_id ?? null,
       item: r.item.trim(),
       qty: Number(r.qty),
       weight_g: r.weight_g === "" ? null : Number(r.weight_g),

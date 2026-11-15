@@ -43,7 +43,7 @@ src/
 supabase/
   schema.sql                       v1 baseline (never edited; its header comment
                                    still mentions seed.sql, which no longer exists)
-  migrations/20261112_01 … 20261113_08   v2 changes, additive and idempotent
+  migrations/20261112_01 … 20261115_09   v2 changes, additive and idempotent
   users_roles.sql                  roles, role guard triggers, RLS lockdown
   base.sql                         production starting data (generated)
   seed_mock_data.sql               tagged mock data for test projects (optional)
@@ -74,7 +74,7 @@ npm run db:pin -- 'a-password'          # print one password hash
 Fresh Supabase project, in the SQL editor:
 
 1. `supabase/schema.sql`
-2. `supabase/migrations/20261112_01_foundation.sql` … `20261113_08_username_login.sql`, in name order
+2. `supabase/migrations/20261112_01_foundation.sql` … `20261115_09_document_row_sku.sql`, in name order
 3. `supabase/users_roles.sql`
 4. `supabase/base.sql`
 5. Test projects only: `supabase/seed_mock_data.sql`, then `supabase/tests/verify_v2.sql` (prints `VERIFY_V2 OK`)
