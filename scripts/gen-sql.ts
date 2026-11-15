@@ -1,8 +1,9 @@
 // Generates the SQL files that set up a Supabase project:
 //
 //   npm run db:sql                      -> writes supabase/base.sql
-//   npm run db:admin -- "Owner" 4821    -> prints SQL that creates the first admin
-//   npm run db:pin -- 1234              -> prints one PBKDF2 hash for that PIN
+//   npm run db:admin -- "Owner" owner 'a-long-password'
+//                                       -> prints SQL that creates the first admin
+//   npm run db:pin -- 'a-password'      -> prints one PBKDF2 hash for that password
 //
 // base.sql  = what a real (production) database starts with: the 4 branches,
 //             the config row, and the standard SKU types and sizes. No people,
@@ -12,7 +13,7 @@
 // database, is gone. db:pin was used once to fill the PIN constant in that file.
 import fs from "node:fs";
 import { buildDemoData } from "../src/demoData";
-import { hashPin, isValidPin } from "../src/auth";
+import { hashPassword, isValidPassword, isValidUsername, normalizeUsername, MIN_PASSWORD } from "../src/auth";
 import { laosDate } from "../src/time";
 
 function lit(v: unknown): string {
@@ -53,25 +54,27 @@ function writeSqlFiles() {
   console.log(`Wrote supabase/base.sql (demo date ${today}).`);
 }
 
-async function printPinHash(pin: string | undefined) {
-  if (!isValidPin(pin)) {
-    console.error("Usage: npm run db:pin -- 1234   (PIN = 4 digits)");
+async function printPasswordHash(password: string | undefined) {
+  if (!isValidPassword(password)) {
+    console.error(`Usage: npm run db:pin -- 'a-password'   (at least ${MIN_PASSWORD} characters)`);
     process.exit(1);
   }
-  console.log(await hashPin(pin as string));
+  console.log(await hashPassword(password as string));
 }
 
-async function printAdminSql(name: string | undefined, pin: string | undefined) {
-  if (!name || !isValidPin(pin)) {
-    console.error('Usage: npm run db:admin -- "Display Name" 1234   (PIN = 4 digits)');
+async function printAdminSql(name: string | undefined, rawUsername: string | undefined, password: string | undefined) {
+  const username = normalizeUsername(rawUsername);
+  if (!name || !isValidUsername(username) || !isValidPassword(password)) {
+    console.error(`Usage: npm run db:admin -- "Display Name" username 'password'
+  username: 3-30 of a-z 0-9 . _ -    password: at least ${MIN_PASSWORD} characters`);
     process.exit(1);
   }
-  const pinHash = await hashPin(pin as string);
+  const pinHash = await hashPassword(password as string);
   console.log("-- Paste into the Supabase SQL editor. Run it once.");
-  console.log(insert("staff_accounts", [{ branch_id: null, display_name: name, pin_hash: pinHash, role: "admin" }]));
+  console.log(insert("staff_accounts", [{ branch_id: null, display_name: name, username, pin_hash: pinHash, role: "admin" }]));
 }
 
 const [mode, ...args] = process.argv.slice(2);
-if (mode === "admin") await printAdminSql(args[0], args[1]);
-else if (mode === "pin-hash") await printPinHash(args[0]);
+if (mode === "admin") await printAdminSql(args[0], args[1], args[2]);
+else if (mode === "pin-hash") await printPasswordHash(args[0]);
 else writeSqlFiles();

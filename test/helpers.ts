@@ -1,7 +1,7 @@
 // Drives the real Hono app against a fresh in-memory demo store.
 import app from "../src/index";
-import { resetDemoStore } from "../src/store";
-import { DEMO_ADMIN_ID, DEMO_MANAGER, DEMO_STAFF } from "../src/demoData";
+import { resetDemoStore, getStore } from "../src/store";
+import { DEMO_ADMIN_ID, DEMO_MANAGER, DEMO_STAFF, DEMO_USERNAMES } from "../src/demoData";
 
 export const TODAY = "2026-11-12";
 export const YESTERDAY = "2026-11-11";
@@ -35,8 +35,19 @@ export async function call(session: Session | null, method: string, path: string
   return { status: res.status, json, text };
 }
 
-export async function login(accountId: string, pin: string, date = TODAY): Promise<Session> {
-  const res = await call(null, "POST", "/auth/login", { accountId, pin }, date);
+// Login body for an account id. Demo accounts use their fixed username (no
+// store access, so the demo store is never built off the pinned date); an
+// account created in the test is looked up in the already-built store.
+export function creds(accountId: string, password: string) {
+  const username =
+    DEMO_USERNAMES[accountId] ??
+    (getStore({ DEMO_DATE: TODAY } as any) as any).db.staffAccounts.find((a: any) => a.id === accountId)?.username ??
+    `no-such-${accountId}`;
+  return { username, password };
+}
+
+export async function login(accountId: string, password: string, date = TODAY): Promise<Session> {
+  const res = await call(null, "POST", "/auth/login", creds(accountId, password), date);
   if (res.status !== 200) throw new Error(`login failed: ${res.status} ${res.text}`);
   return { token: res.json.token, date };
 }

@@ -22,9 +22,9 @@ async function send(path, options = {}) {
       ...(options.headers || {}),
     },
   });
-  // A 401 on an authenticated call means the session ended server-side (PIN
-  // changed, account closed, 30 days passed) — drop it and return to login.
-  // A 401 from the login call itself is just a wrong PIN.
+  // A 401 on an authenticated call means the session ended server-side
+  // (password changed, account closed, 30 days passed) — drop it and return to
+  // login. A 401 from the login call itself is just a wrong password.
   if (res.status === 401 && token && !path.startsWith("/auth/login")) {
     clearSession();
     window.location.reload();
@@ -60,7 +60,7 @@ export const api = {
   branches: () => request("/branches"),
 
   authAccounts: (branchId) => request(`/auth/accounts${branchId ? `?branchId=${branchId}` : ""}`),
-  login: (accountId, pin) => post(`/auth/login`, { accountId, pin }),
+  login: (username, password) => post(`/auth/login`, { username, password }),
   me: () => request("/auth/me"),
   logout: () => post(`/auth/logout`),
 

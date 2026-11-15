@@ -12,7 +12,7 @@
 -- transaction open in your SQL session.)
 --
 -- Dates are relative to kpv_today() (Laos), so this file never needs
--- regenerating. Login for every seed account: PIN 1234.
+-- regenerating. Seed logins: usernames test.admin, test.manager, test.staff1-3; password 1234.
 --
 -- What you get:
 --   B-TST1 "Test Branch" with cases T1-1 .. T1-4, B-TST2 with case T2-1
@@ -30,7 +30,7 @@
 do $$
 declare
   v_today date := kpv_today();
-  v_pin   constant text := 'pbkdf2$100000$779f103340e75f15d22d0121cc45f4e1$632159949dbe5db4d24ea545930ac416b818c0d136a53413491cee8e0e6a5de6';  -- PIN 1234 (npm run db:pin -- 1234)
+  v_pin   constant text := 'pbkdf2$100000$779f103340e75f15d22d0121cc45f4e1$632159949dbe5db4d24ea545930ac416b818c0d136a53413491cee8e0e6a5de6';  -- password 1234 (the old demo PIN)
   v_admin uuid;
   v_mgr   uuid;
   v_s1    uuid;
@@ -55,8 +55,8 @@ begin
   --    this one insert through). Everything after runs as that admin, because
   --    only an admin may create SKUs, rules and closed days.
   -- -------------------------------------------------------------------------
-  insert into staff_accounts (branch_id, display_name, pin_hash, role, is_seed)
-  values (null, 'Test Admin', v_pin, 'admin', true)
+  insert into staff_accounts (branch_id, display_name, username, pin_hash, role, is_seed)
+  values (null, 'Test Admin', 'test.admin', v_pin, 'admin', true)
   returning id into v_admin;
   perform set_config('kpv.actor_id', v_admin::text, true);
 
@@ -79,14 +79,14 @@ begin
       ('T2-1', 'B-TST2', 'Test case 1', 1)
     ) as x(desk_id, branch_id, display_name, sort_order);
 
-  insert into staff_accounts (branch_id, display_name, pin_hash, role, is_seed)
-  values ('B-TST1', 'Test Manager', v_pin, 'manager', true) returning id into v_mgr;
-  insert into staff_accounts (branch_id, display_name, pin_hash, role, is_seed)
-  values ('B-TST1', 'Test Staff 1', v_pin, 'staff', true) returning id into v_s1;
-  insert into staff_accounts (branch_id, display_name, pin_hash, role, is_seed)
-  values ('B-TST1', 'Test Staff 2', v_pin, 'staff', true) returning id into v_s2;
-  insert into staff_accounts (branch_id, display_name, pin_hash, role, is_seed)
-  values ('B-TST2', 'Test Staff 3', v_pin, 'staff', true) returning id into v_s3;
+  insert into staff_accounts (branch_id, display_name, username, pin_hash, role, is_seed)
+  values ('B-TST1', 'Test Manager', 'test.manager', v_pin, 'manager', true) returning id into v_mgr;
+  insert into staff_accounts (branch_id, display_name, username, pin_hash, role, is_seed)
+  values ('B-TST1', 'Test Staff 1', 'test.staff1', v_pin, 'staff', true) returning id into v_s1;
+  insert into staff_accounts (branch_id, display_name, username, pin_hash, role, is_seed)
+  values ('B-TST1', 'Test Staff 2', 'test.staff2', v_pin, 'staff', true) returning id into v_s2;
+  insert into staff_accounts (branch_id, display_name, username, pin_hash, role, is_seed)
+  values ('B-TST2', 'Test Staff 3', 'test.staff3', v_pin, 'staff', true) returning id into v_s3;
 
   -- -------------------------------------------------------------------------
   -- 3. SKUs on the base types and weights (which stay real). Group "Snake
@@ -260,7 +260,7 @@ begin
   values (v_admin, 'Test Admin', 'desk_day.reopen', 'T1-2/' || (v_today - 3)::text,
           '{"reason":"Seed example: recount"}'::jsonb, 'B-TST1', 'T1-2', true);
 
-  raise notice 'Seed loaded for % (see kpv_seed_counts()). Login PIN for all seed accounts: 1234', v_today;
+  raise notice 'Seed loaded for % (see kpv_seed_counts()). Seed logins: test.admin / test.manager / test.staff1-3, password 1234', v_today;
 end $$;
 
 select * from kpv_seed_counts() order by table_name;

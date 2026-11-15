@@ -38,12 +38,12 @@ src/
   replenishment.ts    velocity, runway, alert rules
   store.ts            Store interface: SupabaseStore (PostgREST) and DemoStore
   time.ts             Laos business date (UTC+7)
-  auth.ts             PIN hashing, session tokens, role guards
+  auth.ts             password hashing, session tokens, role guards
   demoData.ts         demo dataset (relative to today)
 supabase/
   schema.sql                       v1 baseline (never edited; its header comment
                                    still mentions seed.sql, which no longer exists)
-  migrations/20261112_01 … _07     v2 changes, additive and idempotent
+  migrations/20261112_01 … 20261113_08   v2 changes, additive and idempotent
   users_roles.sql                  roles, role guard triggers, RLS lockdown
   base.sql                         production starting data (generated)
   seed_mock_data.sql               tagged mock data for test projects (optional)
@@ -65,8 +65,8 @@ npm run test:sql     # only test/sql: the real SQL files on in-process Postgres 
 npm run typecheck
 npm run deploy       # build CSS, then wrangler deploy
 npm run db:sql       # regenerate supabase/base.sql (and only that)
-npm run db:admin -- "Owner name" 1234   # print SQL that creates the first admin
-npm run db:pin -- 1234                  # print one PIN hash
+npm run db:admin -- "Owner name" owner 'a-long-password'   # print SQL that creates the first admin
+npm run db:pin -- 'a-password'          # print one password hash
 ```
 
 ## SQL files and run order
@@ -74,7 +74,7 @@ npm run db:pin -- 1234                  # print one PIN hash
 Fresh Supabase project, in the SQL editor:
 
 1. `supabase/schema.sql`
-2. `supabase/migrations/20261112_01_foundation.sql` … `20261112_07_seed_tools.sql`, in name order
+2. `supabase/migrations/20261112_01_foundation.sql` … `20261113_08_username_login.sql`, in name order
 3. `supabase/users_roles.sql`
 4. `supabase/base.sql`
 5. Test projects only: `supabase/seed_mock_data.sql`, then `supabase/tests/verify_v2.sql` (prints `VERIFY_V2 OK`)
@@ -126,8 +126,8 @@ Three roles. Staff and managers see only their own branch; admin sees all.
 | Reopen a Done day | no | own branch, latest, within 3 days | latest |
 | Replenishment rules | read | own branch rules | all |
 | Closed days | read | own branch | all |
-| Unlock a locked PIN | no | own branch staff | yes |
-| Users (create, role, branch, PIN reset) | no | no | yes |
+| Unlock a locked account | no | own branch staff | yes |
+| Users (create, role, branch, username, password reset) | no | no | yes |
 | SKUs, types, sizes, gold price, config | no (gold price is readable) | no (gold price is readable) | yes |
 | Approve / reject proposals, delete documents | no | no | yes |
 | Audit history | own case, today | own branch | all |
@@ -138,9 +138,11 @@ through triggers keyed on the acting staff member (the Worker sends
 
 ## The rules
 
-- **Login.** Branch, name, 4-digit PIN; the session lasts 30 days. 5 wrong PINs
-  lock the account for 15 minutes. Resetting a PIN, moving a branch or
-  deactivating ends that person's sessions.
+- **Login.** Username + password (stored in Supabase `staff_accounts`:
+  `username`, password hash in `pin_hash`); the session lasts 30 days. New
+  passwords need 6+ characters; old 4-digit PINs keep working until reset.
+  5 wrong passwords lock the account for 15 minutes. Resetting a password,
+  moving a branch or deactivating ends that person's sessions.
 - **Desk day** (a "case"): not started, check-in, final stock, done, forward
   only. Check-in is refused while an earlier day of that case is not Done. The
   next opening is the physical count of the last Done day. Done needs every row

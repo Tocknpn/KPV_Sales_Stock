@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEMO_STAFF } from "../src/demoData";
 import { getStore } from "../src/store";
-import { TODAY, YESTERDAY, TOMORROW, freshApp, call, login, asAdmin, asStaff, asManager, on, closeDay, countEverything } from "./helpers";
+import { TODAY, YESTERDAY, TOMORROW, freshApp, call, login, creds, asAdmin, asStaff, asManager, on, closeDay, countEverything } from "./helpers";
 
 beforeEach(freshApp);
 
@@ -15,28 +15,45 @@ const detailOf = async (s: any, desk: string, date: string) => (await call(s, "G
 const rowOf = (detail: any, sku: string) => detail.rows.find((r: any) => r.sku_id === sku);
 
 describe("login", () => {
-  it("locks the account after 5 wrong PINs, even for the right PIN", async () => {
+  it("locks the account after 5 wrong passwords, even for the right one", async () => {
     const id = DEMO_STAFF["B-MM"];
     for (let i = 1; i <= 4; i++) {
-      const res = await call(null, "POST", "/auth/login", { accountId: id, pin: "0000" });
+      const res = await call(null, "POST", "/auth/login", creds(id, "0000"));
       expect(res.status).toBe(401);
       expect(res.json.attemptsLeft).toBe(5 - i);
     }
-    expect((await call(null, "POST", "/auth/login", { accountId: id, pin: "0000" })).status).toBe(423);
-    const locked = await call(null, "POST", "/auth/login", { accountId: id, pin: "1234" });
+    expect((await call(null, "POST", "/auth/login", creds(id, "0000"))).status).toBe(423);
+    const locked = await call(null, "POST", "/auth/login", creds(id, "1234"));
     expect(locked.status).toBe(423);
     expect(locked.json.code).toBe("ACCOUNT_LOCKED");
   });
 
-  it("a correct PIN resets the wrong-PIN counter", async () => {
+  it("a correct password resets the wrong-password counter", async () => {
     const id = DEMO_STAFF["B-MM"];
-    await call(null, "POST", "/auth/login", { accountId: id, pin: "0000" });
+    await call(null, "POST", "/auth/login", creds(id, "0000"));
     await login(id, "1234");
-    const res = await call(null, "POST", "/auth/login", { accountId: id, pin: "0000" });
+    const res = await call(null, "POST", "/auth/login", creds(id, "0000"));
     expect(res.json.attemptsLeft).toBe(4);
   });
 
+  it("an unknown username gets the same answer as a wrong password", async () => {
+    const res = await call(null, "POST", "/auth/login", { username: "nobody", password: "whatever" });
+    expect(res.status).toBe(401);
+    expect(res.json.code).toBe("WRONG_LOGIN");
+    expect((await call(null, "POST", "/auth/login", {})).json.code).toBe("WRONG_LOGIN");
+  });
+
+  it("an admin can change a username; the old one stops working", async () => {
+    const admin = await asAdmin();
+    const id = DEMO_STAFF["B-MM"];
+    expect((await call(admin, "PATCH", `/users/${id}`, { username: "bounmy" })).json.code).toBe("USERNAME_TAKEN");
+    expect((await call(admin, "PATCH", `/users/${id}`, { username: "somchai.s" })).status).toBe(200);
+    expect((await call(null, "POST", "/auth/login", { username: "somchai", password: "1234" })).status).toBe(401);
+    expect((await call(null, "POST", "/auth/login", { username: "somchai.s", password: "1234" })).status).toBe(200);
+  });
+
   it("rejects requests without a session", async () => {
+    expect((await call(null, "GET", "/auth/accounts?branchId=B-MM")).status).toBe(401);
     expect((await call(null, "GET", "/stock/desks")).status).toBe(401);
     expect((await call(null, "GET", "/branches")).status).toBe(200);
   });
@@ -64,8 +81,8 @@ describe("user level", () => {
       ["POST", "/skus/import", { rows: [] }],
       ["POST", "/sku-types", { name_en: "X" }],
       ["POST", "/settings/config", { spotLakPerBaht: 1 }],
-      ["POST", "/users", { displayName: "X", branchId: "B-MM", pin: "1111" }],
-      ["PATCH", `/users/${DEMO_STAFF["B-MM"]}`, { pin: "1111" }],
+      ["POST", "/users", { displayName: "X", username: "xxx", branchId: "B-MM", password: "111111" }],
+      ["PATCH", `/users/${DEMO_STAFF["B-MM"]}`, { password: "111111" }],
       ["DELETE", "/documents/a0000000-0000-0000-0000-000000000001", undefined],
       ["POST", "/documents/a0000000-0000-0000-0000-000000000003/decision", { decision: "approved" }],
       ["POST", "/stock/desk/IT-D01/reopen", { date: TODAY, reason: "test" }],
@@ -76,25 +93,33 @@ describe("user level", () => {
     }
   });
 
-  it("resetting a PIN ends that user's sessions; deactivating blocks login", async () => {
+  it("resetting a password ends that user's sessions; deactivating blocks login", async () => {
     const admin = await asAdmin();
     const staff = await asStaff("B-MM");
     const id = DEMO_STAFF["B-MM"];
-    expect((await call(admin, "PATCH", `/users/${id}`, { pin: "4321" })).status).toBe(200);
+    expect((await call(admin, "PATCH", `/users/${id}`, { password: "new-pass" })).status).toBe(200);
     expect((await call(staff, "GET", "/auth/me")).status).toBe(401);
-    expect((await call(null, "POST", "/auth/login", { accountId: id, pin: "1234" })).status).toBe(401);
-    const again = await login(id, "4321");
+    expect((await call(null, "POST", "/auth/login", creds(id, "1234"))).status).toBe(401);
+    const again = await login(id, "new-pass");
     expect((await call(admin, "PATCH", `/users/${id}`, { active: false })).status).toBe(200);
     expect((await call(again, "GET", "/auth/me")).status).toBe(401);
-    expect((await call(null, "POST", "/auth/login", { accountId: id, pin: "4321" })).status).toBe(404);
+    const closed = await call(null, "POST", "/auth/login", creds(id, "new-pass"));
+    expect(closed.status).toBe(401);
+    expect(closed.json.code).toBe("WRONG_LOGIN");
   });
 
   it("admin can add a user who can then log in; the last admin cannot be deactivated", async () => {
     const admin = await asAdmin();
-    expect((await call(admin, "POST", "/users", { displayName: "Noy", branchId: "B-VT", pin: "12" })).status).toBe(400);
-    const created = await call(admin, "POST", "/users", { displayName: "Noy", branchId: "B-VT", pin: "2468" });
+    const user = { displayName: "Noy V.", username: "Noy.V", branchId: "B-VT", password: "secret-1" };
+    expect((await call(admin, "POST", "/users", { ...user, password: "12345" })).json.code).toBe("BAD_PASSWORD");
+    expect((await call(admin, "POST", "/users", { ...user, username: "no spaces" })).json.code).toBe("BAD_USERNAME");
+    expect((await call(admin, "POST", "/users", { ...user, username: "somchai" })).json.code).toBe("USERNAME_TAKEN");
+    const created = await call(admin, "POST", "/users", user);
     expect(created.status).toBe(200);
-    const noy = await login(created.json.id, "2468");
+    // stored lower-case; login ignores case and surrounding spaces
+    const res = await call(null, "POST", "/auth/login", { username: "  NOY.v ", password: "secret-1" });
+    expect(res.status).toBe(200);
+    const noy = { token: res.json.token, date: TODAY };
     expect((await call(noy, "GET", "/app-meta")).json.branches.map((b: any) => b.branch_id)).toEqual(["B-VT"]);
     const me = (await call(admin, "GET", "/auth/me")).json.user.accountId;
     expect((await call(admin, "PATCH", `/users/${me}`, { active: false })).status).toBe(409);
@@ -564,8 +589,9 @@ describe("branch manager", () => {
 
   it("cannot create users or change master data", async () => {
     const manager = await asManager("B-MM");
-    expect((await call(manager, "POST", "/users", { displayName: "X", branchId: "B-MM", pin: "1111" })).status).toBe(403);
-    expect((await call(manager, "PATCH", `/users/${DEMO_STAFF["B-MM"]}`, { pin: "1111" })).status).toBe(403);
+    expect((await call(manager, "POST", "/users", { displayName: "X", username: "xxx", branchId: "B-MM", password: "111111" })).status).toBe(403);
+    expect((await call(manager, "PATCH", `/users/${DEMO_STAFF["B-MM"]}`, { password: "111111" })).status).toBe(403);
+    expect((await call(manager, "PATCH", `/users/${DEMO_STAFF["B-MM"]}`, { username: "hacked" })).status).toBe(403);
     expect((await call(manager, "PATCH", "/skus/GB-001", { active: false })).status).toBe(403);
     expect((await call(manager, "GET", "/audit?branchId=B-IT")).status).toBe(403);
   });
@@ -573,24 +599,24 @@ describe("branch manager", () => {
   it("can unlock own-branch staff but nothing else about them", async () => {
     const manager = await asManager("B-MM");
     const id = DEMO_STAFF["B-MM"];
-    for (let i = 0; i < 5; i++) await call(null, "POST", "/auth/login", { accountId: id, pin: "0000" });
-    expect((await call(null, "POST", "/auth/login", { accountId: id, pin: "1234" })).status).toBe(423);
-    expect((await call(manager, "PATCH", `/users/${id}`, { pin: "1111" })).status).toBe(403);
+    for (let i = 0; i < 5; i++) await call(null, "POST", "/auth/login", creds(id, "0000"));
+    expect((await call(null, "POST", "/auth/login", creds(id, "1234"))).status).toBe(423);
+    expect((await call(manager, "PATCH", `/users/${id}`, { password: "111111" })).status).toBe(403);
     expect((await call(manager, "PATCH", `/users/${id}`, { unlock: true, active: false })).status).toBe(403);
     expect((await call(manager, "PATCH", `/users/${id}`, { unlock: true })).status).toBe(200);
-    expect((await call(null, "POST", "/auth/login", { accountId: id, pin: "1234" })).status).toBe(200);
+    expect((await call(null, "POST", "/auth/login", creds(id, "1234"))).status).toBe(200);
     // another branch's staff are out of reach
     expect((await call(manager, "PATCH", `/users/${DEMO_STAFF["B-TS"]}`, { unlock: true })).status).toBe(403);
   });
 
   it("admin can create a manager; a manager without a branch is refused", async () => {
     const admin = await asAdmin();
-    const bad = await call(admin, "POST", "/users", { displayName: "Boss", role: "manager", pin: "2222" });
+    const bad = await call(admin, "POST", "/users", { displayName: "Boss", username: "boss", role: "manager", password: "222222" });
     expect(bad.status).toBe(400);
     expect(bad.json.code).toBe("BAD_BRANCH");
-    const ok = await call(admin, "POST", "/users", { displayName: "Boss", role: "manager", branchId: "B-TS", pin: "2222" });
+    const ok = await call(admin, "POST", "/users", { displayName: "Boss", username: "boss", role: "manager", branchId: "B-TS", password: "222222" });
     expect(ok.status).toBe(200);
-    const session = await login(ok.json.id, "2222");
+    const session = await login(ok.json.id, "222222");
     expect((await call(session, "GET", "/auth/me")).json.user.role).toBe("manager");
     const summary = (await call(admin, "GET", "/settings/summary")).json.staff;
     expect(summary.roleCounts.manager).toBe(2);
@@ -751,18 +777,18 @@ describe("data mode and /api/meta (Task 18)", () => {
 
   it("production mode refuses a seed account login", async () => {
     seedStaff();
-    const res = await call(null, "POST", "/auth/login", { accountId: DEMO_STAFF["B-MM"], pin: "1234" }, TODAY, { KPV_DATA_MODE: "production" });
+    const res = await call(null, "POST", "/auth/login", creds(DEMO_STAFF["B-MM"], "1234"), TODAY, { KPV_DATA_MODE: "production" });
     expect(res.status).toBe(403);
     expect(res.json.code).toBe("SEED_ACCOUNT_DISABLED");
-    const list = await call(null, "GET", "/auth/accounts?branchId=B-MM", undefined, TODAY, { KPV_DATA_MODE: "production" });
+    const list = await call(await asManager(), "GET", "/auth/accounts?branchId=B-MM", undefined, TODAY, { KPV_DATA_MODE: "production" });
     expect(list.json.accounts.map((a: any) => a.id)).not.toContain(DEMO_STAFF["B-MM"]);
   });
 
   it("test mode allows it and meta says test", async () => {
     seedStaff();
-    const res = await call(null, "POST", "/auth/login", { accountId: DEMO_STAFF["B-MM"], pin: "1234" }, TODAY, { KPV_DATA_MODE: "test" });
+    const res = await call(null, "POST", "/auth/login", creds(DEMO_STAFF["B-MM"], "1234"), TODAY, { KPV_DATA_MODE: "test" });
     expect(res.status).toBe(200);
-    const list = await call(null, "GET", "/auth/accounts?branchId=B-MM", undefined, TODAY, { KPV_DATA_MODE: "test" });
+    const list = await call(await asManager(), "GET", "/auth/accounts?branchId=B-MM", undefined, TODAY, { KPV_DATA_MODE: "test" });
     expect(list.json.accounts.map((a: any) => a.id)).toContain(DEMO_STAFF["B-MM"]);
     const meta = await call(null, "GET", "/meta", undefined, TODAY, { KPV_DATA_MODE: "test" });
     expect(meta.status).toBe(200);

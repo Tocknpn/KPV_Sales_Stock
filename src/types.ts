@@ -130,11 +130,14 @@ export type LedgerEntryPatch = Partial<
 
 export type StaffRole = "staff" | "manager" | "admin";
 
-// Server/store-side shape — includes pin_hash. Never sent to the client.
+// Server/store-side shape — includes pin_hash (the password hash; the column
+// kept its old name). Never sent to the client.
 export interface StaffAccount {
   id: string;
   branch_id: string | null;
   display_name: string;
+  // Login name, lower-case, unique. null = cannot log in until an admin sets one.
+  username: string | null;
   pin_hash: string;
   role: StaffRole;
   active: boolean;
