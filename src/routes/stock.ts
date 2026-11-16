@@ -208,7 +208,8 @@ r.post("/desks", async (c) => {
   const displayName = String(body.displayName ?? "").trim();
   if (!displayName) throw new HttpError(400, "Case name is required", "NAME_REQUIRED");
 
-  const skuIds = new Set((await store.skus()).filter((s) => s.active).map((s) => s.sku_id));
+  const skuList = await store.skus();
+  const skuIds = new Set(skuList.filter((s) => s.active).map((s) => s.sku_id));
   const opening = new Map<string, number>();
   for (const item of Array.isArray(body.openingSkus) ? body.openingSkus : []) {
     const qty = parseQty(item?.opening_qty);
@@ -218,11 +219,10 @@ r.post("/desks", async (c) => {
 
   const today = businessDate(c.env);
   // The case's origin, frozen for good: who made it and what it started with.
-  const skuList = await store.skus();
   const initial_stock = {
     skus: Object.fromEntries(opening),
     total_pcs: [...opening.values()].reduce((a, q) => a + q, 0),
-    total_baht: [...opening].reduce((a, [id, q]) => a + bahtOf(skuList.find((s) => s.sku_id === id), q), 0),
+    total_baht: Math.round([...opening].reduce((a, [id, q]) => a + bahtOf(skuList.find((s) => s.sku_id === id), q), 0) * 10000) / 10000,
   };
   const desk = await store.createDesk({ branch_id: branchId, display_name: displayName, created_by: user.accountId, initial_stock });
   await store.insertDeskDay({ desk_id: desk.desk_id, ledger_date: today, branch_id: branchId, checked_in_by: user.accountId });
@@ -251,6 +251,12 @@ r.get("/desks/:deskId/info", async (c) => {
   const initial = desk.initial_stock
     ? {
         ...desk.initial_stock,
+        names: Object.fromEntries(
+          Object.keys(desk.initial_stock.skus).map((id) => {
+            const sku = skuList.find((s) => s.sku_id === id);
+            return [id, { name_en: sku?.name_en ?? id, name_lo: sku?.name_lo ?? null }];
+          })
+        ),
         valueLak: Math.round(Object.entries(desk.initial_stock.skus).reduce((sum, [id, q]) => sum + valueLak(skuList.find((s) => s.sku_id === id), q, lakPerBaht), 0) * 100) / 100,
       }
     : null;

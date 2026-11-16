@@ -8,7 +8,7 @@ import { resolveGoldPrice, priceOn } from "../goldPrice";
 import { loadBranchStatuses } from "../replenishment";
 import { buildCaseHistory, buildIssueGrid } from "../caseHistory";
 import type { CaseDayRow } from "../caseHistory";
-import type { Desk, SessionUser } from "../types";
+import type { Desk, DeskDay, SessionUser } from "../types";
 
 const r = newRouter();
 
@@ -110,9 +110,9 @@ r.get("/report/grid", async (c) => {
     const deskIds = desks.map((d) => d.desk_id);
     // One range read for the month, plus each case's latest earlier day so the
     // first day of the month is chain-checked against it.
-    const [monthDays, anchors, closed, skus, staffAccounts, config, goldRow, snapshots, reopened] = await Promise.all([
+    const [monthDays, earlierDays, closed, skus, staffAccounts, config, goldRow, snapshots, reopened] = await Promise.all([
       store.deskDays({ branchId, from, to }),
-      Promise.all(deskIds.map((deskId) => store.deskDays({ deskId, before: from, order: "desc", limit: 1 }))),
+      store.deskDays({ branchId, from: addDays(from, -400), before: from }),
       store.closedDays({ branchId, from, to }),
       store.skus(),
       store.staffAccounts(),
@@ -121,9 +121,18 @@ r.get("/report/grid", async (c) => {
       store.goldPriceHistory(from, to),
       store.reopenedDates(deskIds, from, to),
     ]);
-    const anchorDays = anchors.flat();
-    const ledgerFrom = anchorDays.reduce((min, d) => (d.ledger_date < min ? d.ledger_date : min), from);
-    const ledger = await store.ledger({ branchId, from: ledgerFrom, to });
+    // Each case's latest earlier day (rows are ascending, so the last one per case wins).
+    const latestEarlier = new Map<string, DeskDay>();
+    for (const d of earlierDays) if (deskIds.includes(d.desk_id)) latestEarlier.set(d.desk_id, d);
+    const anchorDays = [...latestEarlier.values()];
+    // The month's rows, plus only the anchor days' rows (one read, however far back they are).
+    const [monthLedger, anchorLedger] = await Promise.all([
+      store.ledger({ branchId, from, to }),
+      anchorDays.length > 0
+        ? store.ledger({ pairs: anchorDays.map((d) => ({ deskId: d.desk_id, date: d.ledger_date })) })
+        : Promise.resolve([]),
+    ]);
+    const ledger = [...anchorLedger, ...monthLedger];
     const skuMap = new Map(skus.map((s) => [s.sku_id, s]));
     const staffNames = new Map(staffAccounts.map((a) => [a.id, a.display_name]));
     const fallbackPrice = resolveGoldPrice(goldRow, config, today).lakPerBaht;

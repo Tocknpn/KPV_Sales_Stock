@@ -65,6 +65,8 @@ export interface LedgerFilter {
   to?: string;
   branchId?: string;
   deskId?: string;
+  // Exact (desk, date) pairs, OR-ed together; combined with the other filters by AND.
+  pairs?: { deskId: string; date: string }[];
 }
 
 export interface DeskDayFilter extends LedgerFilter {
@@ -517,6 +519,7 @@ export class DemoStore implements Store {
       if (filter.to && row.ledger_date > filter.to) return false;
       if (filter.branchId && row.branch_id !== filter.branchId) return false;
       if (filter.deskId && row.desk_id !== filter.deskId) return false;
+      if (filter.pairs && !filter.pairs.some((p) => p.deskId === row.desk_id && p.date === row.ledger_date)) return false;
       return true;
     });
   }
@@ -1231,6 +1234,10 @@ class SupabaseStore implements Store {
     if (f.after) q.push(`ledger_date=gt.${f.after}`);
     if (f.branchId) q.push(`branch_id=eq.${enc(f.branchId)}`);
     if (f.deskId) q.push(`desk_id=eq.${enc(f.deskId)}`);
+    if (f.pairs) {
+      const ors = f.pairs.map((p) => `and(desk_id.eq."${p.deskId.replace(/"/g, "")}",ledger_date.eq.${p.date})`);
+      q.push(`or=${encodeURIComponent(`(${ors.join(",")})`)}`);
+    }
     return q;
   }
 

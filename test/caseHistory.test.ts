@@ -87,6 +87,13 @@ describe("buildCaseHistory", () => {
     expect(h[0].flags).toContain("chain_break");
     expect(h[1].flags).toEqual([]);
   });
+  it("chain_break: a SKU carried yesterday has no row today", () => {
+    const h = build({
+      days: [day("2026-11-01"), day("2026-11-02")], to: "2026-11-02", today: "2026-11-03",
+      ledger: [row("2026-11-01", "A", { opening_qty: 3 }), row("2026-11-01", "B", { opening_qty: 2 }), row("2026-11-02", "A", { opening_qty: 3 })],
+    });
+    expect(h[0].flags).toContain("chain_break");
+  });
   it("new_sku_not_break (RF5): SKU absent yesterday with opening 0", () => {
     const h = build({
       days: [day("2026-11-01"), day("2026-11-02")], to: "2026-11-02", today: "2026-11-03",

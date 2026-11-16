@@ -4,7 +4,7 @@
 //   TS-D01  yesterday left at check_in (unfinished)
 //   IT-D01  Done today
 //   VT-D01  in final count today
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEMO_STAFF } from "../src/demoData";
 import { getStore } from "../src/store";
 import { TODAY, YESTERDAY, TOMORROW, freshApp, call, login, creds, asAdmin, asStaff, asManager, on, closeDay, countEverything } from "./helpers";
@@ -971,5 +971,25 @@ describe("case history and issue grid", () => {
     expect((await call(staff, "GET", "/report/grid?month=bad")).status).toBe(400);
     const other = await call(staff, "GET", "/report/grid?month=2026-11&branch=B-TS");
     expect(other.json.rows.every((r: any) => r.deskId.startsWith("MM-"))).toBe(true);
+  });
+
+  it("grid: a case last checked long ago does not widen the month read", async () => {
+    const store = getStore({} as any) as any;
+    const row = store.db.ledger.find((r: any) => r.desk_id === "MM-D02");
+    const template = store.db.deskDays.find((d: any) => d.desk_id === "MM-D02");
+    const old = "2026-08-03";
+    // MM-D02's only earlier day is the August one.
+    store.db.deskDays = store.db.deskDays.filter((d: any) => d.desk_id !== "MM-D02" || d.ledger_date >= "2026-11-01");
+    store.db.deskDays.push({ ...template, ledger_date: old, status: "done" });
+    store.db.ledger.push({ ...row, ledger_date: old });
+    const spy = vi.spyOn(Object.getPrototypeOf(store), "ledger");
+    const res = await call(await asStaff("B-MM"), "GET", "/report/grid?month=2026-11");
+    expect(res.status).toBe(200);
+    const calls = spy.mock.calls.map((c: any) => c[0]);
+    spy.mockRestore();
+    // One month-bounded read and one exact-pairs read; nothing reaches back to August by range.
+    expect(calls.filter((f: any) => f.from && f.from < "2026-11-01")).toHaveLength(0);
+    expect(calls.some((f: any) => f.pairs?.some((p: any) => p.deskId === "MM-D02" && p.date === old))).toBe(true);
+    expect(res.json.rows).toHaveLength(store.db.desks.filter((d: any) => d.branch_id === "B-MM" && d.active).length);
   });
 });

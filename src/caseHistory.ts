@@ -112,7 +112,9 @@ export function buildCaseHistory(input: CaseHistoryInput): CaseDayRow[] {
     if (prev) {
       const prevCarry = new Map<string, number>();
       for (const r of rowsByDate.get(prev) ?? []) prevCarry.set(r.sku_id, Math.max(0, carryQty(r)));
-      if (rows.some((r) => r.opening_qty !== (prevCarry.get(r.sku_id) ?? 0))) flags.push("chain_break");
+      const here = new Set(rows.map((r) => r.sku_id));
+      const dropped = [...prevCarry].some(([id, q]) => q > 0 && !here.has(id));
+      if (dropped || rows.some((r) => r.opening_qty !== (prevCarry.get(r.sku_id) ?? 0))) flags.push("chain_break");
     }
     if (reopenedDates.has(date)) flags.push("reopened");
 
