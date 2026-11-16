@@ -307,13 +307,20 @@ r.post("/settings/config", requireAdmin, async (c) => {
   const body = await readBody(c);
   // spotLakPerBaht is intentionally not accepted: the gold price now comes from the gold_prices feed;
   // the spot_lak_per_baht column stays only as the silent fallback.
-  const patch: Record<string, number> = {};
+  const patch: Record<string, number | string> = {};
   const fields = { safetyBufferDays: "safety_buffer_days", usdToLakRate: "usd_to_lak_rate" } as const;
   for (const [key, column] of Object.entries(fields)) {
     if (body[key] === undefined) continue;
     const n = nonNegative(body[key]);
     if (n === null || Number.isNaN(n)) throw new HttpError(400, `${key} must be a number, 0 or more`, "BAD_CONFIG");
     patch[column] = n;
+  }
+  // Company-wide; each case-day keeps the mode it was opened in.
+  if (body.stockOutMode !== undefined) {
+    if (body.stockOutMode !== "dynamic" && body.stockOutMode !== "single") {
+      throw new HttpError(400, "stockOutMode must be dynamic or single", "BAD_CONFIG");
+    }
+    patch.stock_out_mode = body.stockOutMode;
   }
   const updated = await store.updateConfig(patch);
   await audit(store, c.get("user"), "config.update", "system_config", patch);

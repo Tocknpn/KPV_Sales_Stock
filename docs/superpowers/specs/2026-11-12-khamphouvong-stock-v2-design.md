@@ -246,7 +246,7 @@ Replace the multi-column grid and the separate Final Stock step with one screen 
 ```
 - Row 2 is `grid grid-cols-4`, each cell `min-w-0`, ≥ 44 px tall, `tabular-nums`. 5-digit values (max 99 999) fit 80 px at 16 px text. No fixed pixel column widths anywhere; the outer containers drop `overflow-x-auto`.
 - **Open** is read-only. **In** opens a numeric sheet (stepper ±1, keypad). **Out** opens a sheet with three steppers: Retail (focused), Wholesale, Destock (+ required reason); the cell shows their sum. **⇄** shows the net (`transfer_in − transfer_out − move`, signed) and opens the CR1 move sheet.
-- Rows are grouped by `group_name` (fallback: type), sizes sorted by grams. Group header shows count and pieces; tap collapses. A search box filters by name; "Only rows with activity" toggle.
+- ~~Rows are grouped by `group_name` (fallback: type), sizes sorted by grams. Group header shows count and pieces; tap collapses. A search box filters by name; "Only rows with activity" toggle.~~ **Superseded 2026-11-16:** one typed grid (SKU · Opening · Stock-in · Stock-out or Retail/Wholesale/Destock · Move in/out · Closing), slim fixed group labels, no search, no activity filter, no collapse. Stock-out mode (single/dynamic) is an admin setting stamped on each case-day; Move in/out is one signed number per case (no linked move/transfer). See docs/GO-LIVE.md section 7 and migration 20261116_11.
 - Inputs use 16 px text (stops iOS zoom) and `inputmode="numeric"`.
 
 ### Questions raised and answers

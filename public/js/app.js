@@ -1,6 +1,7 @@
 import { api } from "./api.js";
 import { state } from "./state.js";
-import { toast } from "./ui.js";
+import { toast, isSheetOpen, closeSheet } from "./ui.js";
+import { parseLocation, pathFor, go, listen } from "./router.js";
 import { t, tf, getLang } from "./i18n.js";
 import { getToken, getCachedUser, clearSession, isAdmin } from "./session.js";
 import { mountLogin } from "./views/login.js";
@@ -68,7 +69,15 @@ function setActiveNav(view) {
   });
 }
 
-async function switchView(view) {
+// opts: { sub, params } from the URL (a case, a settings section). fromRoute:
+// the URL already says this (boot, Back/Forward), so nothing is pushed.
+async function switchView(view, opts = {}, { fromRoute = false } = {}) {
+  if (!views[view]) view = "stock";
+  if (!fromRoute) {
+    const params = view === "stock" && opts.sub ? { date: opts.params?.date, tab: opts.params?.tab } : {};
+    go(pathFor(view, opts.sub ?? null, params), { parent: opts.sub ? pathFor(view) : null });
+  }
+  if (isSheetOpen()) closeSheet({ fromHistory: true });
   if (state.view === "report" && view !== "report") unmountReport();
   if (state.view === "stock" && view !== "stock") unmountStock();
   state.view = view;
@@ -76,7 +85,7 @@ async function switchView(view) {
   document.getElementById("view-root").scrollTop = 0;
   const mount = views[view];
   try {
-    await mount();
+    await mount({ sub: opts.sub ?? null, params: opts.params ?? {} });
   } catch (err) {
     console.error(err);
     toast(err.message || "Something went wrong", "error");
@@ -119,8 +128,20 @@ async function loadMetaAndEnter() {
     return;
   }
   refreshNav();
-  await switchView("stock");
+  await routeFrom(parseLocation());
 }
+
+// Shows the screen the URL names. "/" and unknown paths become /daily_stock.
+async function routeFrom(route) {
+  if (!route.known) go(pathFor("stock"), { replace: true });
+  const params = Object.fromEntries(route.params.entries());
+  await switchView(route.view, { sub: route.known ? route.sub : null, params }, { fromRoute: true });
+}
+
+listen((route) => {
+  if (!state.meta) return;
+  routeFrom(route);
+}, { isSheetOpen, closeSheet });
 
 async function boot() {
   refreshNav();

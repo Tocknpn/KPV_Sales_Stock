@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeClosing, carryQty, currentQty, reorderPoint, valueLak, parseQty, validateDeskDay, buildCalendarMonth } from "../src/logic";
+import { computeClosing, stockOutOf, soldOf, netMoveOf, parseSignedQty, carryQty, currentQty, reorderPoint, valueLak, parseQty, validateDeskDay, buildCalendarMonth } from "../src/logic";
 import { laosDate, monthRange, isValidDate, addDays } from "../src/time";
 import type { LedgerRow } from "../src/types";
 
@@ -19,6 +19,9 @@ function row(patch: Partial<LedgerRow> = {}): LedgerRow {
     destock: 0,
     destock_note: null,
     move: 0,
+    stock_out_single: 0,
+    stock_out: 0,
+    move_qty: 0,
     closing_qty: 0,
     counted_qty: null,
     counted_note: null,
@@ -28,6 +31,7 @@ function row(patch: Partial<LedgerRow> = {}): LedgerRow {
     updated_at: "",
     ...patch,
   };
+  base.stock_out = stockOutOf(base);
   base.closing_qty = computeClosing(base);
   return base;
 }
@@ -35,6 +39,27 @@ function row(patch: Partial<LedgerRow> = {}): LedgerRow {
 describe("closing formula", () => {
   it("is opening + in + transfer in - sale - wholesale - out - destock - move", () => {
     expect(computeClosing(row({ opening_qty: 20, stock_in: 5, transfer_in: 2, retail_sale: 3, wholesale: 4, transfer_out: 1, destock: 2, move: 1 }))).toBe(16);
+  });
+  it("subtracts a single-mode stock-out total and adds a signed Move in/out", () => {
+    expect(computeClosing(row({ opening_qty: 20, stock_in: 5, stock_out_single: 8, move_qty: -3 }))).toBe(14);
+    expect(computeClosing(row({ opening_qty: 20, move_qty: 8 }))).toBe(28);
+  });
+  it("stock_out combines the three parts and the single total", () => {
+    expect(stockOutOf(row({ retail_sale: 3, wholesale: 4, destock: 2 }))).toBe(9);
+    expect(stockOutOf(row({ stock_out_single: 7 }))).toBe(7);
+  });
+  it("sold is retail + wholesale, or the single total (destock never counts)", () => {
+    expect(soldOf(row({ retail_sale: 3, wholesale: 4, destock: 2 }))).toBe(7);
+    expect(soldOf(row({ stock_out_single: 5 }))).toBe(5);
+  });
+  it("net move adds Move in/out to the old linked columns", () => {
+    expect(netMoveOf(row({ transfer_in: 2, transfer_out: 1, move: 1, move_qty: -8 }))).toBe(-8);
+  });
+  it("parseSignedQty accepts negatives within the limit", () => {
+    expect(parseSignedQty("-8")).toBe(-8);
+    expect(parseSignedQty(8)).toBe(8);
+    expect(parseSignedQty(1.5)).toBeNull();
+    expect(parseSignedQty(-100000)).toBeNull();
   });
 });
 
@@ -133,6 +158,7 @@ describe("calendar", () => {
     checked_in_by: null,
     done_by: null,
     done_at: null,
+    stock_out_mode: "dynamic" as const,
     created_at: "",
     updated_at: "",
   });

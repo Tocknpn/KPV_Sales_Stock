@@ -1,9 +1,13 @@
-// The day screen: one case, one date, one vertical list. No horizontal scroll.
+// The day screen: one case, one date, one stock grid.
 //
 //   sticky top bar   back · Case · date · status · who · ⋯
 //   sticky totals    pcs · Baht · low count · save state
-//   groups of SKU cards (row.js), search, "only rows with activity"
+//   stock grid       sticky column header, slim group labels, one row per SKU
+//                    (row.js); numbers are typed straight into the cells
 //   sticky footer    [Start count] [✓ Close day]   (Done: [Reopen])
+//
+// The single-mode grid fits a phone; the dynamic one (retail / wholesale /
+// destock) scrolls sideways with the SKU column pinned.
 //
 // stock.js owns the case cards and opens this with mountDay(deskCard, date, hooks).
 import { api } from "../../api.js";
@@ -11,21 +15,20 @@ import { state } from "../../state.js";
 import { toast, openActionSheet } from "../../ui.js";
 import { fmtBaht, fmtInt, fmtDate, escapeHtml, statusPillClasses } from "../../util.js";
 import { t } from "../../i18n.js";
-import { closingOf, hasActivity, groupKeyOf, renderRow, skuName } from "./row.js";
-import { createSaveQueue, clampQty } from "./save-queue.js";
+import { closingOf, groupKeyOf, renderRow, patchRow, headerHtml, gridTemplate, gridMinWidth, skuName } from "./row.js";
+import { createSaveQueue, clampQty, clampSigned } from "./save-queue.js";
 import {
   tf,
-  openInSheet,
-  openOutSheet,
   openCountNoteSheet,
+  openDestockNoteSheet,
   openSafeDropSheet,
   openCaseInfoSheet,
   openReopenSheet,
   openConflictSheet,
   openRemoveItemSheet,
 } from "./sheets.js";
-import { openMoveSheet } from "./move-sheet.js";
 import { renderHistory } from "./history.js";
+import { replaceQuery } from "../../router.js";
 
 // After Undo on the History tab the day reloads; this brings the tab back.
 let resumeTab = null;
@@ -43,6 +46,8 @@ const SYNC_FIELDS = [
   "destock",
   "destock_note",
   "move",
+  "stock_out_single",
+  "move_qty",
   "counted_qty",
   "counted_note",
 ];
@@ -79,8 +84,9 @@ export function findProblems(rows) {
 // ---------------------------------------------------------------------------
 let S = null;
 
-export async function mountDay(deskCard, date, hooks = {}) {
+export async function mountDay(deskCard, date, hooks = {}, opts = {}) {
   await unmountDay();
+  if (opts.tab) resumeTab = opts.tab;
   const detail = await api.deskDetail(deskCard.desk_id, date);
   const rows = detail.rows.map((r) => ({ ...r }));
   const screen = {
@@ -92,10 +98,9 @@ export async function mountDay(deskCard, date, hooks = {}) {
     stored: new Map(rows.map((r) => [r.sku_id, { ...r }])),
     readOnly: detail.status === "done",
     countMode: rows.some((r) => r.counted_qty != null),
-    search: "",
-    onlyActivity: false,
+    // The mode the day was opened in (the company setting at that moment).
+    mode: detail.stock_out_mode === "single" ? "single" : "dynamic",
     tab: resumeTab ?? "stock",
-    collapsed: new Set(),
     problems: new Map(),
     saveState: "",
     closing: false,
@@ -127,7 +132,10 @@ export async function mountDay(deskCard, date, hooks = {}) {
     },
     onResult: (res) => {
       if (S !== screen) return;
-      if (res.code === "NEGATIVE_CLOSING") toast(tf("day.onlyAvailable", { n: res.available }), "error");
+      if (res.code === "NEGATIVE_CLOSING") {
+        toast(tf("day.onlyAvailable", { n: res.available }), "error");
+        refreshRow(res.skuId, { force: true });
+      }
       else if (res.code === "ROW_CHANGED") openConflictSheet(screen.ctx, res);
       else toast(res.message || t("err.SERVER_ERROR"), "error");
     },
@@ -236,18 +244,7 @@ function renderScreen() {
       <div id="day-history" class="${S.tab === "history" ? "" : "hidden"}"></div>
       <div id="day-stock" class="${S.tab === "stock" ? "" : "hidden"}">
       <div id="day-notices"></div>
-      ${
-        S.rows.length
-          ? `<div class="mb-3 flex flex-col gap-2">
-               <input id="day-search" type="search" placeholder="${t("day.search")}" aria-label="${t("day.search")}" class="input-filled text-base" />
-               <label class="flex min-h-[44px] items-center gap-2.5 text-sm font-semibold text-gray-700">
-                 <input id="day-activity" type="checkbox" class="h-5 w-5 shrink-0 accent-brand-600" />
-                 <span class="min-w-0">${t("day.onlyActivity")}</span>
-               </label>
-             </div>`
-          : ""
-      }
-      <div id="day-list" class="flex flex-col gap-3"></div>
+      <div id="day-list"></div>
       </div>
     </div>`;
   renderNotices();
@@ -259,6 +256,8 @@ function renderScreen() {
   screen.addEventListener("pointerdown", onPointerDown);
   screen.addEventListener("change", onChange);
   screen.addEventListener("input", onInput);
+  screen.addEventListener("keydown", onKeyDown);
+  screen.addEventListener("focusin", onFocusIn);
 }
 
 function showHistory() {
@@ -276,6 +275,7 @@ function showHistory() {
 function setTab(tab) {
   if (!S || S.tab === tab) return;
   S.tab = tab;
+  replaceQuery({ tab: tab === "stock" ? null : tab });
   document.querySelectorAll("#day-screen [data-tab]").forEach((b) => {
     const on = b.dataset.tab === tab;
     b.setAttribute("aria-selected", String(on));
@@ -308,26 +308,6 @@ function renderNotices() {
   if (state.stock.date !== state.meta.today) {
     parts.push(`<p class="mb-3 rounded-lg bg-warning-bg px-3 py-2 text-center text-xs font-bold text-warning">${tf("stock.viewingDate", { date: fmtDate(S.date) })}</p>`);
   }
-  if (!S.readOnly && detail.incoming.length) {
-    parts.push(`
-      <div class="mb-3 rounded-xl border border-success/30 bg-success-bg p-3">
-        <div class="mb-1.5 text-xs font-extrabold uppercase tracking-wide text-success">${t("stock.incomingTitle")} (${detail.incoming.length})</div>
-        <div class="flex flex-col gap-1.5">
-          ${detail.incoming
-            .map(
-              (x) => `
-            <div class="flex items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-2">
-              <div class="min-w-0">
-                <div class="truncate text-sm font-bold text-gray-900">${x.qty} × ${escapeHtml(x.name_en)}</div>
-                <div class="truncate text-xs text-gray-600">${t("stock.fromDesk")} ${escapeHtml(x.from)} · ${fmtDate(x.sent_date)}</div>
-              </div>
-              <button data-act="receive" data-id="${x.id}" class="btn-primary shrink-0 px-3 py-2 text-sm">${t("stock.confirmReceive")}</button>
-            </div>`
-            )
-            .join("")}
-        </div>
-      </div>`);
-  }
   if (S.problems.size) {
     const counts = {};
     for (const rules of S.problems.values()) for (const rule of rules) counts[rule] = (counts[rule] ?? 0) + 1;
@@ -340,15 +320,6 @@ function renderNotices() {
       </div>`);
   }
   el.innerHTML = parts.join("");
-}
-
-function matches(r) {
-  const q = S.search.trim().toLowerCase();
-  if (q) {
-    const hay = `${r.name_en} ${r.name_lo ?? ""} ${r.weight_name ?? ""} ${r.sku_id}`.toLowerCase();
-    if (!hay.includes(q)) return false;
-  }
-  return !S.onlyActivity || hasActivity(r);
 }
 
 // Rows grouped by group_name (when the API has it), else by type; sizes by grams.
@@ -367,11 +338,15 @@ function groupRows() {
 
 function groupMeta(list) {
   const pcs = list.reduce((s, r) => s + closingOf(r), 0);
-  return `${tf("day.sizes", { n: list.length })} · ${fmtInt(pcs)} pcs`;
+  return `${fmtInt(pcs)} pcs`;
+}
+
+function rowView(r) {
+  return { readOnly: S.readOnly, countMode: S.countMode, mode: S.mode, problems: S.problems.get(r.sku_id) };
 }
 
 function rowHtml(r) {
-  return renderRow(r, { readOnly: S.readOnly, countMode: S.countMode, problems: S.problems.get(r.sku_id) });
+  return renderRow(r, rowView(r));
 }
 
 function renderList() {
@@ -381,30 +356,44 @@ function renderList() {
     list.innerHTML = `<div class="py-8 text-center text-sm text-gray-600">${t("stock.noRows")}</div>`;
     return;
   }
-  const html = groupRows()
-    .map(([key, all]) => {
-      const visible = all.filter(matches);
-      if (visible.length === 0) return "";
-      const open = !S.collapsed.has(key);
-      return `
+  const cols = gridTemplate(S.mode);
+  const minW = gridMinWidth(S.mode);
+  const width = minW ? `min-width:${minW}px;` : "";
+  // Slim, fixed group labels: no collapsing, the rows are always shown.
+  const groups = groupRows()
+    .map(
+      ([key, rows]) => `
       <section data-group="${escapeHtml(key)}">
-        <button type="button" data-act="group" aria-expanded="${open}" class="focus-ring tap-target flex w-full min-w-0 items-center gap-2 rounded-lg px-1 text-left">
-          <span aria-hidden="true" class="shrink-0 text-gray-600">${open ? "▾" : "▸"}</span>
-          <span class="min-w-0 flex-1 truncate text-sm font-extrabold text-gray-900">${escapeHtml(key || t("day.groupOther"))}</span>
-          <span data-group-meta class="shrink-0 text-xs font-semibold tabular-nums text-gray-600">${groupMeta(all)}</span>
-        </button>
-        ${open ? `<div class="mt-1 flex flex-col gap-2.5">${visible.map(rowHtml).join("")}</div>` : ""}
-      </section>`;
-    })
+        <div class="sticky left-0 flex w-fit max-w-[calc(100vw-4rem)] items-center gap-2 px-2 pb-1 pt-2.5 text-xs">
+          <span class="min-w-0 truncate font-extrabold text-gray-900">${escapeHtml(key || t("day.groupOther"))}</span>
+          <span data-group-meta class="shrink-0 font-semibold tabular-nums text-gray-500">${groupMeta(rows)}</span>
+        </div>
+        <div class="flex flex-col gap-1">${rows.map(rowHtml).join("")}</div>
+      </section>`
+    )
     .join("");
-  list.innerHTML = html || `<div class="py-8 text-center text-sm text-gray-600">${t("day.noMatches")}</div>`;
+  // The header sits outside the sideways scroller so it can stick to the top
+  // of the page, and follows the body's horizontal scroll.
+  list.innerHTML = `
+    <div class="card px-1.5 pb-2">
+      <div id="grid-head-wrap" class="sticky -top-4 z-[2] -mx-1.5 overflow-hidden rounded-t-2xl border-b border-hairline bg-white px-1.5">
+        <div class="grid items-end gap-1.5 px-1 pb-1.5 pt-2.5 text-center text-[11px] font-bold leading-tight text-gray-600" style="grid-template-columns:${cols};${width}">
+          ${headerHtml(S.mode, { countMode: S.countMode && !S.readOnly })}
+        </div>
+      </div>
+      <div id="grid-body" class="overflow-x-auto overscroll-x-contain">
+        <div style="${width}">${groups}</div>
+      </div>
+    </div>`;
+  const head = $("#grid-head-wrap");
+  $("#grid-body").addEventListener("scroll", (e) => (head.scrollLeft = e.currentTarget.scrollLeft), { passive: true });
 }
 
-function refreshRow(sku) {
+function refreshRow(sku, opts) {
   if (!S) return;
   const el = document.querySelector(`#day-list [data-sku="${CSS.escape(sku)}"]`);
   const row = S.rows.find((r) => r.sku_id === sku);
-  if (el && row) el.outerHTML = rowHtml(row);
+  if (el && row) patchRow(el, row, rowView(row), opts);
   const group = row && document.querySelector(`#day-list [data-group="${CSS.escape(groupKeyOf(row))}"] [data-group-meta]`);
   if (group) group.textContent = groupMeta(S.rows.filter((r) => groupKeyOf(r) === groupKeyOf(row)));
 }
@@ -463,30 +452,10 @@ function onAction(act, btn) {
   if (!S) return;
   const sku = btn.closest("[data-sku]")?.dataset.sku;
   switch (act) {
-    case "in":
-      return openInSheet(S.ctx, sku);
-    case "out":
-      return openOutSheet(S.ctx, sku);
-    case "move":
-      return (async () => {
-        const ctx = S.ctx;
-        try {
-          await ctx.queue.flushAll();
-        } catch (err) {
-          return toast(err.message || t("err.SERVER_ERROR"), "error");
-        }
-        openMoveSheet({
-          desk: ctx.deskCard,
-          date: ctx.date,
-          detail: ctx.detail,
-          rows: ctx.rows(),
-          hooks: ctx.hooks,
-          onDone: () => ctx.hooks.reload?.(),
-          skuId: sku,
-        });
-      })();
     case "note":
       return openCountNoteSheet(S.ctx, sku);
+    case "destock-note":
+      return openDestockNoteSheet(S.ctx, sku);
     case "match": {
       const row = S.ctx.row(sku);
       const to = closingOf(row);
@@ -495,18 +464,12 @@ function onAction(act, btn) {
       S.queue.set(sku, "counted_qty", to, { kind: "typed" });
       return;
     }
-    case "group": {
-      const key = btn.closest("[data-group]").dataset.group;
-      if (S.collapsed.has(key)) S.collapsed.delete(key);
-      else S.collapsed.add(key);
-      return renderList();
-    }
+    case "sign":
+      return flipMoveSign(sku, btn);
     case "count-mode":
       S.countMode = !S.countMode;
       renderList();
       return renderFooter();
-    case "receive":
-      return receiveIncoming(btn);
     case "reopen":
       return openReopenSheet(S.ctx);
     case "close":
@@ -514,30 +477,90 @@ function onAction(act, btn) {
   }
 }
 
-function onChange(e) {
-  const input = e.target.closest("[data-count]");
-  if (!input || !S) return;
-  const sku = input.closest("[data-sku]").dataset.sku;
+// Move in/out: the input holds the size, the strip under it the direction.
+// With no size yet, the direction is remembered for the number typed next.
+function flipMoveSign(sku, btn) {
   const row = S.ctx.row(sku);
-  const raw = input.value.trim();
-  const to = raw === "" ? null : clampQty(raw);
-  if (to === row.counted_qty) return refreshRow(sku);
-  row.counted_qty = to;
+  const input = btn.closest("[data-move-cell]")?.querySelector('[data-field="move_qty"]');
+  const size = Math.abs(row.move_qty ?? 0) || clampQty(input?.value || 0);
+  const neg = !((row.move_qty ?? 0) < 0 || btn.dataset.pendingNeg === "1");
+  if (!size) {
+    btn.dataset.pendingNeg = neg ? "1" : "";
+    refreshRow(sku);
+    input?.focus();
+    return;
+  }
+  btn.dataset.pendingNeg = "";
+  saveField(sku, "move_qty", neg ? -size : size);
+}
+
+// One typed value: check it locally (closing may not drop below zero), show it,
+// then queue it. The server has the last word (NEGATIVE_CLOSING).
+function saveField(sku, field, to) {
+  const row = S.ctx.row(sku);
+  if (to === (row[field] ?? 0)) return refreshRow(sku);
+  const before = closingOf(row);
+  const after = closingOf({ ...row, [field]: to });
+  if (after < 0 && after < before) {
+    // How much this cell could take out at most, given everything else on the row.
+    const available = field === "move_qty" ? before - (row.move_qty ?? 0) : field === "stock_in" ? before : before + (row[field] ?? 0);
+    toast(tf("day.onlyAvailable", { n: Math.max(available, 0) }), "error");
+    return refreshRow(sku, { force: true });
+  }
+  row[field] = to;
   S.ctx.rowChanged(sku);
-  S.queue.set(sku, "counted_qty", to, { kind: "typed" });
+  S.queue.set(sku, field, to, { kind: "typed" });
+}
+
+function onChange(e) {
+  if (!S) return;
+  const input = e.target;
+  const sku = input.closest("[data-sku]")?.dataset.sku;
+  if (!sku) return;
+  const raw = input.value.trim();
+  if (input.matches("[data-count]")) {
+    const row = S.ctx.row(sku);
+    const to = raw === "" ? null : clampQty(raw);
+    if (to === row.counted_qty) return refreshRow(sku);
+    row.counted_qty = to;
+    S.ctx.rowChanged(sku);
+    S.queue.set(sku, "counted_qty", to, { kind: "typed" });
+    return;
+  }
+  const field = input.dataset.field;
+  if (!field) return;
+  if (field === "move_qty") {
+    const sign = input.closest("[data-move-cell]")?.querySelector('[data-act="sign"]');
+    const neg = (S.ctx.row(sku).move_qty ?? 0) < 0 || sign?.dataset.pendingNeg === "1";
+    if (sign) sign.dataset.pendingNeg = "";
+    const size = clampQty(raw || 0);
+    return saveField(sku, field, clampSigned(neg ? -size : size));
+  }
+  saveField(sku, field, clampQty(raw || 0));
 }
 
 function onInput(e) {
   if (!S) return;
-  if (e.target.id === "day-search") {
-    S.search = e.target.value;
-    renderList();
-  } else if (e.target.id === "day-activity") {
-    S.onlyActivity = e.target.checked;
-    renderList();
-  } else if (e.target.matches("[data-count]")) {
+  if (e.target.matches("[data-count], [data-field]")) {
     e.target.value = e.target.value.replace(/\D/g, "").slice(0, 5);
   }
+}
+
+// Enter / "next" on the keypad moves on to the next cell, row by row.
+function onKeyDown(e) {
+  if (e.key !== "Enter" || !e.target.matches("[data-count], [data-field]")) return;
+  e.preventDefault();
+  const cells = [...document.querySelectorAll("#day-list [data-count], #day-list [data-field]")];
+  const next = cells[cells.indexOf(e.target) + 1];
+  if (next) next.focus();
+  else e.target.blur();
+}
+
+// Select the whole number on focus so typing replaces it.
+function onFocusIn(e) {
+  if (!e.target.matches("[data-count], [data-field]")) return;
+  const el = e.target;
+  setTimeout(() => el.select?.(), 0);
 }
 
 function openMenu() {
@@ -564,18 +587,6 @@ function openMenu() {
       }
     );
   });
-}
-
-async function receiveIncoming(btn) {
-  btn.disabled = true;
-  const { date, hooks } = S;
-  await S.queue.flushAll();
-  try {
-    await api.receiveTransfer(btn.dataset.id, date);
-    toast(t("stock.receivedToast"), "success");
-  } finally {
-    await hooks.reload?.();
-  }
 }
 
 async function closeDay() {

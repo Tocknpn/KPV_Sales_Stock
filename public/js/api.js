@@ -90,13 +90,8 @@ export const api = {
   addDeskSku: (deskId, payload) => post(`/stock/desk/${deskId}/sku`, payload),
   removeDeskSku: (deskId, skuId, date) => request(`/stock/desk/${deskId}/sku/${encodeURIComponent(skuId)}?${query({ date })}`, { method: "DELETE" }),
 
-  transferDestinations: () => request(`/transfers/destinations`),
-  move: (payload) => post(`/moves`, payload),
   undoMove: (ticketId, clientRef) => post(`/moves/${encodeURIComponent(ticketId)}/undo`, { clientRef }),
   transfers: (params) => request(`/transfers?${query(params ?? {})}`),
-  createTransfer: (payload) => post(`/transfers`, payload),
-  cancelTransfer: (id) => post(`/transfers/${id}/cancel`),
-  receiveTransfer: (id, date) => post(`/transfers/${id}/receive`, { date }),
 
   documents: (params) => request(`/documents?${query(params)}`),
   createDocument: (payload) => post(`/documents`, payload),

@@ -23,6 +23,7 @@ const day = (date: string, status: DeskDay["status"] = "done"): DeskDay => ({
   checked_in_by: "u1",
   done_by: status === "done" ? "u2" : null,
   done_at: null,
+  stock_out_mode: "dynamic",
   created_at: "",
   updated_at: "",
 });
@@ -31,7 +32,7 @@ function row(date: string, sku_id: string, o: Partial<LedgerRow> = {}): LedgerRo
   const r = {
     id: date + sku_id, ledger_date: date, desk_id: "D1", branch_id: "b", sku_id,
     opening_qty: 0, stock_in: 0, transfer_in: 0, retail_sale: 0, wholesale: 0, transfer_out: 0,
-    destock: 0, destock_note: null, move: 0, counted_qty: null, counted_note: null,
+    destock: 0, destock_note: null, move: 0, stock_out_single: 0, move_qty: 0, counted_qty: null, counted_note: null,
     performed_by: null, excluded: false, created_at: "", updated_at: "", ...o,
   } as LedgerRow;
   r.closing_qty = computeClosing(r);

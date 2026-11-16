@@ -25,25 +25,43 @@ export const MAX_QTY = 99999;
 // ---------------------------------------------------------------------------
 // Core per-row / per-SKU computations
 // ---------------------------------------------------------------------------
-export function computeClosing(row: {
-  opening_qty: number;
-  stock_in: number;
-  transfer_in: number;
-  retail_sale: number;
-  wholesale: number;
-  transfer_out: number;
-  destock: number;
-  move: number;
-}) {
-  return row.opening_qty + row.stock_in + row.transfer_in - row.retail_sale - row.wholesale - row.transfer_out - row.destock - row.move;
+type ClosingInput = Pick<
+  LedgerRow,
+  "opening_qty" | "stock_in" | "transfer_in" | "retail_sale" | "wholesale" | "transfer_out" | "destock" | "move"
+> & { stock_out_single?: number; move_qty?: number };
+
+// Same formula as the generated closing_qty column (migration 11).
+export function computeClosing(row: ClosingInput) {
+  return (
+    row.opening_qty + row.stock_in + row.transfer_in - row.transfer_out - row.move -
+    stockOutOf(row) + (row.move_qty ?? 0)
+  );
 }
 
-export function movementIn(row: Pick<LedgerRow, "stock_in" | "transfer_in">) {
-  return row.stock_in + row.transfer_in;
+// The day's stock-out in either mode (= the generated stock_out column).
+export function stockOutOf(row: Pick<LedgerRow, "retail_sale" | "wholesale" | "destock"> & { stock_out_single?: number }) {
+  return row.retail_sale + row.wholesale + row.destock + (row.stock_out_single ?? 0);
 }
 
-export function movementOut(row: Pick<LedgerRow, "retail_sale" | "wholesale" | "transfer_out" | "destock" | "move">) {
-  return row.retail_sale + row.wholesale + row.transfer_out + row.destock + row.move;
+// Units sold: retail + wholesale on a dynamic day; on a single-mode day the
+// typed total, which cannot be split.
+export function soldOf(row: Pick<LedgerRow, "retail_sale" | "wholesale"> & { stock_out_single?: number }) {
+  return row.retail_sale + row.wholesale + (row.stock_out_single ?? 0);
+}
+
+// Signed net of every move column: old linked moves/transfers and Move in/out.
+export function netMoveOf(row: Pick<LedgerRow, "transfer_in" | "transfer_out" | "move"> & { move_qty?: number }) {
+  return row.transfer_in - row.transfer_out - row.move + (row.move_qty ?? 0);
+}
+
+export function movementIn(row: Pick<LedgerRow, "stock_in" | "transfer_in"> & { move_qty?: number }) {
+  return row.stock_in + row.transfer_in + Math.max(row.move_qty ?? 0, 0);
+}
+
+export function movementOut(
+  row: Pick<LedgerRow, "retail_sale" | "wholesale" | "transfer_out" | "destock" | "move"> & { stock_out_single?: number; move_qty?: number }
+) {
+  return stockOutOf(row) + row.transfer_out + row.move + Math.max(-(row.move_qty ?? 0), 0);
 }
 
 // What a closed day hands to the next day: the physical count when there is
@@ -109,6 +127,13 @@ export function estLifetimeDays(sku: Pick<MasterSku, "avg_daily_sales"> | undefi
 export function parseQty(value: unknown): number | null {
   if (typeof value === "string" && value.trim() !== "") value = Number(value);
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > MAX_QTY) return null;
+  return value;
+}
+
+// Signed whole pieces for Move in/out (−MAX_QTY..MAX_QTY).
+export function parseSignedQty(value: unknown): number | null {
+  if (typeof value === "string" && value.trim() !== "") value = Number(value);
+  if (typeof value !== "number" || !Number.isInteger(value) || Math.abs(value) > MAX_QTY) return null;
   return value;
 }
 
@@ -256,6 +281,9 @@ export function buildDeskDetail(
       destock: r.destock,
       destock_note: r.destock_note,
       move: r.move,
+      stock_out_single: r.stock_out_single ?? 0,
+      stock_out: stockOutOf(r),
+      move_qty: r.move_qty ?? 0,
       closing_qty: closing,
       closing_baht: round4(bahtOf(sku, closing)),
       closing_gram: round3(gramOf(sku, closing)),
@@ -293,6 +321,7 @@ export function buildDeskDetail(
     date: day?.ledger_date ?? null,
     lastActorName: lastActor(visibleRows, day, staffById)?.name ?? null,
     status,
+    stock_out_mode: day?.stock_out_mode ?? config.stock_out_mode ?? "dynamic",
     safe_drop_note: day?.safe_drop_note ?? null,
     // For the "Closed 18:42 by Noy" banner and the "Changed by Noy" conflict prompt.
     closed_at: day?.done_at ?? null,

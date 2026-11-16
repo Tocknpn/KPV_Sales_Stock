@@ -33,7 +33,13 @@ import type {
 import { computeVelocity, type VelocityRow } from "./replenishment";
 import { buildDemoData, type DemoData } from "./demoData";
 import { businessDate, isLive, laosDate } from "./time";
-import { computeClosing } from "./logic";
+import { computeClosing, stockOutOf } from "./logic";
+
+// DemoStore stand-in for the generated columns (closing_qty, stock_out).
+function regenerate(row: LedgerRow) {
+  row.stock_out = stockOutOf(row);
+  row.closing_qty = computeClosing(row);
+}
 import { actorHeaders, type Actor } from "./actor";
 import { auditEntry, reopenedDatesFrom, type AuditOp } from "./audit";
 
@@ -49,8 +55,27 @@ export class StoreError extends Error {
   }
 }
 
-export type LedgerChangeField = "stock_in" | "retail_sale" | "wholesale" | "destock" | "destock_note" | "counted_qty" | "counted_note";
-export const LEDGER_CHANGE_FIELDS: readonly LedgerChangeField[] = ["stock_in", "retail_sale", "wholesale", "destock", "destock_note", "counted_qty", "counted_note"];
+export type LedgerChangeField =
+  | "stock_in"
+  | "retail_sale"
+  | "wholesale"
+  | "destock"
+  | "destock_note"
+  | "stock_out_single"
+  | "move_qty"
+  | "counted_qty"
+  | "counted_note";
+export const LEDGER_CHANGE_FIELDS: readonly LedgerChangeField[] = [
+  "stock_in",
+  "retail_sale",
+  "wholesale",
+  "destock",
+  "destock_note",
+  "stock_out_single",
+  "move_qty",
+  "counted_qty",
+  "counted_note",
+];
 export const TEXT_CHANGE_FIELDS: readonly LedgerChangeField[] = ["destock_note", "counted_note"];
 // Compare-and-set: when `from` is present the change applies only if the stored
 // value is still `from` (or already `to`, which makes a retry harmless).
@@ -496,7 +521,17 @@ export class DemoStore implements Store {
     this.guard();
     if (this.dayStatus(day.desk_id, day.ledger_date) !== null) return null;
     const now = this.now();
-    const row: DeskDay = { ...day, status: "check_in", safe_drop_note: null, done_by: null, done_at: null, created_at: now, updated_at: now };
+    const row: DeskDay = {
+      ...day,
+      status: "check_in",
+      safe_drop_note: null,
+      done_by: null,
+      done_at: null,
+      // Same as the database trigger: the company setting of this moment.
+      stock_out_mode: this.db.config.stock_out_mode ?? "dynamic",
+      created_at: now,
+      updated_at: now,
+    };
     this.db.deskDays.push(row);
     this.log("desk_days", "INSERT", null, row);
     return row;
@@ -541,7 +576,7 @@ export class DemoStore implements Store {
         if (opts?.overwriteOpening && existing.opening_qty !== r.opening_qty) {
           const before = { ...existing };
           existing.opening_qty = r.opening_qty;
-          existing.closing_qty = computeClosing(existing);
+          regenerate(existing);
           existing.updated_at = this.now();
           this.log("daily_stock_ledger", "UPDATE", before, existing);
         }
@@ -560,6 +595,9 @@ export class DemoStore implements Store {
         destock: 0,
         destock_note: null,
         move: 0,
+        stock_out_single: 0,
+        stock_out: 0,
+        move_qty: 0,
         closing_qty: r.opening_qty,
         counted_qty: null,
         counted_note: null,
@@ -592,7 +630,7 @@ export class DemoStore implements Store {
       if (!row) continue;
       const before = { ...row };
       Object.assign(row, p, { updated_at: this.now() });
-      row.closing_qty = computeClosing(row);
+      regenerate(row);
       this.log("daily_stock_ledger", "UPDATE", before, row);
       out.push(row);
     }
@@ -610,7 +648,7 @@ export class DemoStore implements Store {
     row[field] += delta;
     row.excluded = false;
     if (actor) row.performed_by = actor;
-    row.closing_qty = computeClosing(row);
+    regenerate(row);
     row.updated_at = this.now();
     this.log("daily_stock_ledger", "UPDATE", before, row);
     return row[field];
@@ -637,7 +675,7 @@ export class DemoStore implements Store {
     const before = { ...row };
     Object.assign(row, patch, { updated_at: this.now() });
     if (this.actor && "id" in this.actor) row.performed_by = this.actor.id;
-    row.closing_qty = computeClosing(row);
+    regenerate(row);
     this.log("daily_stock_ledger", "UPDATE", before, row);
     return { ok: true, row: { ...row } };
   }
@@ -798,7 +836,7 @@ export class DemoStore implements Store {
       src.move += qty;
       src.excluded = false;
       if (actorId) src.performed_by = actorId;
-      src.closing_qty = computeClosing(src);
+      regenerate(src);
       src.updated_at = this.now();
       this.log("daily_stock_ledger", "UPDATE", srcBefore, src);
 
@@ -808,7 +846,7 @@ export class DemoStore implements Store {
         dst.transfer_in += qty;
         dst.excluded = false;
         if (actorId) dst.performed_by = actorId;
-        dst.closing_qty = computeClosing(dst);
+        regenerate(dst);
         dst.updated_at = this.now();
         this.log("daily_stock_ledger", "UPDATE", before, dst);
       } else {
@@ -828,6 +866,9 @@ export class DemoStore implements Store {
           destock: 0,
           destock_note: null,
           move: 0,
+          stock_out_single: 0,
+          stock_out: 0,
+          move_qty: 0,
           closing_qty: qty,
           counted_qty: null,
           counted_note: null,

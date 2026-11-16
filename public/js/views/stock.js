@@ -6,6 +6,7 @@ import { t, tf, pickName } from "../i18n.js";
 import { renderCalendar } from "../calendar.js";
 import { isAdmin } from "../session.js";
 import { mountDay, unmountDay } from "./day/index.js";
+import { go, pathFor, backTo } from "../router.js";
 
 const PURITY_OPTIONS = ["96.5%", "99.99%"];
 
@@ -37,9 +38,23 @@ function actionLabel(status) {
   );
 }
 
-export async function mountStock() {
+// route.sub is a desk id when the URL names one case: /daily_stock/<deskId>?date=…&tab=…
+export async function mountStock(route = {}) {
+  await unmountDay();
+  const deskId = route.sub;
+  if (deskId) {
+    const date = route.params?.date;
+    if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) state.stock.date = date;
+    const desk = state.meta.desks?.find((d) => d.desk_id === deskId);
+    if (desk) state.stock.branch = desk.branch_id;
+  }
   renderTopbar();
   await refreshCards();
+  if (!deskId) return;
+  const card = currentCards.find((d) => d.desk_id === deskId);
+  // Opening a case that was never checked in that day would check it in: show the cards instead.
+  if (card && card.status !== "not_started") await openDeskDetail(card, { fromRoute: true, tab: route.params?.tab });
+  else go(pathFor("stock"), { replace: true });
 }
 
 function renderTopbar() {
@@ -83,9 +98,11 @@ function renderTopbar() {
 }
 
 async function backToGrid() {
-  await unmountDay();
-  renderTopbar();
-  refreshCards();
+  await backTo(pathFor("stock"), async () => {
+    await unmountDay();
+    renderTopbar();
+    refreshCards();
+  });
 }
 
 // Keeps currentCards fresh in the background while the user stays on the
@@ -355,31 +372,24 @@ async function handleCardAction(desk) {
 // never checked in that day just shows the cards for the date: opening it here
 // would check it in.
 export async function openDeskDay(deskId, date) {
-  const desk = state.meta.desks.find((d) => d.desk_id === deskId);
-  state.stock.date = date;
-  if (desk) state.stock.branch = desk.branch_id;
-  await window.switchView("stock");
-  const card = currentCards.find((d) => d.desk_id === deskId);
-  if (card && card.status !== "not_started") await openDeskDetail(card);
+  await window.switchView("stock", { sub: deskId, params: { date } });
 }
 
-async function openDeskDetail(deskCard) {
+async function openDeskDetail(deskCard, { fromRoute = false, tab } = {}) {
   if (deskCard.status === "not_started") return handleCardAction(deskCard);
+  if (!fromRoute) go(pathFor("stock", deskCard.desk_id, { date: state.stock.date }), { parent: pathFor("stock") });
   hideFab();
-  await mountDay(deskCard, state.stock.date, dayHooks(deskCard));
+  await mountDay(deskCard, state.stock.date, dayHooks(deskCard), { tab: tab === "history" ? "history" : undefined });
 }
 
 // What the day screen needs from this file: the SKU picker (shared with
-// "New case"), the existing transfer sheet (Task 9 replaces it with the move
-// sheet) and a way back to the cards.
+// "New case") and a way back to the cards.
 function dayHooks(deskCard) {
   return {
     onBack: backToGrid,
     reload: () => reloadDeskDetail(deskCard),
     openSkuPicker: openSkuPickerSheet,
     askOpeningQty,
-    openTransfer: openTransferSheet,
-    loadDestinations,
   };
 }
 
@@ -391,98 +401,6 @@ async function reloadDeskDetail(deskCard) {
   await mountDay(updatedCard, state.stock.date, dayHooks(updatedCard));
 }
 
-
-// --- Transfer-out / Move ---
-
-let destinationsCache = null;
-async function loadDestinations() {
-  if (!destinationsCache) destinationsCache = (await api.transferDestinations()).desks;
-  return destinationsCache;
-}
-
-async function openTransferSheet(deskCard, detail, skuId, kind, available) {
-  const row = detail.rows.find((r) => r.sku_id === skuId);
-  const all = await loadDestinations();
-  // Move stays inside the branch; Out goes to a desk in another branch.
-  const destinations = all.filter((d) => d.desk_id !== deskCard.desk_id && (kind === "move" ? d.branch_id === deskCard.branch_id : d.branch_id !== deskCard.branch_id));
-  const sent = detail.outgoing.filter((x) => x.sku_id === skuId && x.kind === kind);
-
-  openSheet(
-    `
-    <p class="mb-3 rounded-lg bg-gray-50 px-3 py-2 text-[11px] font-medium text-gray-600">${t(kind === "move" ? "stock.moveHint" : "stock.transferHint")}</p>
-    <div class="mb-3 flex items-center justify-between rounded-xl border border-hairline px-3 py-2.5">
-      <span class="min-w-0 truncate text-xs font-bold text-gray-900">${escapeHtml(pickName(row.name_en, row.name_lo))}</span>
-      <span class="shrink-0 text-[11px] font-semibold text-gray-600">${t("stock.available")}: <b class="text-gray-900">${available}</b> pcs</span>
-    </div>
-    ${
-      sent.length
-        ? `<div class="mb-3 flex flex-col gap-1.5">
-            ${sent
-              .map(
-                (x) => `
-              <div class="flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-2.5 py-2">
-                <div class="min-w-0">
-                  <div class="truncate text-xs font-bold text-gray-900">${x.qty} pcs → ${escapeHtml(x.to)}</div>
-                  <div class="text-[10px] font-semibold ${x.status === "received" ? "text-success" : "text-warning"}">${t(x.status === "received" ? "stock.transferReceived" : "stock.inTransit")}</div>
-                </div>
-                ${x.status === "in_transit" ? `<button data-cancel="${x.id}" class="btn-secondary shrink-0 px-3 py-2 text-xs text-danger">${t("stock.cancelTransfer")}</button>` : ""}
-              </div>`
-              )
-              .join("")}
-          </div>`
-        : ""
-    }
-    ${
-      destinations.length === 0
-        ? `<p class="py-4 text-center text-xs text-gray-500">${t("stock.noDestinations")}</p>`
-        : `
-    <label for="transfer-to" class="mb-1.5 block text-xs font-bold text-gray-600">${t("stock.destination")}</label>
-    <select id="transfer-to" class="input-filled">
-      ${destinations.map((d) => `<option value="${d.desk_id}">${escapeHtml(`${pickName(d.branch_name, d.branch_name_lo)} · ${d.display_name}`)}</option>`).join("")}
-    </select>
-    <label for="transfer-qty" class="mb-1.5 mt-3 block text-xs font-bold text-gray-600">${t("stock.transferQty")}</label>
-    <input id="transfer-qty" type="number" min="1" max="${available}" step="1" inputmode="numeric" class="input-filled text-center text-base font-extrabold" />
-    <button id="transfer-send" class="btn-primary mt-4 w-full" ${available <= 0 ? "disabled" : ""}>${t("stock.sendTransfer")}</button>`
-    }
-  `,
-    {
-      title: `${t(kind === "move" ? "stock.move" : "stock.transferOut")} · ${escapeHtml(deskCard.display_name)}`,
-      onMount: (body) => {
-        body.querySelectorAll("[data-cancel]").forEach((btn) =>
-          btn.addEventListener("click", async () => {
-            btn.disabled = true;
-            try {
-              await api.cancelTransfer(btn.dataset.cancel);
-              toast(t("stock.transferCancelled"), "success");
-            } finally {
-              closeSheet();
-              await reloadDeskDetail(deskCard);
-            }
-          })
-        );
-        body.querySelector("#transfer-send")?.addEventListener("click", async (e) => {
-          const qty = Math.floor(Number(body.querySelector("#transfer-qty").value));
-          if (!(qty > 0)) return toast(t("stock.needQty"), "error");
-          if (qty > available) return toast(tf("stock.onlyAvailable", { n: available }), "error");
-          e.currentTarget.disabled = true;
-          try {
-            await api.createTransfer({
-              date: state.stock.date,
-              fromDeskId: deskCard.desk_id,
-              toDeskId: body.querySelector("#transfer-to").value,
-              skuId,
-              qty,
-            });
-            toast(t("stock.transferSent"), "success");
-          } finally {
-            closeSheet();
-            await reloadDeskDetail(deskCard);
-          }
-        });
-      },
-    }
-  );
-}
 
 // Resolves to the typed opening quantity, or null when the sheet is closed.
 function askOpeningQty(sku) {

@@ -10,7 +10,7 @@ import { buildDayStatus } from "../dayStatus";
 import { loadBranchStatuses } from "../replenishment";
 import { resolveGoldPrice, priceOn } from "../goldPrice";
 import { buildCaseHistory } from "../caseHistory";
-import { bahtOf, valueLak, buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, computeClosing, parseQty, validateDeskDay } from "../logic";
+import { bahtOf, valueLak, buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, computeClosing, parseQty, parseSignedQty, validateDeskDay } from "../logic";
 import type { Desk, DeskDay, LedgerRow, MasterSku, SessionUser, StaffAccount, Transfer } from "../types";
 
 // Mounted behind requireAuth in src/index.ts.
@@ -34,7 +34,9 @@ function hasActivity(row: LedgerRow) {
     row.wholesale !== 0 ||
     row.transfer_out !== 0 ||
     row.destock !== 0 ||
-    row.move !== 0
+    row.move !== 0 ||
+    (row.stock_out_single ?? 0) !== 0 ||
+    (row.move_qty ?? 0) !== 0
   );
 }
 
@@ -475,9 +477,11 @@ r.post("/stock/desk/:deskId/checkin", async (c) => {
 
 // ---------------------------------------------------------------------------
 // Save entries. Only the fields sent for a row are changed, so two tablets
-// editing different things never overwrite each other. Transfer-out, Move and
-// incoming transfers are not typed here — see routes/transfers.ts.
+// editing different things never overwrite each other. Move in/out (move_qty)
+// is signed; stock-out is typed as retail / wholesale / destock on a dynamic
+// day and as one total (stock_out_single) on a single-mode day.
 // ---------------------------------------------------------------------------
+const DYNAMIC_OUT_FIELDS: readonly LedgerChangeField[] = ["retail_sale", "wholesale", "destock", "destock_note"];
 const parseCount = (v: unknown) => (v === null || v === "" ? null : parseQty(v));
 
 // One compare-and-set change: {sku_id, field, from?, to}. `from` omitted means
@@ -488,9 +492,9 @@ function parseChange(item: Record<string, any>): { sku_id: string; change: Ledge
   if (!LEDGER_CHANGE_FIELDS.includes(field)) throw new HttpError(400, `Field ${String(item?.field)} cannot be changed here`, "BAD_FIELD", { sku_id, field: item?.field });
   const value = (v: unknown): number | string | null => {
     if (TEXT_CHANGE_FIELDS.includes(field)) return v === null || v === undefined || v === "" ? null : String(v).slice(0, 200);
-    const qty = field === "counted_qty" ? parseCount(v) : parseQty(v);
+    const qty = field === "counted_qty" ? parseCount(v) : field === "move_qty" ? parseSignedQty(v) : parseQty(v);
     if (qty === null && !(field === "counted_qty" && (v === null || v === ""))) {
-      throw new HttpError(400, `${field} must be a whole number, 0 or more`, "BAD_QTY", { sku_id, field });
+      throw new HttpError(400, field === "move_qty" ? "move_qty must be a whole number" : `${field} must be a whole number, 0 or more`, "BAD_QTY", { sku_id, field });
     }
     return qty;
   };
@@ -506,7 +510,10 @@ r.post("/stock/desk/:deskId/entries", async (c) => {
   const today = businessDate(c.env);
   const date = requireDate(body.date, today);
   const desk = await requireDesk(store, user, c.req.param("deskId"));
-  await requireOpenDay(store, user, desk.desk_id, date, today);
+  const day = await requireOpenDay(store, user, desk.desk_id, date, today);
+  const mode = day.stock_out_mode ?? "dynamic";
+  const offMode = (field: LedgerChangeField) =>
+    mode === "single" ? DYNAMIC_OUT_FIELDS.includes(field) : field === "stock_out_single";
 
   const known = new Set((await store.ledger({ date, deskId: desk.desk_id })).filter((row) => !row.excluded).map((row) => row.sku_id));
   const unknownSku = (skuId: string) => new HttpError(400, `SKU ${skuId} is not on this desk for ${date}`, "ROW_NOT_FOUND", { sku_id: skuId });
@@ -521,6 +528,11 @@ r.post("/stock/desk/:deskId/entries", async (c) => {
     for (const item of body.changes) {
       const { sku_id, change } = parseChange(item);
       if (!known.has(sku_id)) throw unknownSku(sku_id);
+      // A value typed while the screen still showed the other mode would be
+      // invisible after reload; refuse it so the device reloads instead.
+      if (offMode(change.field)) {
+        throw new HttpError(409, `${change.field} is not used on a ${mode} stock-out day — reload`, "WRONG_STOCK_OUT_MODE", { sku_id, field: change.field, mode });
+      }
       const list = bySku.get(sku_id) ?? [];
       // Two assignments to one column would make the generated SQL repeat it (42601).
       if (list.some((x) => x.field === change.field)) {

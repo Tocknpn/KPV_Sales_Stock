@@ -6,7 +6,11 @@
   "compatibility_flags": ["nodejs_compat"],
   "keep_vars": true,
   "assets": {
-    "directory": "./public"
+    "directory": "./public",
+    // Deep links (/daily_stock/…, /settings/users) serve index.html; the
+    // client router picks the screen. The API always reaches the Worker.
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
   },
   "observability": {
     "enabled": true

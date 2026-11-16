@@ -43,7 +43,7 @@ src/
 supabase/
   schema.sql                       v1 baseline (never edited; its header comment
                                    still mentions seed.sql, which no longer exists)
-  migrations/20261112_01 … 20261116_10   v2 changes, additive and idempotent
+  migrations/20261112_01 … 20261116_11   v2 changes, additive and idempotent
   users_roles.sql                  roles, role guard triggers, RLS lockdown
   base.sql                         production starting data (generated)
   seed_mock_data.sql               tagged mock data for test projects (optional)
@@ -74,12 +74,12 @@ npm run db:pin -- 'a-password'          # print one password hash
 Fresh Supabase project, in the SQL editor:
 
 1. `supabase/schema.sql`
-2. `supabase/migrations/20261112_01_foundation.sql` … `20261116_10_case_tracking.sql`, in name order
+2. `supabase/migrations/20261112_01_foundation.sql` … `20261116_11_stock_grid_modes.sql`, in name order
 3. `supabase/users_roles.sql`
 4. `supabase/base.sql`
 5. Test projects only: `supabase/seed_mock_data.sql`, then `supabase/tests/verify_v2.sql` (prints `VERIFY_V2 OK`)
 
-On an existing project always re-run the whole sequence 01 to 10 and then
+On an existing project always re-run the whole sequence 01 to 11 and then
 `users_roles.sql`, never a single earlier migration file (migration 07
 redefines a function that migration 01 also defines, so a lone re-run of 01
 would put the older body back). Re-run `users_roles.sql` after any future

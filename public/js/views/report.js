@@ -290,8 +290,8 @@ function render(root, data) {
               <td class="px-3 py-2 text-gray-500">${r.desk_id}</td>
               <td class="px-3 py-2 font-semibold text-gray-800">${escapeHtml(r.name_en)}</td>
               <td class="px-3 py-2 text-right text-gray-500">${r.opening_qty}</td>
-              <td class="px-3 py-2 text-right text-success">+${r.stock_in + r.transfer_in}</td>
-              <td class="px-3 py-2 text-right text-warning">-${r.retail_sale + r.wholesale + r.transfer_out + r.destock + r.move}</td>
+              <td class="px-3 py-2 text-right text-success">+${r.stock_in + r.transfer_in + Math.max(r.move_qty ?? 0, 0)}</td>
+              <td class="px-3 py-2 text-right text-warning">-${(r.stock_out ?? r.retail_sale + r.wholesale + r.destock) + r.transfer_out + r.move + Math.max(-(r.move_qty ?? 0), 0)}</td>
               <td class="px-3 py-2 text-right font-bold text-gray-900">${r.closing_qty}</td>
               <td class="px-3 py-2 text-right ${r.counted_qty != null && r.counted_qty !== r.closing_qty ? "font-bold text-danger" : "text-gray-500"}">${r.counted_qty ?? "—"}</td>
             </tr>`

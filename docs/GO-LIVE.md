@@ -16,7 +16,7 @@ skip to section 2.)
 
 1. In **SQL Editor**, run these files in this order:
    1. `supabase/schema.sql`
-   2. `supabase/migrations/20261112_01_foundation.sql` to `20261116_10_case_tracking.sql`, in name order
+   2. `supabase/migrations/20261112_01_foundation.sql` to `20261116_11_stock_grid_modes.sql`, in name order
    3. `supabase/users_roles.sql`
    4. `supabase/base.sql`
    5. `supabase/real_skus.sql` (the real product list; real rows, kept by the purge;
@@ -85,9 +85,9 @@ Do these in order, **before** the new code is deployed.
    ```
    Fix every row (correct the count or the entry in the old app). After v2 such
    a row can only be corrected, never pushed further down.
-3. Run `supabase/migrations/20261112_01_foundation.sql` to `20261116_10_case_tracking.sql`
+3. Run `supabase/migrations/20261112_01_foundation.sql` to `20261116_11_stock_grid_modes.sql`
    in name order, then `supabase/users_roles.sql`. All are safe to run twice, but
-   always re-run the **whole** sequence 01 to 10 and then `users_roles.sql`,
+   always re-run the **whole** sequence 01 to 11 and then `users_roles.sql`,
    never a single earlier file (migration 07 redefines a function that
    migration 01 also defines).
 
@@ -203,3 +203,24 @@ On the live project, in this order:
 5. After the next daily gold fetch, confirm `gold_prices.updated_at` advanced and
    a second `gold_price_history` row appeared (the fetcher uses service_role, so
    RLS does not block it).
+
+## 7. Rollout: stock grid, stock-out mode, Move in/out (2026-11-16)
+
+The case screen becomes one typed grid; stock-out is **single** (one total) or
+**dynamic** (retail / wholesale / destock), chosen by an admin; the linked
+Move / Transfer is replaced by one signed **Move in/out** number per case.
+
+On the live project, in this order:
+
+1. Check nothing is in transit (the migration refuses otherwise):
+   `select count(*) from transfers where status = 'in_transit';`
+2. Run `supabase/migrations/20261116_11_stock_grid_modes.sql` in the SQL editor.
+   It adds `stock_out_mode` (system_config, desk_days), `stock_out_single`,
+   `move_qty` and the generated `stock_out`, and re-generates `closing_qty`
+   with the new formula (no stored value changes; no Done row is written).
+3. Check: `select count(*) from daily_stock_ledger where closing_qty <> opening_qty + stock_in + transfer_in - transfer_out - move - stock_out + move_qty;` returns 0.
+4. Deploy the Worker (`npm run deploy`) to the **owner's Cloudflare account**.
+   `wrangler.jsonc` now serves `index.html` for deep links such as
+   `/daily_stock` and `/settings/users`.
+5. The default mode is **dynamic** (same as before). An admin switches it in
+   ຕັ້ງຄ່າ → ແບບສະຕັອກອອກ; it applies to case-days opened after the switch.

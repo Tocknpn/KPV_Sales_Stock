@@ -18,6 +18,15 @@ export function clampQty(n) {
   return Number.isFinite(v) ? Math.min(MAX_QTY, Math.max(0, v)) : 0;
 }
 
+// Move in/out is signed: −MAX_QTY..MAX_QTY.
+export function clampSigned(n) {
+  const v = Math.trunc(Number(n));
+  return Number.isFinite(v) ? Math.min(MAX_QTY, Math.max(-MAX_QTY, v)) : 0;
+}
+
+const SIGNED_FIELDS = new Set(["move_qty"]);
+const clampFor = (field, n) => (SIGNED_FIELDS.has(field) ? clampSigned(n) : clampQty(n));
+
 /**
  * @param {object} opts
  * @param {string} opts.deskId
@@ -119,7 +128,7 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
         if (steppers.length && !rebased) {
           const rebasedEntries = steppers.map(([field, e]) => [
             field,
-            { ...e, from: cur[field], to: clampQty(cur[field] + (e.to - e.from)) },
+            { ...e, from: cur[field], to: clampFor(field, cur[field] + (e.to - e.from)) },
           ]);
           await attempt(skuId, rebasedEntries, true);
         } else {

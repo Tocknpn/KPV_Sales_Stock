@@ -4,7 +4,7 @@
 // then the loader that gathers a branch's data from the Store.
 import type { Desk, DeskDay, LedgerRow, MasterSku, ReplenishmentRule, SystemConfig, Transfer } from "./types";
 import type { Store } from "./store";
-import { currentQty } from "./logic";
+import { currentQty, soldOf } from "./logic";
 
 export type ParamSource = "sku-branch" | "sku" | "group-branch" | "group" | "type-branch" | "type" | "auto" | "default" | "none";
 export type RunwayStatus = "critical" | "warning" | "ok" | "no_data";
@@ -127,8 +127,8 @@ export function computeVelocity(
     if (!done.has(`${r.desk_id}__${r.ledger_date}`)) continue;
     const key = `${r.ledger_date}__${r.sku_id}`;
     const cur = perDay.get(key) ?? { sku_id: r.sku_id, stocked: 0, sold: 0 };
-    cur.stocked += r.opening_qty + r.stock_in + r.transfer_in;
-    cur.sold += r.retail_sale + r.wholesale;
+    cur.stocked += r.opening_qty + r.stock_in + r.transfer_in + Math.max(r.move_qty ?? 0, 0);
+    cur.sold += soldOf(r);
     perDay.set(key, cur);
   }
   const bySku = new Map<string, { sold: number; days: number }>();

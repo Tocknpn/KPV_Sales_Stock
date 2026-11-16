@@ -101,9 +101,14 @@ export interface DeskDay {
   checked_in_by: string | null;
   done_by: string | null;
   done_at: string | null;
+  // Stamped from system_config when the day is created; never changes after.
+  stock_out_mode: StockOutMode;
   created_at: string;
   updated_at: string;
 }
+
+// 'dynamic': staff enter retail / wholesale / destock. 'single': one total.
+export type StockOutMode = "dynamic" | "single";
 
 export interface LedgerRow {
   id: string;
@@ -121,6 +126,12 @@ export interface LedgerRow {
   destock: number;
   destock_note: string | null;
   move: number;
+  // Stock-out typed as one total on a single-mode day (0 on dynamic days).
+  stock_out_single: number;
+  // Generated: retail_sale + wholesale + destock + stock_out_single.
+  stock_out: number;
+  // Signed Move in/out typed by staff (−8 out of this case, +8 into it).
+  move_qty: number;
   // Computed by the database (generated column) / DemoStore — never written.
   closing_qty: number;
   counted_qty: number | null;
@@ -134,7 +145,7 @@ export interface LedgerRow {
 // Fields a route may change on a ledger row. transfer_in / transfer_out / move
 // are absent on purpose: they only change through Store.ledgerAdd.
 export type LedgerEntryPatch = Partial<
-  Pick<LedgerRow, "stock_in" | "retail_sale" | "wholesale" | "destock" | "destock_note" | "counted_qty" | "counted_note" | "performed_by" | "excluded" | "opening_qty">
+  Pick<LedgerRow, "stock_in" | "retail_sale" | "wholesale" | "destock" | "destock_note" | "stock_out_single" | "move_qty" | "counted_qty" | "counted_note" | "performed_by" | "excluded" | "opening_qty">
 >;
 
 export type StaffRole = "staff" | "manager" | "admin";
@@ -219,6 +230,7 @@ export interface SystemConfig {
   default_lead_time_days: number;
   warning_margin_days: number;
   velocity_window_days: number;
+  stock_out_mode: StockOutMode;
   updated_at: string;
 }
 

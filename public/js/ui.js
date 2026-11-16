@@ -1,3 +1,5 @@
+import { sheetOpened, sheetClosed } from "./router.js";
+
 export function toast(message, tone = "default", ms = 2200) {
   const host = document.getElementById("toast");
   const toneCls =
@@ -18,6 +20,11 @@ export function toast(message, tone = "default", ms = 2200) {
 }
 
 const sheetHost = () => document.getElementById("sheet-host");
+
+export const isSheetOpen = () => {
+  const host = sheetHost();
+  return Boolean(host) && !host.classList.contains("hidden");
+};
 
 // Remembers the element that had focus before a sheet opened, so closing it
 // (Escape, backdrop tap, the X button, or a completed action) returns focus
@@ -75,6 +82,8 @@ export function openSheet(innerHtml, { onMount, title, anchorEl } = {}) {
     </div>`;
   host.classList.remove("hidden");
   document.body.style.overflow = "hidden";
+  // A history entry of its own, so the phone's Back closes the sheet.
+  sheetOpened();
   host.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", closeSheet));
   host.addEventListener("keydown", trapFocus);
   if (onMount) onMount(host.querySelector("#sheet-body"));
@@ -88,14 +97,17 @@ export function openSheet(innerHtml, { onMount, title, anchorEl } = {}) {
   (firstFocusable || host.querySelector('[role="dialog"]'))?.focus();
 }
 
-export function closeSheet() {
+// `fromHistory`: Back already popped the sheet's history entry.
+export function closeSheet(opts) {
   const host = sheetHost();
+  const wasOpen = isSheetOpen();
   host.removeEventListener("keydown", trapFocus);
   host.classList.add("hidden");
   host.innerHTML = "";
   document.body.style.overflow = "";
   lastFocusedBeforeSheet?.focus?.();
   lastFocusedBeforeSheet = null;
+  if (wasOpen && !opts?.fromHistory) sheetClosed(isSheetOpen);
 }
 
 export function openActionSheet(title, options, onPick) {

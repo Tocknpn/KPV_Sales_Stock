@@ -11,7 +11,7 @@ import { deskById } from "../../state.js";
 import { escapeHtml, fmtBaht, fmtClock, fmtDate } from "../../util.js";
 
 // Columns that are bookkeeping for the row, not something a person changed.
-const HIDDEN_FIELDS = new Set(["id", "desk_id", "sku_id", "ledger_date", "is_seed", "created_at", "updated_at", "performed_by", "closing_qty", "branch_id"]);
+const HIDDEN_FIELDS = new Set(["id", "desk_id", "sku_id", "ledger_date", "is_seed", "created_at", "updated_at", "performed_by", "closing_qty", "stock_out", "branch_id"]);
 
 // Who made a case and what it started with: summarised, never printed raw.
 const ORIGIN_FIELDS = new Set(["created_by", "initial_stock"]);
@@ -171,10 +171,11 @@ function dayRow(r) {
 
 function skuTable(rows) {
   const body = rows
-    .filter((r) => r.opening_qty || r.stock_in || r.transfer_in || r.closing_qty || r.counted_qty != null || r.retail_sale || r.wholesale || r.transfer_out || r.destock || r.move)
+    .filter((r) => r.opening_qty || r.stock_in || r.transfer_in || r.closing_qty || r.counted_qty != null || r.retail_sale || r.wholesale || r.transfer_out || r.stock_out_single || r.move_qty || r.destock || r.move)
     .map((r) => {
-      const inQ = (r.stock_in ?? 0) + (r.transfer_in ?? 0);
-      const outQ = (r.retail_sale ?? 0) + (r.wholesale ?? 0) + (r.transfer_out ?? 0) + (r.destock ?? 0) + (r.move ?? 0);
+      const moveQ = r.move_qty ?? 0;
+      const inQ = (r.stock_in ?? 0) + (r.transfer_in ?? 0) + Math.max(moveQ, 0);
+      const outQ = (r.retail_sale ?? 0) + (r.wholesale ?? 0) + (r.stock_out_single ?? 0) + (r.transfer_out ?? 0) + (r.destock ?? 0) + (r.move ?? 0) + Math.max(-moveQ, 0);
       const off = r.counted_qty != null && r.counted_qty !== r.closing_qty;
       return `<tr>
         <td class="px-2 py-1.5 text-left font-semibold text-gray-800">${escapeHtml(pickName(r.name_en, r.name_lo))}</td>
