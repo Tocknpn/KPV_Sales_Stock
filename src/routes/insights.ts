@@ -6,6 +6,8 @@ import { businessDate, addDays, isValidMonth, monthRange } from "../time";
 import { buildDashboard, buildReport, AGING_LOOKBACK_DAYS } from "../logic";
 import { resolveGoldPrice, priceOn } from "../goldPrice";
 import { loadBranchStatuses } from "../replenishment";
+import { buildCaseHistory, buildIssueGrid } from "../caseHistory";
+import type { CaseDayRow } from "../caseHistory";
 import type { Desk, SessionUser } from "../types";
 
 const r = newRouter();
@@ -85,6 +87,67 @@ r.get("/report", async (c) => {
   const gold = resolveGoldPrice(goldRow, config, today);
   const lakPerBaht = priceOn(to < today ? to : today, goldHistory, gold.lakPerBaht);
   return c.json({ period, ...buildReport(rows, days, skus, { q: c.req.query("q") || undefined }, config, lakPerBaht) });
+});
+
+// Month grid of issues: one row per active case of a branch, one cell per day.
+r.get("/report/grid", async (c) => {
+  const store = storeFor(c);
+  const user = c.get("user");
+  const today = businessDate(c.env);
+  const month = c.req.query("month") || today.slice(0, 7);
+  if (!isValidMonth(month)) throw new HttpError(400, "Invalid month", "BAD_MONTH");
+  const branchId = scopeBranch(user, c.req.query("branch") || undefined);
+  if (!branchId) throw new HttpError(400, "branch is required", "BRANCH_REQUIRED");
+  const [branches, allDesks] = await Promise.all([store.branches(), store.desks()]);
+  if (!branches.some((b) => b.branch_id === branchId)) throw new HttpError(400, "Unknown branch", "BAD_BRANCH");
+  const desks = allDesks.filter((d) => d.branch_id === branchId && d.active);
+
+  const { from, to: monthEnd } = monthRange(month);
+  // Days that have not happened yet stay blank.
+  const to = monthEnd > today ? today : monthEnd;
+  const perDesk = new Map<string, CaseDayRow[]>();
+  if (to >= from && desks.length > 0) {
+    const deskIds = desks.map((d) => d.desk_id);
+    // One range read for the month, plus each case's latest earlier day so the
+    // first day of the month is chain-checked against it.
+    const [monthDays, anchors, closed, skus, staffAccounts, config, goldRow, snapshots, reopened] = await Promise.all([
+      store.deskDays({ branchId, from, to }),
+      Promise.all(deskIds.map((deskId) => store.deskDays({ deskId, before: from, order: "desc", limit: 1 }))),
+      store.closedDays({ branchId, from, to }),
+      store.skus(),
+      store.staffAccounts(),
+      store.config(),
+      store.goldPrice(),
+      store.goldPriceHistory(from, to),
+      store.reopenedDates(deskIds, from, to),
+    ]);
+    const anchorDays = anchors.flat();
+    const ledgerFrom = anchorDays.reduce((min, d) => (d.ledger_date < min ? d.ledger_date : min), from);
+    const ledger = await store.ledger({ branchId, from: ledgerFrom, to });
+    const skuMap = new Map(skus.map((s) => [s.sku_id, s]));
+    const staffNames = new Map(staffAccounts.map((a) => [a.id, a.display_name]));
+    const fallbackPrice = resolveGoldPrice(goldRow, config, today).lakPerBaht;
+    for (const desk of desks) {
+      const id = desk.desk_id;
+      perDesk.set(
+        id,
+        buildCaseHistory({
+          from,
+          to,
+          today,
+          days: [...anchorDays, ...monthDays].filter((d) => d.desk_id === id),
+          ledger: ledger.filter((l) => l.desk_id === id),
+          closed,
+          skus: skuMap,
+          staffNames,
+          reopenedDates: reopened.get(id) ?? new Set(),
+          snapshots,
+          fallbackPrice,
+        })
+      );
+    }
+  }
+  return c.json(buildIssueGrid({ month, desks, perDesk }));
 });
 
 export default r;

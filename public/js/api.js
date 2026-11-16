@@ -106,6 +106,7 @@ export const api = {
 
   dashboard: (params) => request(`/dashboard?${query(params)}`),
   report: (params) => request(`/report?${query(params)}`),
+  reportGrid: (branch, month) => request(`/report/grid?${query({ branch, month })}`),
 
   settingsSummary: () => request("/settings/summary"),
   saveConfig: (payload) => post("/settings/config", payload),
@@ -120,6 +121,7 @@ export const api = {
 
   myCases: (branchId) => request(`/my-cases?${query({ branchId })}`),
   assignDesk: (deskId, staffId, note) => post(`/desks/${encodeURIComponent(deskId)}/assign`, { staffId, note }),
+  deskHistory: (deskId, to, days) => request(`/desks/${encodeURIComponent(deskId)}/history?${query({ to, days })}`),
   deskInfo: (deskId) => request(`/desks/${encodeURIComponent(deskId)}/info`),
   releaseDesk: (deskId) => post(`/desks/${encodeURIComponent(deskId)}/release`),
   closedDays: (params) => request(`/closed-days?${query(params ?? {})}`),

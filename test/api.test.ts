@@ -898,3 +898,65 @@ describe("data mode and /api/meta (Task 18)", () => {
     expect(res.json).toHaveProperty("today");
   });
 });
+
+describe("case history and issue grid", () => {
+  it("GET /desks/:id/history returns newest-first rows with nextTo", async () => {
+    const staff = await asStaff("B-MM");
+    const res = await call(staff, "GET", "/desks/MM-D01/history?days=2");
+    expect(res.status).toBe(200);
+    const dates = res.json.rows.map((r: any) => r.date);
+    expect(dates).toEqual([...dates].sort().reverse());
+    expect(res.json.rows.length).toBeGreaterThan(0);
+    expect(res.json.rows.length).toBeLessThanOrEqual(2);
+    expect(res.json.rows[0].date).toBe(TODAY);
+    expect(res.json.nextTo).toBe("2026-11-10");
+    // A window reaching the first recorded day has no further page.
+    const all = await call(staff, "GET", "/desks/MM-D01/history?days=90");
+    expect(all.json.nextTo).toBeNull();
+  });
+
+  it("history refuses another branch, bad dates and caps days", async () => {
+    expect((await call(await asStaff("B-TS"), "GET", "/desks/MM-D01/history")).status).toBe(403);
+    const staff = await asStaff("B-MM");
+    expect((await call(staff, "GET", "/desks/MM-D01/history?to=nope")).status).toBe(400);
+    expect((await call(staff, "GET", "/desks/MM-D01/history?days=0")).status).toBe(400);
+    expect((await call(staff, "GET", "/desks/NOPE/history")).status).toBe(404);
+    const capped = await call(staff, "GET", "/desks/MM-D01/history?days=500");
+    expect(capped.status).toBe(200);
+    expect(capped.json.rows.length).toBeLessThanOrEqual(90);
+  });
+
+  it("history flags a reopened day and a short window matches the full one", async () => {
+    const staff = await asStaff("B-MM");
+    const full = (await call(staff, "GET", "/desks/MM-D01/history?days=90")).json.rows;
+    const lastDone = full.find((r: any) => r.state === "done");
+    expect(lastDone).toBeTruthy();
+    // Cutting the window to one day must not invent a chain break.
+    const one = await call(staff, "GET", `/desks/MM-D01/history?to=${lastDone.date}&days=1`);
+    expect(one.json.rows).toEqual([lastDone]);
+    const admin = await asAdmin();
+    expect((await call(admin, "POST", "/stock/desk/MM-D01/reopen", { date: lastDone.date, reason: "recount" })).status).toBe(200);
+    const after = (await call(staff, "GET", "/desks/MM-D01/history?days=90")).json.rows;
+    expect(after.find((r: any) => r.date === lastDone.date).flags).toContain("reopened");
+  });
+
+  it("GET /report/grid has one row per active desk and one column per day", async () => {
+    const staff = await asStaff("B-MM");
+    const res = await call(staff, "GET", "/report/grid?month=2026-11");
+    expect(res.status).toBe(200);
+    expect(res.json.dates).toHaveLength(30);
+    const desks = (await getStore({} as any).desks()).filter((d) => d.branch_id === "B-MM" && d.active);
+    expect(res.json.rows.map((r: any) => r.deskId).sort()).toEqual(desks.map((d) => d.desk_id).sort());
+    for (const row of res.json.rows) expect(row.cells).toHaveLength(30);
+  });
+
+  it("grid: admin must name a branch, others are scoped, bad month is 400", async () => {
+    const admin = await asAdmin();
+    expect((await call(admin, "GET", "/report/grid?month=2026-11")).status).toBe(400);
+    expect((await call(admin, "GET", "/report/grid?month=2026-11&branch=B-TS")).status).toBe(200);
+    const staff = await asStaff("B-MM");
+    expect((await call(staff, "GET", "/report/grid?month=bad")).status).toBe(400);
+    const other = await call(staff, "GET", "/report/grid?month=2026-11&branch=B-TS");
+    expect(other.json.rows.every((r: any) => r.deskId.startsWith("MM-"))).toBe(true);
+  });
+});

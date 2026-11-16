@@ -35,7 +35,7 @@ import { buildDemoData, type DemoData } from "./demoData";
 import { businessDate, isLive, laosDate } from "./time";
 import { computeClosing } from "./logic";
 import { actorHeaders, type Actor } from "./actor";
-import { auditEntry, type AuditOp } from "./audit";
+import { auditEntry, reopenedDatesFrom, type AuditOp } from "./audit";
 
 export type NewDesk = { branch_id: string; display_name: string; created_by: string; initial_stock: InitialStock };
 
@@ -241,6 +241,8 @@ export interface Store {
   // to_desk_id), branchId likewise. from is inclusive and to exclusive, both
   // ISO timestamps; before is a keyset cursor (created_at, id): rows strictly after it in the newest-first order (created_at desc, id desc).
   auditLog(filter: AuditFilter): Promise<AuditEntry[]>;
+  // Per desk, the dates in [from, to] whose Done day was later reopened.
+  reopenedDates(deskIds: string[], from: string, to: string): Promise<Map<string, Set<string>>>;
 }
 
 export interface AuditFilter {
@@ -1052,6 +1054,9 @@ export class DemoStore implements Store {
   async audit(entry: Omit<AuditEntry, "id" | "created_at">) {
     this.db.audit.unshift({ id: crypto.randomUUID(), created_at: this.now(), ...entry });
   }
+  async reopenedDates(deskIds: string[], from: string, to: string) {
+    return reopenedDatesFrom(this.db.audit, deskIds, from, to);
+  }
   async auditLog(f: AuditFilter) {
     return this.db.audit
       .filter((e) => {
@@ -1511,6 +1516,25 @@ class SupabaseStore implements Store {
 
   async audit(entry: Omit<AuditEntry, "id" | "created_at">) {
     await this.rest("audit_log", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(entry) });
+  }
+  async reopenedDates(deskIds: string[], from: string, to: string) {
+    if (deskIds.length === 0) return new Map<string, Set<string>>();
+    // A reopen happens after the day it reopens, so only the lower bound is a filter.
+    const since = new Date(`${from}T00:00:00+07:00`).toISOString();
+    const q = [
+      "select=desk_id,created_at,row_key,old_values,new_values,table_name,op",
+      "table_name=eq.desk_days",
+      "op=eq.UPDATE",
+      "old_values->>status=eq.done",
+      "new_values->>status=neq.done",
+      `desk_id=in.(${deskIds.map(enc).join(",")})`,
+      `created_at=gte.${enc(since)}`,
+    ];
+    try {
+      return reopenedDatesFrom(await this.restAll<AuditEntry>(`audit_log?${q.join("&")}&order=created_at`), deskIds, from, to);
+    } catch {
+      return new Map<string, Set<string>>();
+    }
   }
   async auditLog(f: AuditFilter) {
     // id breaks ties: one transaction stamps every row it writes with the same created_at.

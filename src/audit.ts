@@ -3,6 +3,7 @@
 // 20261112_02_audit.sql). Keep the two in step.
 import type { AuditEntry } from "./types";
 import type { Actor } from "./actor";
+import { laosDate } from "./time";
 
 type Row = Record<string, unknown>;
 export type AuditOp = "INSERT" | "UPDATE" | "DELETE";
@@ -108,4 +109,23 @@ export function auditEntry(
     new_values: diff.new_values,
     is_seed: src.is_seed === true,
   };
+}
+
+// Dates (per desk) on which a Done day was reopened: desk_days UPDATEs that took
+// status from done to anything else. The date is the day's own ledger_date
+// (row_key, else old_values), else the Laos date of the change.
+export function reopenedDatesFrom(entries: AuditEntry[], deskIds: string[], from: string, to: string): Map<string, Set<string>> {
+  const wanted = new Set(deskIds);
+  const out = new Map<string, Set<string>>();
+  for (const e of entries) {
+    if (e.table_name !== "desk_days" || e.op !== "UPDATE" || !e.desk_id || !wanted.has(e.desk_id)) continue;
+    if (e.old_values?.status !== "done" || e.new_values?.status === "done" || e.new_values?.status == null) continue;
+    const raw = e.row_key?.ledger_date ?? e.old_values?.ledger_date;
+    const date = typeof raw === "string" ? raw : laosDate(new Date(e.created_at));
+    if (date < from || date > to) continue;
+    const set = out.get(e.desk_id) ?? new Set<string>();
+    set.add(date);
+    out.set(e.desk_id, set);
+  }
+  return out;
 }

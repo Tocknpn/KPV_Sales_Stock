@@ -9,6 +9,7 @@ import { addDays, businessDate, datesInMonth, isValidMonth, laosDate } from "../
 import { buildDayStatus } from "../dayStatus";
 import { loadBranchStatuses } from "../replenishment";
 import { resolveGoldPrice, priceOn } from "../goldPrice";
+import { buildCaseHistory } from "../caseHistory";
 import { bahtOf, valueLak, buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, computeClosing, parseQty, validateDeskDay } from "../logic";
 import type { Desk, DeskDay, LedgerRow, MasterSku, SessionUser, StaffAccount, Transfer } from "../types";
 
@@ -265,6 +266,58 @@ r.get("/desks/:deskId/info", async (c) => {
     createdBy: desk.created_by ? { id: desk.created_by, name: creator?.display_name ?? null } : null,
     initial,
   });
+});
+
+// Case day-by-day history, newest first, one page of `days` (default 30, max 90)
+// ending at `to`. nextTo is the last date of the following (older) page, or null
+// once the window reaches the case's first recorded day.
+const HISTORY_DEFAULT_DAYS = 30;
+const HISTORY_MAX_DAYS = 90;
+
+r.get("/desks/:deskId/history", async (c) => {
+  const store = storeFor(c);
+  const desk = await requireDesk(store, c.get("user"), c.req.param("deskId"));
+  const today = businessDate(c.env);
+  const requestedTo = requireDate(c.req.query("to"), today);
+  const to = requestedTo > today ? today : requestedTo;
+  const daysQuery = c.req.query("days");
+  let count = HISTORY_DEFAULT_DAYS;
+  if (daysQuery !== undefined && daysQuery !== "") {
+    count = Number(daysQuery);
+    if (!Number.isInteger(count) || count < 1) throw new HttpError(400, "days must be a whole number, 1 or more", "BAD_DAYS");
+  }
+  count = Math.min(count, HISTORY_MAX_DAYS);
+  const from = addDays(to, -(count - 1));
+
+  // One read of the case's days up to `to`; the latest one before `from` anchors
+  // the chain check of the first day shown, so the ledger starts there.
+  const days = await store.deskDays({ deskId: desk.desk_id, to, order: "asc" });
+  const anchor = days.filter((d) => d.ledger_date < from).pop();
+  const [ledger, closed, skus, staffAccounts, config, goldRow, snapshots, reopened] = await Promise.all([
+    store.ledger({ deskId: desk.desk_id, from: anchor?.ledger_date ?? from, to }),
+    store.closedDays({ branchId: desk.branch_id, from, to }),
+    store.skus(),
+    store.staffAccounts(),
+    store.config(),
+    store.goldPrice(),
+    store.goldPriceHistory(from, to),
+    store.reopenedDates([desk.desk_id], from, to),
+  ]);
+  const rows = buildCaseHistory({
+    from,
+    to,
+    today,
+    days,
+    ledger,
+    closed,
+    skus: new Map(skus.map((s) => [s.sku_id, s])),
+    staffNames: new Map(staffAccounts.map((a) => [a.id, a.display_name])),
+    reopenedDates: reopened.get(desk.desk_id) ?? new Set(),
+    snapshots,
+    fallbackPrice: resolveGoldPrice(goldRow, config, today).lakPerBaht,
+  });
+  const first = days[0]?.ledger_date;
+  return c.json({ rows, nextTo: first && from > first ? addDays(from, -1) : null });
 });
 
 // ---------------------------------------------------------------------------

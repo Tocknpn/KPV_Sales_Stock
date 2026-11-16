@@ -658,6 +658,7 @@ const DICT = {
     "err.STAFF_NOT_FOUND": "ບໍ່ພົບພະນັກງານ",
     "err.BAD_REASON": "ຕ້ອງໃສ່ເຫດຜົນ",
     "err.BAD_DATE": "ວັນທີບໍ່ຖືກຕ້ອງ",
+    "err.BAD_DAYS": "ຈຳນວນມື້ບໍ່ຖືກຕ້ອງ",
     "err.BAD_RULE": "ຄ່າບໍ່ຖືກຕ້ອງ",
     "err.ROLE_DENIED": "ທ່ານບໍ່ມີສິດປ່ຽນຄ່ານີ້",
 
@@ -1368,6 +1369,7 @@ const DICT = {
     "err.STAFF_NOT_FOUND": "Staff member not found",
     "err.BAD_REASON": "A reason is required",
     "err.BAD_DATE": "Invalid date",
+    "err.BAD_DAYS": "Invalid number of days",
     "err.BAD_RULE": "Invalid value",
     "err.ROLE_DENIED": "You are not allowed to change these",
 
