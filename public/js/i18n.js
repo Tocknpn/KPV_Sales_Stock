@@ -1499,3 +1499,10 @@ export function tf(key, vars) {
 export function pickName(nameEn, nameLo) {
   return getLang() === "lo" && nameLo ? nameLo : nameEn;
 }
+
+// Product names (SKUs, SKU types) are always shown in Lao, whatever the UI
+// language: the shop staff know the products by their Lao names. English only
+// when no Lao name is set.
+export function productName(nameEn, nameLo) {
+  return nameLo || nameEn;
+}

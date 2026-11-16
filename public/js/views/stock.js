@@ -2,7 +2,7 @@ import { api } from "../api.js";
 import { state, branchName } from "../state.js";
 import { toast, openSheet, closeSheet, openActionSheet } from "../ui.js";
 import { fmtBaht, fmtInt, fmtDate, icon, statusPillClasses, escapeHtml, fmtClock, fmtLaosStamp, laosDateOf, flameIcon } from "../util.js";
-import { t, tf, pickName } from "../i18n.js";
+import { t, tf, productName } from "../i18n.js";
 import { renderCalendar } from "../calendar.js";
 import { isAdmin } from "../session.js";
 import { mountDay, unmountDay } from "./day/index.js";
@@ -309,7 +309,7 @@ async function openOpeningBalanceSheet(deskCard) {
       <div class="flex items-center gap-2.5 px-4 py-3">
         <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">${icon(r.icon, "h-4 w-4")}</span>
         <div class="min-w-0 flex-1">
-          <div class="truncate text-xs font-bold text-gray-900">${escapeHtml(pickName(r.name_en, r.name_lo))}</div>
+          <div class="truncate text-xs font-bold text-gray-900">${escapeHtml(productName(r.name_en, r.name_lo))}</div>
           <div class="truncate text-[10px] text-gray-500">${escapeHtml([r.category, r.weight_name].filter(Boolean).join(" · ") || r.sku_id)}</div>
         </div>
         <div class="shrink-0 text-right">
@@ -414,7 +414,7 @@ function askOpeningQty(sku) {
       <button id="first-opening-ok" class="btn-primary mt-4 w-full">${t("stock.addSku")}</button>
     `,
       {
-        title: escapeHtml(pickName(sku.name_en, sku.name_lo)),
+        title: escapeHtml(productName(sku.name_en, sku.name_lo)),
         onMount: (body) => {
           body.querySelector("#first-opening-ok").addEventListener("click", () => {
             answered = true;
@@ -454,7 +454,7 @@ async function renderSkuPickerInto(container, excludeSkuIds, onPick, onCancel) {
         <button data-pick-sku="${escapeHtml(s.sku_id)}" class="card flex items-center gap-2.5 p-2.5 text-left">
           <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">${icon(s.icon, "h-4 w-4")}</span>
           <span class="min-w-0">
-            <span class="block truncate text-xs font-bold text-gray-900">${escapeHtml(pickName(s.name_en, s.name_lo))}</span>
+            <span class="block truncate text-xs font-bold text-gray-900">${escapeHtml(productName(s.name_en, s.name_lo))}</span>
             <span class="block text-[10px] text-gray-500">${escapeHtml([s.type_name, s.weight_name].filter(Boolean).join(" · ") || s.sku_id)}</span>
           </span>
         </button>`
@@ -558,7 +558,7 @@ async function openCreateCaseSheet() {
         body,
         rows.map((r) => r.sku_id),
         (sku) => {
-          rows.push({ sku_id: sku.sku_id, name: pickName(sku.name_en, sku.name_lo), icon: sku.icon, opening_qty: 0 });
+          rows.push({ sku_id: sku.sku_id, name: productName(sku.name_en, sku.name_lo), icon: sku.icon, opening_qty: 0 });
           mode = "form";
           render(body);
         },

@@ -363,7 +363,7 @@ async function historyMoves(store: Store, deskId: string, date: string, outgoing
       reversal,
       reversed,
       canUndo: !reversal && !reversed && open,
-      lines: lines.map((t) => ({ sku_id: t.sku_id, name_en: skus.find((s) => s.sku_id === t.sku_id)?.name_en ?? t.sku_id, qty: t.qty })),
+      lines: lines.map((t) => { const s = skus.find((x) => x.sku_id === t.sku_id); return { sku_id: t.sku_id, name_en: s?.name_en ?? t.sku_id, name_lo: s?.name_lo ?? null, qty: t.qty }; }),
     });
   }
   return out.sort((a, b) => b.created_at.localeCompare(a.created_at));

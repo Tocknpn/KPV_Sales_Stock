@@ -8,7 +8,7 @@
 // its input holds the size and a ± strip under it holds the direction, because
 // the iPhone number pad has no minus key. In count mode the Closing column
 // becomes the Count input, with the expected closing above it (tap = matches).
-import { t, pickName } from "../../i18n.js";
+import { t, productName } from "../../i18n.js";
 import { escapeHtml, fmtRunway } from "../../util.js";
 
 // Same formula as the database's generated closing_qty (migration 11).
@@ -21,7 +21,7 @@ export const linkedMoveOf = (r) => r.transfer_in - r.transfer_out - r.move;
 export const signed = (n) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : "0");
 
 export function skuName(r) {
-  return pickName(r.name_en, r.name_lo);
+  return productName(r.name_en, r.name_lo);
 }
 
 export function groupKeyOf(r) {

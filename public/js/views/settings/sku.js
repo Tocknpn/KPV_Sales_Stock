@@ -1,7 +1,7 @@
 import { api } from "../../api.js";
 import { toast, openSheet, closeSheet } from "../../ui.js";
 import { icon, escapeHtml, fmtInt, ICONS, toggleSwitch, debounce } from "../../util.js";
-import { t } from "../../i18n.js";
+import { t, productName } from "../../i18n.js";
 import { state } from "../../state.js";
 import { isAdmin } from "../../session.js";
 import { parseCsv, csvRowsToSkus, CSV_TEMPLATE } from "../../csv.js";
@@ -86,7 +86,7 @@ function typeRow(ty) {
     <div class="flex items-center gap-2.5 px-4 py-3">
       <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">${icon(ty.icon, "h-4 w-4")}</span>
       <button data-edit-type="${ty.type_id}" class="min-w-0 flex-1 text-left">
-        <span class="block truncate text-xs font-bold text-gray-900">${escapeHtml(ty.name_en)}</span>
+        <span class="block truncate text-xs font-bold text-gray-900">${escapeHtml(productName(ty.name_en, ty.name_lo))}</span>
         <span class="block text-[10px] text-gray-500">${ty.active ? t("settings.activeLabel") : t("settings.inactiveLabel")}</span>
       </button>
       ${canEdit() ? toggleSwitch(ty.active, `data-toggle-type="${ty.type_id}"`) : ""}
@@ -287,7 +287,7 @@ function visibleSkus(skus) {
     (s) =>
       (skuGroupFilter === "all" || s.type_id === skuGroupFilter) &&
       (skuSizeFilter === "all" || s.weight_id === skuSizeFilter) &&
-      (!q || s.name_en.toLowerCase().includes(q))
+      (!q || s.name_en.toLowerCase().includes(q) || (s.name_lo ?? "").toLowerCase().includes(q))
   );
 }
 
@@ -343,7 +343,7 @@ function skuRow(s) {
     <div class="flex items-center gap-2.5 px-4 py-3">
       <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">${icon(s.icon, "h-4 w-4")}</span>
       <button data-edit-sku="${s.sku_id}" class="min-w-0 flex-1 text-left">
-        <span class="block truncate text-xs font-bold text-gray-900">${escapeHtml(s.name_en)}</span>
+        <span class="block truncate text-xs font-bold text-gray-900">${escapeHtml(productName(s.name_en, s.name_lo))}</span>
         <span class="block text-[10px] text-gray-500">${escapeHtml(subtitle)} · ${s.active ? t("settings.activeLabel") : t("settings.inactiveLabel")}</span>
       </button>
       ${canEdit() ? toggleSwitch(s.active, `data-toggle-sku="${s.sku_id}"`) : ""}
@@ -413,7 +413,7 @@ function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights,
     <button id="save-sku" class="btn-primary mt-4 w-full">${t("settings.saveSku")}</button>
   `,
     {
-      title: existing ? existing.name_en : t("settings.addSku"),
+      title: existing ? productName(existing.name_en, existing.name_lo) : t("settings.addSku"),
       onMount: (sheetBody) => {
         // Gold items: suggest the Baht weight from the chosen size until the
         // admin types their own.

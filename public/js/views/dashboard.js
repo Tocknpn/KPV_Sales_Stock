@@ -3,11 +3,15 @@ import { state, branchName, deskById } from "../state.js";
 import { renderDonut, renderCapacityBar, categoryColor } from "../charts.js";
 import { openActionSheet } from "../ui.js";
 import { fmtBaht, fmtInt, fmtLak, fmtLakSigned, fmtUsd, escapeHtml, fmtRunway, fmtDate } from "../util.js";
-import { t, tf, pickName } from "../i18n.js";
+import { t, tf, productName } from "../i18n.js";
 import { isAdmin } from "../session.js";
 
 // The category filter lists the SKU types the admin maintains in Settings.
 let categoryOptions = [];
+// Category filter value is the English type name (what master_sku.category
+// holds); the label is the Lao name.
+let categoryLabels = new Map();
+const categoryLabel = (c) => categoryLabels.get(c) ?? c;
 
 function deskLabel(deskId) {
   const d = deskById(deskId);
@@ -16,7 +20,9 @@ function deskLabel(deskId) {
 
 export async function mountDashboard() {
   try {
-    categoryOptions = (await api.skuTypes()).types.filter((ty) => ty.active).map((ty) => ty.name_en);
+    const types = (await api.skuTypes()).types.filter((ty) => ty.active);
+    categoryOptions = types.map((ty) => ty.name_en);
+    categoryLabels = new Map(types.map((ty) => [ty.name_en, productName(ty.name_en, ty.name_lo)]));
   } catch {
     categoryOptions = [];
   }
@@ -48,7 +54,7 @@ function renderTopbar() {
     </div>
     <div class="mt-2 flex gap-2">
       <button id="category-select" class="chip flex-1 justify-between border-hairline bg-white text-gray-700">
-        <span id="category-label" class="truncate">${state.dashboard.category || t("dashboard.allCategories")}</span>
+        <span id="category-label" class="truncate">${state.dashboard.category ? escapeHtml(categoryLabel(state.dashboard.category)) : t("dashboard.allCategories")}</span>
         <svg class="h-3.5 w-3.5 shrink-0 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
       </button>
       <button id="stock-select" class="chip flex-1 justify-between border-hairline bg-white text-gray-700">
@@ -100,7 +106,7 @@ function renderTopbar() {
   });
 
   document.getElementById("category-select").addEventListener("click", () => {
-    const options = [{ label: t("dashboard.allCategories"), value: null }, ...categoryOptions.map((c) => ({ label: c, value: c }))];
+    const options = [{ label: t("dashboard.allCategories"), value: null }, ...categoryOptions.map((c) => ({ label: categoryLabel(c), value: c }))];
     openActionSheet(
       t("dashboard.filterByCategory"),
       options.map((o) => ({ ...o, selected: o.value === state.dashboard.category })),
@@ -277,7 +283,7 @@ function watchlistRow(item, kind) {
   return `
     <div class="flex items-center justify-between gap-2 py-1.5">
       <div class="min-w-0">
-        <div class="truncate text-xs font-bold text-gray-900">${escapeHtml(pickName(item.name_en, item.name_lo))}</div>
+        <div class="truncate text-xs font-bold text-gray-900">${escapeHtml(productName(item.name_en, item.name_lo))}</div>
         <div class="truncate text-[10px] text-gray-500">${escapeHtml(item.category)} · ${escapeHtml(deskLabel(item.desk_id))}</div>
       </div>
       <span class="status-pill shrink-0 ${kind === "over" ? "bg-danger-bg text-danger" : "bg-warning-bg text-warning"}" title="${t("dashboard.stockVsReorder")}">${fmtInt(item.closing)} / ${fmtInt(item.reorder_level)}</span>
@@ -288,7 +294,7 @@ function agingRow(item) {
   return `
     <div class="flex items-center justify-between gap-2 py-1.5">
       <div class="min-w-0">
-        <div class="truncate text-xs font-bold text-gray-900">${escapeHtml(pickName(item.name_en, item.name_lo))}</div>
+        <div class="truncate text-xs font-bold text-gray-900">${escapeHtml(productName(item.name_en, item.name_lo))}</div>
         <div class="truncate text-[10px] text-gray-500">${escapeHtml(item.category)} · ${escapeHtml(deskLabel(item.desk_id))}</div>
       </div>
       <span class="status-pill shrink-0 bg-gray-100 text-gray-600">${fmtInt(item.estDays)} ${t("dashboard.days")}</span>
@@ -299,7 +305,7 @@ function transitRow(item) {
   return `
     <div class="flex items-center justify-between gap-2 py-1.5">
       <div class="min-w-0">
-        <div class="truncate text-xs font-bold text-gray-900">${fmtInt(item.qty)} × ${escapeHtml(item.name_en)}</div>
+        <div class="truncate text-xs font-bold text-gray-900">${fmtInt(item.qty)} × ${escapeHtml(productName(item.name_en, item.name_lo))}</div>
         <div class="truncate text-[10px] text-gray-500">${escapeHtml(item.from_desk_id)} → ${escapeHtml(item.to_desk_id)}</div>
       </div>
       <span class="status-pill shrink-0 bg-warning-bg text-warning">${item.sent_date.slice(5)}</span>

@@ -3,7 +3,7 @@ import { isAdmin } from "../session.js";
 import { state, branchName, setStoredDocView } from "../state.js";
 import { toast, openSheet, closeSheet, openActionSheet } from "../ui.js";
 import { fmtDateTime, escapeHtml, icon } from "../util.js";
-import { t, pickName } from "../i18n.js";
+import { t, productName } from "../i18n.js";
 
 const PAGE_SIZE = 10;
 
@@ -397,10 +397,10 @@ function blankRow() {
 }
 
 function openSkuPicker(skuCatalog, selectedId, onPick) {
-  const sorted = [...skuCatalog].sort((a, b) => pickName(a.name_en, a.name_lo).localeCompare(pickName(b.name_en, b.name_lo)));
+  const sorted = [...skuCatalog].sort((a, b) => productName(a.name_en, a.name_lo).localeCompare(productName(b.name_en, b.name_lo)));
   const options = [
     { label: t("documents.customItemOption"), value: null, selected: !selectedId },
-    ...sorted.map((s) => ({ label: `${pickName(s.name_en, s.name_lo)} · ${s.sku_id}`, value: s.sku_id, selected: s.sku_id === selectedId })),
+    ...sorted.map((s) => ({ label: `${productName(s.name_en, s.name_lo)} · ${s.sku_id}`, value: s.sku_id, selected: s.sku_id === selectedId })),
   ];
   openActionSheet(t("documents.pickSkuTitle"), options, (opt) => onPick(opt.value));
 }
@@ -473,7 +473,7 @@ function wireRowList(rowList, rows, render, body, balanceMap, skuCatalog) {
           const sku = skuId ? skuCatalog.find((s) => s.sku_id === skuId) : null;
           if (sku) {
             rows[idx].sku_id = sku.sku_id;
-            rows[idx].item = pickName(sku.name_en, sku.name_lo);
+            rows[idx].item = productName(sku.name_en, sku.name_lo);
             rows[idx].skuIcon = sku.icon;
             rows[idx].gramEach = sku.std_gram_weight ?? 0;
           } else {
@@ -740,7 +740,7 @@ function wireProposalRows(tableHost, rows, render, balanceMap, skuCatalog) {
           const sku = skuId ? skuCatalog.find((s) => s.sku_id === skuId) : null;
           if (sku) {
             rows[idx].sku_id = sku.sku_id;
-            rows[idx].item = pickName(sku.name_en, sku.name_lo);
+            rows[idx].item = productName(sku.name_en, sku.name_lo);
             rows[idx].skuIcon = sku.icon;
             rows[idx].gramEach = sku.std_gram_weight ?? 0;
           }
@@ -825,7 +825,7 @@ async function openReorderProposalPage() {
     rows = [
       ...detail.rows.map((r) => ({
         sku_id: r.sku_id,
-        item: pickName(r.name_en, r.name_lo),
+        item: productName(r.name_en, r.name_lo),
         skuIcon: r.icon,
         gramEach: r.gram_weight_each ?? 0,
         attention: r.branch_status === "critical" || r.branch_status === "warning" || r.lifetime_alert,

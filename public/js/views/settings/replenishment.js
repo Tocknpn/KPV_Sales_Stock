@@ -4,7 +4,7 @@
 import { api } from "../../api.js";
 import { toast, openSheet, closeSheet } from "../../ui.js";
 import { escapeHtml, fmtRunway, debounce } from "../../util.js";
-import { t, tf, pickName } from "../../i18n.js";
+import { t, tf, productName } from "../../i18n.js";
 import { state, branchName } from "../../state.js";
 import { isAdmin } from "../../session.js";
 
@@ -151,7 +151,7 @@ const srcTag = (source) =>
 
 function rowHtml(r, editable) {
   const sku = data.skus.get(r.sku_id);
-  const name = pickName(r.name, sku?.name_lo);
+  const name = productName(r.name, sku?.name_lo);
   const sub = [sku?.weight_name, sku?.purity].filter(Boolean).join(" · ");
   const runway = fmtRunway(r.runwayDays);
   const auto = r.autoAvg?.value != null ? tf("replen.auto", { n: num(r.autoAvg.value), d: r.autoAvg.inStockDays }) : t("replen.autoNone");
@@ -227,7 +227,7 @@ function openRuleSheet(root, row) {
     ${scopeField("rs")}
     <button id="rs-save" class="btn-primary mt-4 w-full">${t("settings.save")}</button>`,
     {
-      title: escapeHtml(pickName(row.name, sku?.name_lo)),
+      title: escapeHtml(productName(row.name, sku?.name_lo)),
       onMount: (sheet) => {
         const avg = sheet.querySelector("#rs-avg");
         const lead = sheet.querySelector("#rs-lead");
