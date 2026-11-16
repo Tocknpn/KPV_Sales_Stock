@@ -345,15 +345,15 @@ D1 keep stack · D2 Workers not Pages · D3 no anon key in browser · D4 actor v
 
 ## Addendum 2026-11-16: case tracking and gold price
 
-Reverses the case assignment of v2 section 4 and changes the gold price source.
+Reverses the case assignment of v2 section 4 and changes the gold price source. A day always means a Laos day (Asia/Vientiane).
 
-1. **Case ownership retired.** Assignment routes are removed; closed-day routes moved to `src/routes/closedDays.ts`; the `desk_assignment` table stays, unused. "Switch user" is removed (use Log out).
-2. **One-line header** on Daily Stock, with no My cases and no Switch user.
-3. **Uniform compact case cards**, each with `≈ LAK`.
-4. **Case info** (⋯ menu): creator, creation date and original stock. Migration `20261116_10_case_tracking.sql` adds `desks.created_by` and `initial_stock`, `kpv_backfill_desk_origin()` and an `INITIAL_IMMUTABLE` trigger. Desks with no creation record and no first-day stock keep a blank origin ("-").
-5. **Original stock** = the openings entered when the case was created; SKUs added later are not part of it.
-6. **History tab** is a day table. A *missed day* is a past date with no check-in that is not a closed day; a *chain break* is an opening that differs from the previous checked day's count (or its closing when not counted). Both render red.
-7. **Report month grid** (cases x days); a red day opens that day.
-8. **Gold price source** is `gold_prices` (daily fetch), shown as a read-only strip in Settings. Each day's price is stored in `gold_price_history` (trigger on `gold_prices`).
-9. **Exchange rate** is a new admin-only Settings page for the USD to LAK rate. `POST /settings/config` ignores `spotLakPerBaht`; `system_config.spot_lak_per_baht` remains only as the fallback when `gold_prices` cannot be read.
-10. **Live rollout order** is in `docs/GO-LIVE.md` section 6; manual sections to update are in section 5.
+1. **Gold price source.** Value = Baht weight x `gold_prices.price_baht_sell` (row id 1, written daily by the owner's job). It replaces `system_config.spot_lak_per_baht` everywhere (cards, day header, Report, Dashboard). If the row is missing or unreadable, the fallback is `spot_lak_per_baht` (source "manual"). **Stale rule:** when `updated_at` is more than 1 Laos day old, the UI shows "price may be outdated". The price is read-only in the app; the admin-only **Exchange rate** page edits only the USD to LAK rate, and `POST /settings/config` ignores `spotLakPerBaht`.
+2. **Past-day pricing.** `gold_price_history` keeps one row per Laos date, upserted by a trigger on `gold_prices` (a snapshot failure never fails the owner's write). A past day is valued at the latest snapshot on or before that date; days before the first snapshot use the earliest one. Cards use today's price.
+3. **No ownership.** Assignment routes are removed (closed-day routes moved to `src/routes/closedDays.ts`); the `desk_assignment` table stays, unused. Any staff member of the branch works any case and is stamped. "Switch user" is removed (use Log out). A card shows **`Last: <name> · HH:mm`**, or `DD/MM HH:mm` when the last action was not on the viewed date.
+4. **Header.** One line on Daily Stock: title, date chip, overdue/active badges; the branch name is small grey text, a tappable chip only for an admin. No My cases, no Switch user.
+5. **Cards.** One compact style for every case: name, status chip, `Baht · pcs`, `≈ LAK`, last stamp, one action button. Overdue cases are sorted first and show a red left bar plus a warning line; the card is never bigger.
+6. **Case info** (⋯ menu): creator, creation date (Laos time), original stock per SKU with total Baht/pcs, valued at today's price. Migration `20261116_10_case_tracking.sql` adds `desks.created_by` and `initial_stock`, `kpv_backfill_desk_origin()` and an `INITIAL_IMMUTABLE` trigger. The original stock is the openings entered when the case was created; SKUs added later are not part of it. Cases with no creation record and no first-day stock keep a blank origin ("—").
+7. **History tab.** A day-per-row table, newest first (30 days, then "Load more"): Date, Open, In, Out, Close, Count, Diff (Baht), By. Flags, shown red: `count_diff`; `missed` (a past date with no check-in that is not a closed day); `chain_break` (an opening that differs from the previous checked day's count or closing, or a SKU carried the previous day that has no row today); `reopened`. Tapping a row shows that day's SKUs, moves and changes in readable form (names, never ids).
+8. **Report month grid** (cases x days, one grid per branch). Cell: **✓** clean Done; **red Baht diff** for a count difference; **⚠** chain break or reopened; **·** not checked; **blank** for a closed day or a date outside the case's history. Tapping a cell opens that case and day.
+9. **Settings.** A one-line strip above the menu shows `Gold (sell) 43,230,000 LAK/Baht · updated 16/11 08:58`, amber when stale. The "Gold price" menu item is removed; **Exchange rate** is a new admin-only item.
+10. **Live rollout and docs.** Order of steps is in `docs/GO-LIVE.md` section 6; manual sections to update are in section 5.

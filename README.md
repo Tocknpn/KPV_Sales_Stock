@@ -79,7 +79,7 @@ Fresh Supabase project, in the SQL editor:
 4. `supabase/base.sql`
 5. Test projects only: `supabase/seed_mock_data.sql`, then `supabase/tests/verify_v2.sql` (prints `VERIFY_V2 OK`)
 
-On an existing project always re-run the whole sequence 01 to 07 and then
+On an existing project always re-run the whole sequence 01 to 10 and then
 `users_roles.sql`, never a single earlier migration file (migration 07
 redefines a function that migration 01 also defines, so a lone re-run of 01
 would put the older body back). Re-run `users_roles.sql` after any future
@@ -168,7 +168,7 @@ through triggers keyed on the acting staff member (the Worker sends
   Case info shows the creator, creation date and **original stock** (the
   openings entered when the case was created; SKUs added later are not part of
   it, and it cannot be changed). Cases with no creation record and no first-day
-  stock show "-". The case History tab is a day table: a **missed day** is a
+  stock show "—". The case History tab is a day table: a **missed day** is a
   past date with no check-in that is not a closed day; a **chain break** is an
   opening that differs from the previous checked day's count (or its closing
   when it was not counted). The Report has a month grid (cases x days). Closed-day

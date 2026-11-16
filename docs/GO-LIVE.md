@@ -16,7 +16,7 @@ skip to section 2.)
 
 1. In **SQL Editor**, run these files in this order:
    1. `supabase/schema.sql`
-   2. `supabase/migrations/20261112_01_foundation.sql` to `20261112_07_seed_tools.sql`, in name order
+   2. `supabase/migrations/20261112_01_foundation.sql` to `20261116_10_case_tracking.sql`, in name order
    3. `supabase/users_roles.sql`
    4. `supabase/base.sql`
    5. `supabase/real_skus.sql` (the real product list; real rows, kept by the purge;
@@ -85,9 +85,9 @@ Do these in order, **before** the new code is deployed.
    ```
    Fix every row (correct the count or the entry in the old app). After v2 such
    a row can only be corrected, never pushed further down.
-3. Run `supabase/migrations/20261112_01_foundation.sql` to `20261112_07_seed_tools.sql`
+3. Run `supabase/migrations/20261112_01_foundation.sql` to `20261116_10_case_tracking.sql`
    in name order, then `supabase/users_roles.sql`. All are safe to run twice, but
-   always re-run the **whole** sequence 01 to 07 and then `users_roles.sql`,
+   always re-run the **whole** sequence 01 to 10 and then `users_roles.sql`,
    never a single earlier file (migration 07 redefines a function that
    migration 01 also defines).
 
@@ -164,20 +164,20 @@ out of date; v2 wins where they differ.
 
 | Manual section | Change in v2 |
 |---|---|
-| ສິດທີ່ມີໃນລະບົບ | A third role, **ຜູ້ຈັດການສາຂາ (manager)**, for one branch: manages that branch's cases, reopens its latest Done day (within 3 days), edits its replenishment rules and closed days, unlocks its staff's PIN, reads its audit history. Admin keeps users, SKUs, gold price, proposals and deleting documents. Staff cannot create SKUs. |
+| ສິດທີ່ມີໃນລະບົບ | A third role, **ຜູ້ຈັດການສາຂາ (manager)**, for one branch: manages that branch's cases, reopens its latest Done day (within 3 days), edits its replenishment rules and closed days, unlocks its staff's PIN, reads its audit history. Admin keeps users, SKUs, the exchange rate, proposals and deleting documents. The gold price comes from the daily feed; nobody edits it by hand (manual price only as the fallback when the feed cannot be read). Staff cannot create SKUs. |
 | ການເຂົ້າສູ່ລະບົບ | 5 wrong PINs lock the account for 15 minutes; admin or the branch manager unlocks. **ປ່ຽນຜູ້ໃຊ້ (Switch user)** is removed; use Log out. |
-| ວົງຈອນປະຈຳວັນ | One screen for the whole day, with a count mode (no sideways scrolling). A day must be ✓ Done before the next check-in; the opening is the counted figure of the last Done day. Done is refused (cells turn red) until every row is counted, differences have notes and destocks have reasons. A card shows the **streak** and the **tier** (done today, on track, behind, overdue; overdue cases are pinned). Holidays are set as **closed days (ວັນປິດຮ້ານ)** and do not break streaks. |
+| ວົງຈອນປະຈຳວັນ | One screen for the whole day, with a count mode (no sideways scrolling). A day must be ✓ Done before the next check-in; the opening is the counted figure of the last Done day. Done is refused (cells turn red) until every row is counted, differences have notes and destocks have reasons. A card shows the **streak** and the **tier** (done today, on track, behind, overdue; overdue cases are sorted first and show only a red warning line). Holidays are set as **closed days (ວັນປິດຮ້ານ)** and do not break streaks. |
 | ຍ້າຍ (Move, same branch) | Instant: choose the destination case and quantity, and the gold moves at once. There is **no in-transit state and no confirmation** for a same-branch move; **Undo** is shown for a few seconds. |
 | ອອກ (Out, other branch) | Still a transfer: stays *in transit* until the receiving case taps **ຮັບແລ້ວ**; its ເຂົ້າ cell shows `+n⇄`. |
 | ຕັ້ງຄ່າ, ເຕີມສະຕັອກ | A **Replenishment** screen replaces the old "lead time and avg. RR" screen: rules per SKU, group (such as Snake Necklace) or type, runway in days, and alerts when the runway falls inside the lead time plus margin. Quantities are whole pieces, 0 to 99 999. |
 | ຕັ້ງຄ່າ, ປະຫວັດການແກ້ໄຂ (new) | A new Settings entry: who changed what and when. Staff see their case for today, managers their branch, admin everything. Entries cannot be edited or deleted. |
 | ກົດ ✓ ແລ້ວ ແຕ່ບັນທຶກຜິດ | Admin reopens the latest Done day; a branch manager may do so for their own branch within 3 days. A reason is required and is logged. |
 | ຂັ້ນຕອນການສັ່ງຊື້ເພີ່ມ | A saved proposal shows **ລໍຖ້າອະນຸມັດ**; admin approves or rejects. Low stock is judged from the runway and the lead time. |
-| ພາບລວມ | Value uses the gold price from Settings. A new "in transit" card; branch cards show cases done today; runway chips. |
-| ຕັ້ງຄ່າ, menu | Menu now: SKU, Replenishment, **Gold price** (read-only strip), **Exchange rate** (admin only), Users, ວັນປິດຮ້ານ closed days and ປະຫວັດການແກ້ໄຂ audit history (managers and admin), Language. |
+| ພາບລວມ | Value uses the daily `gold_prices` sell price (a past day uses that day's snapshot). A new "in transit" card; branch cards show cases done today; runway chips. |
+| ຕັ້ງຄ່າ, menu | Menu now: SKU, Replenishment, **Exchange rate** (admin only), Users, ວັນປິດຮ້ານ closed days and ປະຫວັດການແກ້ໄຂ audit history (managers and admin), Language. There is no "Gold price" item: a read-only strip above the menu shows the current price. |
 | ວົງຈອນປະຈຳວັນ (header, cards) | The header is one line (no My cases, no Switch user: use Log out). All case cards are one compact style, each with its `≈ LAK` value. |
-| ວົງຈອນປະຈຳວັນ (case ownership) | Replaces the row above on case assignment: case ownership is **removed** (no taking, no handover, no holder on cards). |
-| Case info (new, ⋯ menu) | Shows the creator, creation date and original stock (the openings entered when the case was created). Old cases without a record show "-". |
+| ວົງຈອນປະຈຳວັນ (case ownership) | Replaces the manual's text on case assignment: case ownership is **removed** (no taking, no handover, no holder on cards). |
+| Case info (new, ⋯ menu) | Shows the creator, creation date and original stock (the openings entered when the case was created). Old cases without a record show "—". |
 | History tab (case) | A day table with missed days (no check-in, not a closed day) and chain breaks (opening differs from the previous count) marked red. |
 | ລາຍງານ (Report) | A month grid of cases x days; a red day is a problem, tap it to open the day. |
 | ຕັ້ງຄ່າ, ລາຄາຄຳ | **Gold price** is now a read-only strip (the price comes from the daily fetch). The admin-only **Exchange rate** page edits the USD to LAK rate. |
@@ -188,7 +188,13 @@ out of date; v2 wins where they differ.
 On the live project, in this order:
 
 1. Run `supabase/migrations/20261116_10_case_tracking.sql` in the Supabase SQL editor.
-2. Re-run `supabase/users_roles.sql`.
+2. **Pre-check before re-running `users_roles.sql`** (it locks down `gold_prices`):
+   ```sql
+   select grantee, privilege_type from information_schema.role_table_grants where table_name = 'gold_prices';
+   select * from pg_policies where tablename = 'gold_prices';
+   ```
+   If anything other than `service_role` / `postgres` uses the table, stop and ask
+   before running the lockdown. Then re-run `supabase/users_roles.sql`.
 3. Confirm a `gold_price_history` row for today exists:
    `select * from gold_price_history order by 1 desc limit 3;`
 4. Deploy the Worker (`npm run deploy`) to the **owner's Cloudflare account**. It
