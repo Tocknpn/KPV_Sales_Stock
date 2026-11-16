@@ -1,7 +1,7 @@
 // Login, session and the public data the login screen needs.
 import { newRouter, readBody, HttpError, storeFor } from "../app";
 import { getStore } from "../store";
-import { verifyPassword, normalizeUsername, signToken, requireAuth, authSecret, MAX_FAILED_LOGINS, LOCK_MINUTES } from "../auth";
+import { verifyPassword, encryptPassword, normalizeUsername, signToken, requireAuth, authSecret, MAX_FAILED_LOGINS, LOCK_MINUTES } from "../auth";
 import { businessDate, isLive } from "../time";
 import { seedBlocked } from "../dataMode";
 import { resolveGoldPrice } from "../goldPrice";
@@ -63,8 +63,27 @@ r.post("/auth/login", async (c) => {
     throw new HttpError(401, "Wrong username or password", "WRONG_LOGIN", { attemptsLeft: MAX_FAILED_LOGINS - attempts });
   }
 
-  if (account.failed_attempts > 0 || account.locked_until) {
-    await store.updateStaffAccount(account.id, { failed_attempts: 0, locked_until: null });
+  const fix: Partial<typeof account> = {};
+  if (account.failed_attempts > 0 || account.locked_until) Object.assign(fix, { failed_attempts: 0, locked_until: null });
+  // Backfill the admin-readable copy for accounts that predate it. Never
+  // blocks the login: with no key, or on any error, the copy is just skipped.
+  if (!account.password_enc) {
+    try {
+      const enc = await encryptPassword(password, c.env);
+      if (enc) fix.password_enc = enc;
+    } catch {
+      /* skipped */
+    }
+  }
+  if (Object.keys(fix).length > 0) {
+    try {
+      await store.updateStaffAccount(account.id, fix);
+    } catch (e) {
+      // The lockout reset matters; the copy does not. Retry without it.
+      if (!("password_enc" in fix)) throw e;
+      delete fix.password_enc;
+      if (Object.keys(fix).length > 0) await store.updateStaffAccount(account.id, fix);
+    }
   }
   const token = await signToken(account, authSecret(c.env));
   return c.json({

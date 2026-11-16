@@ -819,7 +819,8 @@ export function skuSummary(skus: MasterSku[]) {
   };
 }
 
-export function staffAccountSummary(staffAccounts: StaffAccount[], branches: Branch[], nowIso: string) {
+// withPassword (admin): adds has_password, whether a readable copy exists.
+export function staffAccountSummary(staffAccounts: StaffAccount[], branches: Branch[], nowIso: string, withPassword = false) {
   const branchById = new Map(branches.map((b) => [b.branch_id, b]));
   const roleCounts: Record<string, number> = { staff: 0, manager: 0, admin: 0 };
   for (const a of staffAccounts) if (a.active) roleCounts[a.role] = (roleCounts[a.role] ?? 0) + 1;
@@ -834,6 +835,7 @@ export function staffAccountSummary(staffAccounts: StaffAccount[], branches: Bra
       role: a.role,
       active: a.active,
       locked: Boolean(a.locked_until && a.locked_until > nowIso),
+      ...(withPassword ? { has_password: Boolean(a.password_enc) } : {}),
     })),
   };
 }

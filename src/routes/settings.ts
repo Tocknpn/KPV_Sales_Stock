@@ -4,7 +4,7 @@
 // Mounted behind requireAuth in src/index.ts.
 import { storeFor, newRouter, readBody, HttpError, audit } from "../app";
 import type { NewSku, Store } from "../store";
-import { requireAdmin, requireManager, hashPassword, isValidPassword, normalizeUsername, isValidUsername, isManagerOf, MIN_PASSWORD } from "../auth";
+import { requireAdmin, requireManager, hashPassword, encryptPassword, decryptPassword, passwordKey, isValidPassword, normalizeUsername, isValidUsername, isManagerOf, MIN_PASSWORD } from "../auth";
 import { isLive } from "../time";
 import { skuSummary, staffAccountSummary } from "../logic";
 import type { MasterSku, SkuType, SkuWeight } from "../types";
@@ -296,7 +296,7 @@ r.get("/settings/summary", async (c) => {
   const scoped = user.role !== "admin" ? staffAccounts.filter((a) => a.branch_id === user.branchId) : staffAccounts;
   return c.json({
     sku: skuSummary(skus),
-    staff: staffAccountSummary(scoped, branches, new Date().toISOString()),
+    staff: staffAccountSummary(scoped, branches, new Date().toISOString(), user.role === "admin"),
     config,
     sync: { connected: isLive(c.env) },
   });
@@ -352,7 +352,7 @@ r.post("/users", requireAdmin, async (c) => {
   const username = await checkUsername(store, body.username, null);
   if (!isValidPassword(body.password)) throw new HttpError(400, `Password must be at least ${MIN_PASSWORD} characters`, "BAD_PASSWORD");
   if (role !== "admin" && !(await store.branches()).some((b) => b.branch_id === branch_id)) throw new HttpError(400, "Choose a branch", "BAD_BRANCH");
-  const account = await store.createStaffAccount({ display_name: display_name.slice(0, 60), username, role, branch_id, pin_hash: await hashPassword(body.password) });
+  const account = await store.createStaffAccount({ display_name: display_name.slice(0, 60), username, role, branch_id, pin_hash: await hashPassword(body.password), password_enc: await encryptPassword(body.password, c.env) });
   await audit(store, c.get("user"), "user.create", account.display_name, { id: account.id, role, branch_id }, { branchId: account.branch_id });
   return c.json({ id: account.id });
 });
@@ -404,6 +404,7 @@ r.patch("/users/:id", requireManager, async (c) => {
   if (body.password !== undefined) {
     if (!isValidPassword(body.password)) throw new HttpError(400, `Password must be at least ${MIN_PASSWORD} characters`, "BAD_PASSWORD");
     patch.pin_hash = await hashPassword(body.password);
+    patch.password_enc = await encryptPassword(body.password, c.env);
     patch.failed_attempts = 0;
     patch.locked_until = null;
     changes.push("password");
@@ -421,6 +422,16 @@ r.patch("/users/:id", requireManager, async (c) => {
   await store.updateStaffAccount(account.id, patch);
   await audit(store, me, "user.update", account.display_name, { id: account.id, changes }, { branchId: account.branch_id });
   return c.json({ ok: true });
+});
+
+// The current password of one account, for the admin (in-house decision,
+// 2026-11-16). Not audited: reveals are routine. password null = not known
+// yet (set before this feature and not logged in since) or no key.
+r.get("/users/:id/password", requireAdmin, async (c) => {
+  const account = (await storeFor(c).staffAccounts()).find((a) => a.id === (c.req.param("id") ?? ""));
+  if (!account) throw new HttpError(404, "User not found", "NOT_FOUND");
+  if (!passwordKey(c.env)) throw new HttpError(503, "PASSWORD_KEY is not set on the server", "PASSWORD_KEY_MISSING");
+  return c.json({ password: await decryptPassword(account.password_enc, c.env) });
 });
 
 export default r;

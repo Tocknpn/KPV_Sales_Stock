@@ -10,7 +10,7 @@ export type AuditOp = "INSERT" | "UPDATE" | "DELETE";
 
 // Never logged: bookkeeping and generated columns.
 const IGNORED = ["updated_at", "performed_by", "created_at", "closing_qty"];
-const IGNORED_BY_TABLE: Record<string, string[]> = { staff_accounts: ["failed_attempts", "token_version"] };
+const IGNORED_BY_TABLE: Record<string, string[]> = { staff_accounts: ["failed_attempts", "token_version", "password_enc"] };
 
 const PRIMARY_KEYS: Record<string, string[]> = {
   desks: ["desk_id"],

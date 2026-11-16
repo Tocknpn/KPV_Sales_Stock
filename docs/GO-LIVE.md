@@ -16,7 +16,7 @@ skip to section 2.)
 
 1. In **SQL Editor**, run these files in this order:
    1. `supabase/schema.sql`
-   2. `supabase/migrations/20261112_01_foundation.sql` to `20261116_11_stock_grid_modes.sql`, in name order
+   2. `supabase/migrations/20261112_01_foundation.sql` to `20261116_12_admin_passwords.sql`, in name order
    3. `supabase/users_roles.sql`
    4. `supabase/base.sql`
    5. `supabase/real_skus.sql` (the real product list; real rows, kept by the purge;
@@ -85,9 +85,9 @@ Do these in order, **before** the new code is deployed.
    ```
    Fix every row (correct the count or the entry in the old app). After v2 such
    a row can only be corrected, never pushed further down.
-3. Run `supabase/migrations/20261112_01_foundation.sql` to `20261116_11_stock_grid_modes.sql`
+3. Run `supabase/migrations/20261112_01_foundation.sql` to `20261116_12_admin_passwords.sql`
    in name order, then `supabase/users_roles.sql`. All are safe to run twice, but
-   always re-run the **whole** sequence 01 to 11 and then `users_roles.sql`,
+   always re-run the **whole** sequence 01 to 12 and then `users_roles.sql`,
    never a single earlier file (migration 07 redefines a function that
    migration 01 also defines).
 
@@ -112,6 +112,7 @@ Do these in order, **before** the new code is deployed.
    | `KPV_DATA_MODE` | Text: `test` for the test run, `production` for go-live |
    | `SUPABASE_SERVICE_ROLE_KEY` | Secret |
    | `AUTH_SECRET` | Secret (changing it logs everyone out) |
+   | `PASSWORD_KEY` | Secret (encrypts the password copy an admin can read in Settings, Users; changing it makes every existing copy unreadable until that person gets a new password) |
 
    `wrangler.jsonc` sets `keep_vars`, so a deploy does not wipe variables you
    typed into the dashboard.
@@ -119,7 +120,7 @@ Do these in order, **before** the new code is deployed.
    connect the GitHub repo under **Settings, Builds**: build command
    `npm ci && npm run build:css`, deploy command `npx wrangler deploy`.
 3. Secrets can also be set from a terminal: `npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY`,
-   `npx wrangler secret put AUTH_SECRET`.
+   `npx wrangler secret put AUTH_SECRET`, `npx wrangler secret put PASSWORD_KEY`.
 
 The Worker refuses to sign sessions if `AUTH_SECRET` is missing while Supabase
 is configured.
@@ -224,3 +225,27 @@ On the live project, in this order:
    `/daily_stock` and `/settings/users`.
 5. The default mode is **dynamic** (same as before). An admin switches it in
    ຕັ້ງຄ່າ → ແບບສະຕັອກອອກ; it applies to case-days opened after the switch.
+
+## 8. Rollout: admin can see passwords (2026-11-16)
+
+In-house decision: an admin can see each person's password in Settings, Users
+(masked, eye button to show, copy button; the edit form shows it too). Login
+still checks the pbkdf2 hash. A second copy, encrypted with AES-GCM under the
+Worker secret `PASSWORD_KEY`, sits in `staff_accounts.password_enc`, so the
+Supabase table alone never shows a password.
+
+On the live project, in this order:
+
+1. Run `supabase/migrations/20261116_12_admin_passwords.sql` in the SQL editor
+   (adds `password_enc`; the audit log never records it).
+2. Re-run `supabase/users_roles.sql` (a login may now fill an empty
+   `password_enc`, never replace one).
+3. Set the secret on the **owner's Cloudflare account**: Workers & Pages,
+   the Worker, Settings, Variables and Secrets, add `PASSWORD_KEY` as a
+   Secret with a long random value (`openssl rand -hex 32`). Keep a copy
+   somewhere safe: changing it later makes every stored copy unreadable
+   until that password is reset.
+4. Deploy the Worker (`npm run deploy`).
+5. Check: Settings, Users shows "not known yet" for everyone at first. Each
+   row fills in after that person's next successful sign-in, or at once when
+   an admin sets a new password.

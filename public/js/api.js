@@ -112,6 +112,7 @@ export const api = {
 
   createUser: (payload) => post(`/users`, payload),
   updateUser: (id, payload) => patch(`/users/${id}`, payload),
+  userPassword: (id) => request(`/users/${encodeURIComponent(id)}/password`),
   audit: (params) => request(`/audit?${query(params ?? {})}`),
 
   deskHistory: (deskId, to, days) => request(`/desks/${encodeURIComponent(deskId)}/history?${query({ to, days })}`),

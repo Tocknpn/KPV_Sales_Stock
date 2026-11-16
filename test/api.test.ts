@@ -126,6 +126,60 @@ describe("user level", () => {
   });
 });
 
+describe("admin-readable passwords", () => {
+  const summaryRow = async (admin: any, id: string) =>
+    (await call(admin, "GET", "/settings/summary")).json.staff.accounts.find((a: any) => a.id === id);
+
+  it("admin sees the password set on create and on reset; it is stored encrypted", async () => {
+    const admin = await asAdmin();
+    const created = await call(admin, "POST", "/users", { displayName: "Pw Test", username: "pwtest", branchId: "B-VT", password: "secret-1" });
+    const id = created.json.id;
+    expect((await summaryRow(admin, id)).has_password).toBe(true);
+    expect((await call(admin, "GET", `/users/${id}/password`)).json.password).toBe("secret-1");
+    const row = (getStore({ DEMO_DATE: TODAY } as any) as any).db.staffAccounts.find((a: any) => a.id === id);
+    expect(row.password_enc).toMatch(/^v1\$/);
+    expect(row.password_enc).not.toContain("secret-1");
+    expect((await call(admin, "PATCH", `/users/${id}`, { password: "secret-2" })).status).toBe(200);
+    expect((await call(admin, "GET", `/users/${id}/password`)).json.password).toBe("secret-2");
+  });
+
+  it("an older account is filled in at its next successful login only", async () => {
+    const admin = await asAdmin();
+    const id = DEMO_STAFF["B-MM"];
+    expect((await summaryRow(admin, id)).has_password).toBe(false);
+    expect((await call(admin, "GET", `/users/${id}/password`)).json.password).toBeNull();
+    expect((await call(null, "POST", "/auth/login", creds(id, "wrong-pw"))).status).toBe(401);
+    expect((await summaryRow(admin, id)).has_password).toBe(false);
+    await asStaff("B-MM");
+    expect((await call(admin, "GET", `/users/${id}/password`)).json.password).toBe("1234");
+  });
+
+  it("only an admin can read a password, and the list never carries one", async () => {
+    const admin = await asAdmin();
+    const id = DEMO_STAFF["B-MM"];
+    await asStaff("B-MM");
+    expect((await call(await asManager("B-MM"), "GET", `/users/${id}/password`)).status).toBe(403);
+    expect((await call(await asStaff("B-MM"), "GET", `/users/${id}/password`)).status).toBe(403);
+    const managerView = (await call(await asManager("B-MM"), "GET", "/settings/summary")).json.staff.accounts;
+    expect(managerView.every((a: any) => !("has_password" in a))).toBe(true);
+    expect((await call(admin, "GET", "/settings/summary")).text).not.toContain("1234");
+  });
+
+  it("a live server without PASSWORD_KEY stores no copy and refuses to reveal", async () => {
+    const { passwordKey, encryptPassword } = await import("../src/auth");
+    const live = { SUPABASE_URL: "https://x.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "k", AUTH_SECRET: "s" } as any;
+    expect(passwordKey(live)).toBeNull();
+    expect(await encryptPassword("pw", live)).toBeNull();
+  });
+
+  it("a copy made under another key reads as unknown", async () => {
+    const { encryptPassword, decryptPassword } = await import("../src/auth");
+    const enc = await encryptPassword("pw-123", { PASSWORD_KEY: "one" } as any);
+    expect(await decryptPassword(enc, { PASSWORD_KEY: "one" } as any)).toBe("pw-123");
+    expect(await decryptPassword(enc, { PASSWORD_KEY: "two" } as any)).toBeNull();
+  });
+});
+
 describe("daily cycle", () => {
   it("check-in is blocked until the unfinished earlier day is Done", async () => {
     const staff = await asStaff("B-TS");
