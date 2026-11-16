@@ -340,3 +340,20 @@ Exact Tailwind classes and icons; sheet animations; i18n wording (Lao reviewed b
 
 ## 12. Calls made in this document (for the owner to check)
 D1 keep stack · D2 Workers not Pages · D3 no anon key in browser · D4 actor via headers · D7 migration files · D8 PGlite tests · 1.1 same-branch instant, cross-branch unchanged · 1.6 undo = reverse move · 1.7 auto check-in of destination · 1.9 any branch staff may move · 2.1 `group_name` column · 2.3 precedence order · 2.4 manual beats auto · 2.5 velocity definition · 2.8 position includes inbound · 2.11 per-case reorder point retired · 3 streak/tier definitions · 4.13 no acceptance step · 4.14 stale assignment display · 5.4 Final Stock merged · 5.5 no "match all" · 5.6 manager reopen ≤3 days · 7a `KPV_DATA_MODE` behaviour · 7c seed branches B-TST1/B-TST2, `seed.sql` deleted.
+
+---
+
+## Addendum 2026-11-16: case tracking and gold price
+
+Reverses the case assignment of v2 section 4 and changes the gold price source.
+
+1. **Case ownership retired.** Assignment routes are removed; closed-day routes moved to `src/routes/closedDays.ts`; the `desk_assignment` table stays, unused. "Switch user" is removed (use Log out).
+2. **One-line header** on Daily Stock, with no My cases and no Switch user.
+3. **Uniform compact case cards**, each with `≈ LAK`.
+4. **Case info** (⋯ menu): creator, creation date and original stock. Migration `20261116_10_case_tracking.sql` adds `desks.created_by` and `initial_stock`, `kpv_backfill_desk_origin()` and an `INITIAL_IMMUTABLE` trigger. Desks with no creation record and no first-day stock keep a blank origin ("-").
+5. **Original stock** = the openings entered when the case was created; SKUs added later are not part of it.
+6. **History tab** is a day table. A *missed day* is a past date with no check-in that is not a closed day; a *chain break* is an opening that differs from the previous checked day's count (or its closing when not counted). Both render red.
+7. **Report month grid** (cases x days); a red day opens that day.
+8. **Gold price source** is `gold_prices` (daily fetch), shown as a read-only strip in Settings. Each day's price is stored in `gold_price_history` (trigger on `gold_prices`).
+9. **Exchange rate** is a new admin-only Settings page for the USD to LAK rate. `POST /settings/config` ignores `spotLakPerBaht`; `system_config.spot_lak_per_baht` remains only as the fallback when `gold_prices` cannot be read.
+10. **Live rollout order** is in `docs/GO-LIVE.md` section 6; manual sections to update are in section 5.

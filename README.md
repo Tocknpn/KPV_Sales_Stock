@@ -32,7 +32,7 @@ src/
   index.ts            mounts the route modules, maps errors to HTTP
   app.ts              shared route helpers: access scoping, the date rule, day locks
   routes/             auth · meta · stock · moves · transfers · documents · insights
-                      · settings · cases · replenishment · audit
+                      · settings · cases · closedDays · replenishment · audit
   dataMode.ts         test / production / demo, and the seed-account rule
   logic.ts            closing, value, dashboard, report
   replenishment.ts    velocity, runway, alert rules
@@ -43,7 +43,7 @@ src/
 supabase/
   schema.sql                       v1 baseline (never edited; its header comment
                                    still mentions seed.sql, which no longer exists)
-  migrations/20261112_01 … 20261115_09   v2 changes, additive and idempotent
+  migrations/20261112_01 … 20261116_10   v2 changes, additive and idempotent
   users_roles.sql                  roles, role guard triggers, RLS lockdown
   base.sql                         production starting data (generated)
   seed_mock_data.sql               tagged mock data for test projects (optional)
@@ -74,7 +74,7 @@ npm run db:pin -- 'a-password'          # print one password hash
 Fresh Supabase project, in the SQL editor:
 
 1. `supabase/schema.sql`
-2. `supabase/migrations/20261112_01_foundation.sql` … `20261115_09_document_row_sku.sql`, in name order
+2. `supabase/migrations/20261112_01_foundation.sql` … `20261116_10_case_tracking.sql`, in name order
 3. `supabase/users_roles.sql`
 4. `supabase/base.sql`
 5. Test projects only: `supabase/seed_mock_data.sql`, then `supabase/tests/verify_v2.sql` (prints `VERIFY_V2 OK`)
@@ -122,13 +122,12 @@ Three roles. Staff and managers see only their own branch; admin sees all.
 | Action | staff | manager | admin |
 |---|---|---|---|
 | Day entries, counts, close, moves, receive transfers (own branch) | yes | yes | yes, all branches |
-| Take / hand over cases | self / own | own branch | all |
 | Reopen a Done day | no | own branch, latest, within 3 days | latest |
 | Replenishment rules | read | own branch rules | all |
 | Closed days | read | own branch | all |
 | Unlock a locked account | no | own branch staff | yes |
 | Users (create, role, branch, username, password reset) | no | no | yes |
-| SKUs, types, sizes, gold price, config | no (gold price is readable) | no (gold price is readable) | yes |
+| SKUs, types, sizes, exchange rate, config | no (gold price strip is readable) | no (gold price strip is readable) | yes |
 | Approve / reject proposals, delete documents | no | no | yes |
 | Audit history | own case, today | own branch | all |
 
@@ -158,8 +157,22 @@ through triggers keyed on the acting staff member (the Worker sends
 - **Replenishment.** Avg/day and lead time come from rules (SKU, group or type,
   company-wide or per branch) or are measured from the ledger. The runway tells
   how many days of stock are left; alerts fire inside the lead time plus margin.
-- **Value** = Baht weight x gold price (Settings, Gold price; admin edits, others
-  read); items without gold weight use their unit price.
+- **Value** = Baht weight x gold price; items without gold weight use their unit
+  price. The gold price comes from `gold_prices` (the daily fetcher) and is shown
+  read-only in Settings; each day's price is kept in `gold_price_history`. Only
+  the USD to LAK rate is edited (admin, Settings, Exchange rate).
+  `system_config.spot_lak_per_baht` is just the fallback when `gold_prices`
+  cannot be read.
+- **Case tracking.** Cases have no owner (assignment routes removed; the
+  `desk_assignment` table is kept, unused; "Switch user" is gone, use Log out).
+  Case info shows the creator, creation date and **original stock** (the
+  openings entered when the case was created; SKUs added later are not part of
+  it, and it cannot be changed). Cases with no creation record and no first-day
+  stock show "-". The case History tab is a day table: a **missed day** is a
+  past date with no check-in that is not a closed day; a **chain break** is an
+  opening that differs from the previous checked day's count (or its closing
+  when it was not counted). The Report has a month grid (cases x days). Closed-day
+  routes live in `src/routes/closedDays.ts`.
 - **Dashboard** is computed from each case's latest recorded day. Report:
   opening + in - out + count adjustments = closing.
 - **Audit history.** Every change is written by a database trigger and cannot
