@@ -36,7 +36,7 @@ skip to section 2.)
      points back to it.
    - Same-branch move between two cases: instant, with Undo.
    - Cross-branch transfer: shows *in transit*; confirm on the receiving case.
-   - Cards: streaks and tiers (the mock T1-4 case is overdue and pinned), the
+   - Cards: streaks and tiers (the mock T1-4 case is overdue and sorted first), the
      closed day 10 days ago does not break streaks.
    - Cases: Case info, History tab, Report grid (no take over / Switch user).
    - Replenishment: runway chips, alerts, the "Snake Necklace" rule, a bulk rule.
