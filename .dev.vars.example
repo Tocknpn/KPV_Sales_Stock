@@ -16,12 +16,6 @@ SUPABASE_SERVICE_ROLE_KEY=
 # everyone out.
 AUTH_SECRET=
 
-# Encrypts the copy of each password that an admin can read in Settings >
-# Users (staff_accounts.password_enc). Long random value, never shared.
-# Changing it makes every stored copy unreadable until that password is reset.
-# Unset with Supabase set: no copy is kept.
-PASSWORD_KEY=
-
 # test       = the database holds mock data: a TEST DATA strip shows on every screen.
 # production = real data: mock-data accounts cannot log in.
 # If unset: production when SUPABASE_* is set, demo otherwise.

@@ -819,7 +819,7 @@ export function skuSummary(skus: MasterSku[]) {
   };
 }
 
-// withPassword (admin): adds has_password, whether a readable copy exists.
+// withPassword (admin): adds has_password, whether the plain password is known.
 export function staffAccountSummary(staffAccounts: StaffAccount[], branches: Branch[], nowIso: string, withPassword = false) {
   const branchById = new Map(branches.map((b) => [b.branch_id, b]));
   const roleCounts: Record<string, number> = { staff: 0, manager: 0, admin: 0 };
@@ -835,7 +835,7 @@ export function staffAccountSummary(staffAccounts: StaffAccount[], branches: Bra
       role: a.role,
       active: a.active,
       locked: Boolean(a.locked_until && a.locked_until > nowIso),
-      ...(withPassword ? { has_password: Boolean(a.password_enc) } : {}),
+      ...(withPassword ? { has_password: Boolean(a.password_plain) } : {}),
     })),
   };
 }

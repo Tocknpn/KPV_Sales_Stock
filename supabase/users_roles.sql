@@ -85,13 +85,13 @@ declare
   a record;
 begin
   -- Login: a system-tagged, actor-less write may touch only the lockout
-  -- counters, and fill password_enc while it is still empty (the backfill of
-  -- the admin-readable copy, migration 12). It can never replace one.
+  -- counters, and fill password_plain while it is still empty (the backfill
+  -- of the admin-readable password, migration 13). It can never replace one.
   if tg_op = 'UPDATE' and kpv_actor_id() is null and kpv_header('x-kpv-actor-system') is not null
-     and (to_jsonb(new) - 'failed_attempts' - 'locked_until' - 'password_enc')
-         = (to_jsonb(old) - 'failed_attempts' - 'locked_until' - 'password_enc')
-     and (to_jsonb(new) -> 'password_enc' is not distinct from to_jsonb(old) -> 'password_enc'
-          or to_jsonb(old) ->> 'password_enc' is null) then
+     and (to_jsonb(new) - 'failed_attempts' - 'locked_until' - 'password_plain')
+         = (to_jsonb(old) - 'failed_attempts' - 'locked_until' - 'password_plain')
+     and (to_jsonb(new) -> 'password_plain' is not distinct from to_jsonb(old) -> 'password_plain'
+          or to_jsonb(old) ->> 'password_plain' is null) then
     return new;
   end if;
   if tg_op = 'UPDATE' and kpv_actor_id() is not null then

@@ -159,9 +159,10 @@ export interface StaffAccount {
   // Login name, lower-case, unique. null = cannot log in until an admin sets one.
   username: string | null;
   pin_hash: string;
-  // Admin-readable copy of the password, AES-GCM under PASSWORD_KEY
-  // ('v1$iv$ct'). null until set or reset, or captured at the next login.
-  password_enc?: string | null;
+  // The password in PLAIN TEXT, for the admin to read (owner's decision,
+  // 2026-11-16, risk accepted). Login never uses it: login checks pin_hash.
+  // null until set or reset, or captured at the person's next login.
+  password_plain?: string | null;
   role: StaffRole;
   active: boolean;
   token_version: number;
@@ -294,9 +295,6 @@ export interface Env {
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
   AUTH_SECRET?: string;
-  // Encrypts the admin-readable password copy (staff_accounts.password_enc).
-  // Changing it makes every stored copy unreadable until reset or next login.
-  PASSWORD_KEY?: string;
   // Demo/test only: pins "today" so the demo dataset and tests are stable.
   // Ignored when Supabase is configured.
   DEMO_DATE?: string;

@@ -96,14 +96,14 @@ describe('audit trigger', () => {
     expect(rows[0].new_values.pin_hash).toBe('changed');
   });
 
-  it('never logs password_enc', async () => {
+  it('never logs password_plain', async () => {
     await asActor(db, staffId);
-    await db.query(`update staff_accounts set password_enc = 'v1$cipher$text' where id = $1`, [staffId]);
+    await db.query(`update staff_accounts set password_plain = 'pw-one' where id = $1`, [staffId]);
     expect(await audit(`table_name = 'staff_accounts'`)).toHaveLength(0);
-    await db.query(`update staff_accounts set pin_hash = 'h2', password_enc = 'v1$other$text' where id = $1`, [staffId]);
+    await db.query(`update staff_accounts set pin_hash = 'h2', password_plain = 'pw-two' where id = $1`, [staffId]);
     const rows = await audit(`table_name = 'staff_accounts'`);
     expect(rows).toHaveLength(1);
-    expect(JSON.stringify(rows[0])).not.toContain('v1$');
+    expect(JSON.stringify(rows[0])).not.toContain('pw-two');
   });
 
   it('does not log failed_attempts alone', async () => {

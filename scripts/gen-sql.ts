@@ -71,7 +71,7 @@ async function printAdminSql(name: string | undefined, rawUsername: string | und
   }
   const pinHash = await hashPassword(password as string);
   console.log("-- Paste into the Supabase SQL editor. Run it once.");
-  console.log(insert("staff_accounts", [{ branch_id: null, display_name: name, username, pin_hash: pinHash, role: "admin" }]));
+  console.log(insert("staff_accounts", [{ branch_id: null, display_name: name, username, pin_hash: pinHash, password_plain: password, role: "admin" }]));
 }
 
 const [mode, ...args] = process.argv.slice(2);

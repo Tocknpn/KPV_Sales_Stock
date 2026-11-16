@@ -76,47 +76,6 @@ export async function verifyPassword(password: string, stored: string): Promise<
   return diff === 0;
 }
 
-// ---------------------------------------------------------------------------
-// Admin-readable password copy. In-house decision (2026-11-16): an admin can
-// see each person's password in Settings > Users. Login still checks the
-// pbkdf2 hash in pin_hash; this is a second copy in password_enc, encrypted
-// with AES-GCM under PASSWORD_KEY so the database alone never shows it.
-// ---------------------------------------------------------------------------
-
-// null = no key: a live deployment without PASSWORD_KEY simply stores no copy.
-export function passwordKey(env: Env): string | null {
-  if (env.PASSWORD_KEY) return env.PASSWORD_KEY;
-  return isLive(env) ? null : "dev-insecure-password-key";
-}
-
-async function aesKey(secret: string) {
-  const raw = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
-  return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
-}
-
-// 'v1$<iv b64url>$<ciphertext b64url>', or null when there is no key.
-export async function encryptPassword(password: string, env: Env): Promise<string | null> {
-  const secret = passwordKey(env);
-  if (!secret) return null;
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await aesKey(secret), new TextEncoder().encode(password));
-  return `v1$${b64urlEncode(iv)}$${b64urlEncode(new Uint8Array(ct))}`;
-}
-
-// null when there is no key, no copy, or the copy was made with another key.
-export async function decryptPassword(stored: string | null | undefined, env: Env): Promise<string | null> {
-  const secret = passwordKey(env);
-  if (!secret || !stored) return null;
-  const parts = stored.split("$");
-  if (parts.length !== 3 || parts[0] !== "v1") return null;
-  try {
-    const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64urlDecode(parts[1]) }, await aesKey(secret), b64urlDecode(parts[2]));
-    return new TextDecoder().decode(pt);
-  } catch {
-    return null;
-  }
-}
-
 function b64urlEncode(bytes: Uint8Array) {
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);

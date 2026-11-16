@@ -153,7 +153,7 @@ export interface SeedCount {
   real_rows: number;
 }
 
-export type NewStaffAccount = Pick<StaffAccount, "branch_id" | "display_name" | "username" | "pin_hash" | "password_enc" | "role">;
+export type NewStaffAccount = Pick<StaffAccount, "branch_id" | "display_name" | "username" | "pin_hash" | "password_plain" | "role">;
 export type NewSku = Omit<MasterSku, "active"> & { active?: boolean };
 
 export interface ClosedDayFilter {

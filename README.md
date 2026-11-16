@@ -74,12 +74,12 @@ npm run db:pin -- 'a-password'          # print one password hash
 Fresh Supabase project, in the SQL editor:
 
 1. `supabase/schema.sql`
-2. `supabase/migrations/20261112_01_foundation.sql` … `20261116_12_admin_passwords.sql`, in name order
+2. `supabase/migrations/20261112_01_foundation.sql` … `20261116_13_plain_passwords.sql`, in name order
 3. `supabase/users_roles.sql`
 4. `supabase/base.sql`
 5. Test projects only: `supabase/seed_mock_data.sql`, then `supabase/tests/verify_v2.sql` (prints `VERIFY_V2 OK`)
 
-On an existing project always re-run the whole sequence 01 to 12 and then
+On an existing project always re-run the whole sequence 01 to 13 and then
 `users_roles.sql`, never a single earlier migration file (migration 07
 redefines a function that migration 01 also defines, so a lone re-run of 01
 would put the older body back). Re-run `users_roles.sql` after any future
@@ -98,7 +98,6 @@ Secrets. Do not add a `VITE_` file: nothing in the browser reads one.
 | `SUPABASE_URL` | `https://tpekfhbjbosbeikawkys.supabase.co` (was `VITE_SUPABASE_URL`) | `.dev.vars` | Variable (text) |
 | `SUPABASE_SERVICE_ROLE_KEY` | service-role key, server side only. There is no anon key (was `VITE_SUPABASE_ANON_KEY`) | `.dev.vars` | Secret |
 | `AUTH_SECRET` | 32+ random bytes; signs sessions | `.dev.vars` | Secret |
-| `PASSWORD_KEY` | 32+ random bytes; encrypts the admin-readable password copy (`staff_accounts.password_enc`). Unset on a live server: no copy is kept and the eye button says so | `.dev.vars` | Secret |
 | `KPV_DATA_MODE` | `test` or `production`; default `production` when Supabase is set, `demo` otherwise | `.dev.vars` | Variable (text) |
 
 Never commit `.dev.vars` (it is git-ignored) or paste the key or `AUTH_SECRET`

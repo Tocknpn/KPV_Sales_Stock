@@ -104,20 +104,20 @@ describe('master data guard', () => {
     await db.query(`update staff_accounts set failed_attempts = 0, locked_until = now() where id = $1`, [staffMM]);
   });
 
-  it('a system-tagged login may fill an empty password_enc but never replace one', async () => {
+  it('a system-tagged login may fill an empty password_plain but never replace one', async () => {
     await asActor(db, null, { system: 'login', jwtRole: 'service_role' });
-    await db.query(`update staff_accounts set password_enc = 'v1$a$b', failed_attempts = 0 where id = $1`, [staffMM]);
-    await expectPgError(db.query(`update staff_accounts set password_enc = 'v1$c$d' where id = $1`, [staffMM]), 'ROLE_DENIED');
-    await expectPgError(db.query(`update staff_accounts set password_enc = null where id = $1`, [staffMM]), 'ROLE_DENIED');
-    await expectPgError(db.query(`update staff_accounts set password_enc = 'v1$a$b', pin_hash = 'x' where id = $1`, [staffTS]), 'ROLE_DENIED');
+    await db.query(`update staff_accounts set password_plain = 'pw-a', failed_attempts = 0 where id = $1`, [staffMM]);
+    await expectPgError(db.query(`update staff_accounts set password_plain = 'pw-c' where id = $1`, [staffMM]), 'ROLE_DENIED');
+    await expectPgError(db.query(`update staff_accounts set password_plain = null where id = $1`, [staffMM]), 'ROLE_DENIED');
+    await expectPgError(db.query(`update staff_accounts set password_plain = 'pw-a', pin_hash = 'x' where id = $1`, [staffTS]), 'ROLE_DENIED');
   });
 
-  it('only an admin may set password_enc otherwise', async () => {
+  it('only an admin may set password_plain otherwise', async () => {
     await asActor(db, mgrMM);
-    await expectPgError(db.query(`update staff_accounts set password_enc = 'v1$a$b' where id = $1`, [staffMM]), 'ROLE_DENIED');
+    await expectPgError(db.query(`update staff_accounts set password_plain = 'pw-a' where id = $1`, [staffMM]), 'ROLE_DENIED');
     await asActor(db, admin);
-    await db.query(`update staff_accounts set password_enc = 'v1$a$b' where id = $1`, [staffMM]);
-    await db.query(`update staff_accounts set password_enc = 'v1$c$d' where id = $1`, [staffMM]);
+    await db.query(`update staff_accounts set password_plain = 'pw-a' where id = $1`, [staffMM]);
+    await db.query(`update staff_accounts set password_plain = 'pw-c' where id = $1`, [staffMM]);
   });
 });
 

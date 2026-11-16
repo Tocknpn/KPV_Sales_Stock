@@ -2,7 +2,8 @@
 // can add people, set their username, move them between branches, reset a
 // password, unlock a locked
 // account and deactivate someone who has left. An admin can also see each
-// person's password (in-house decision, 2026-11-16): masked, revealed on tap.
+// person's password (owner's decision, 2026-11-16; stored as plain text):
+// masked, revealed on tap.
 import { api } from "../../api.js";
 import { t } from "../../i18n.js";
 import { escapeHtml } from "../../util.js";
