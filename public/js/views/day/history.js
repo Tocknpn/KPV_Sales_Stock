@@ -13,7 +13,7 @@ import { escapeHtml, fmtBaht, fmtClock, fmtDate } from "../../util.js";
 // Columns that are bookkeeping for the row, not something a person changed.
 const HIDDEN_FIELDS = new Set(["id", "desk_id", "sku_id", "ledger_date", "is_seed", "created_at", "updated_at", "performed_by", "closing_qty", "branch_id"]);
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
 // id -> display name for people. Filled from the audit entries on screen (actor_id
 // + actor_name) and from the branch's staff list; anything unknown prints as "—".
@@ -42,13 +42,16 @@ function fieldLabel(key) {
   return label === `audit.field.${key}` ? key.replace(/_/g, " ") : label;
 }
 
+// Replaces every UUID in a text with the person's name, or "—" when unknown.
+function scrubIds(text) {
+  return String(text).replace(UUID_RE, (id) => staffNames.get(id.toLowerCase()) ?? staffNames.get(id) ?? "—");
+}
+
 function fmtValue(v) {
   if (v === null || v === undefined || v === "") return "—";
   if (typeof v === "boolean") return v ? "✓" : "✗";
-  if (typeof v === "object") return JSON.stringify(v);
-  const s = String(v);
   // Never show a raw id: people become names, any other id becomes a dash.
-  if (UUID_RE.test(s)) return staffNames.get(s) ?? "—";
+  const s = scrubIds(typeof v === "object" ? JSON.stringify(v) : String(v));
   return s.length > 80 ? `${s.slice(0, 80)}…` : s;
 }
 
@@ -61,6 +64,10 @@ function caseName(id) {
 // "{actor} · {HH:mm} · {case} · {sku} · {field} {old} → {new}" (spec 4.9).
 // Plain text; the caller escapes it.
 export function auditSentence(e) {
+  return scrubIds(buildSentence(e));
+}
+
+function buildSentence(e) {
   const head = [fmtValue(e.actor_name || staffNames.get(e.actor_id)), fmtClock(e.created_at)];
   const ctx = e.context ?? {};
   const where = e.table_name ? caseName(e.desk_id ?? ctx.desk_id) : "";
@@ -194,7 +201,8 @@ async function fillDayDetail(box, { deskId, date, onUndone }) {
     changes = list.length ? `<ul class="card divide-y divide-hairline p-0">${list.map(entryRow).join("")}</ul>` : `<p class="text-sm text-gray-600">${t("history.empty")}</p>`;
   } else {
     // Staff may read today's changes only; a refusal is a note, not an error.
-    changes = `<p class="text-sm text-gray-600">${t("history.notAvailable")}</p>`;
+    const denied = entriesRes.reason?.status === 403;
+    changes = `<p class="text-sm ${denied ? "text-gray-600" : "text-danger"}">${t(denied ? "history.notAvailable" : "err.SERVER_ERROR")}</p>`;
   }
   box.innerHTML = `
     ${skuTable(detail.rows ?? [])}

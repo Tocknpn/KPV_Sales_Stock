@@ -17,6 +17,7 @@ function monthLabel(period) {
 }
 
 export async function mountReport() {
+  gridCache = { key: null, data: null };
   renderTopbar();
   await refreshReport();
 }
@@ -114,6 +115,17 @@ async function refreshReport() {
   renderGrid(root);
 }
 
+// The grid depends only on branch + month, not on the search box, so a typed
+// search reuses the last answer.
+let gridCache = { key: null, data: null };
+async function loadGrid(branch, month) {
+  const key = `${branch}|${month}`;
+  if (gridCache.key === key) return gridCache.data;
+  const data = await api.reportGrid(branch, month);
+  gridCache = { key, data };
+  return data;
+}
+
 // Issue grid (spec decision 8): cases x days of the selected month.
 function gridCell(c) {
   if (!c) return "";
@@ -134,7 +146,7 @@ async function renderGrid(root) {
   const host = section.querySelector("#grid-body");
   const branch = state.report.branch ?? state.meta.branches[0]?.branch_id;
   try {
-    const grid = await api.reportGrid(branch, state.report.period);
+    const grid = await loadGrid(branch, state.report.period);
     if (!host.isConnected) return;
     if (!grid.rows.length) {
       host.innerHTML = `<p class="py-6 text-center text-sm text-gray-600">${t("report.gridEmpty")}</p>`;
