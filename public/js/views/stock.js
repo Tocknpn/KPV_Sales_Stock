@@ -443,6 +443,18 @@ async function handleCardAction(desk) {
   }
 }
 
+// Opens one case on one date from elsewhere (the report grid). A case that was
+// never checked in that day just shows the cards for the date: opening it here
+// would check it in.
+export async function openDeskDay(deskId, date) {
+  const desk = state.meta.desks.find((d) => d.desk_id === deskId);
+  state.stock.date = date;
+  if (desk) state.stock.branch = desk.branch_id;
+  await window.switchView("stock");
+  const card = currentCards.find((d) => d.desk_id === deskId);
+  if (card && card.status !== "not_started") await openDeskDetail(card);
+}
+
 async function openDeskDetail(deskCard) {
   if (deskCard.status === "not_started") return handleCardAction(deskCard);
   hideFab();

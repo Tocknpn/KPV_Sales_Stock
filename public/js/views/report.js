@@ -1,9 +1,10 @@
 import { api } from "../api.js";
 import { state, branchName, deskById } from "../state.js";
 import { openActionSheet } from "../ui.js";
-import { fmtInt, fmtLak, fmtLakSigned, icon, escapeHtml, debounce } from "../util.js";
+import { fmtInt, fmtLak, fmtLakSigned, fmtBaht, icon, escapeHtml, debounce } from "../util.js";
 import { renderFillBar } from "../charts.js";
 import { t, pickName } from "../i18n.js";
+import { openDeskDay } from "./stock.js";
 
 function deskLabel(deskId) {
   const d = deskById(deskId);
@@ -110,6 +111,56 @@ async function refreshReport() {
     q: state.report.q || undefined,
   });
   render(root, data);
+  renderGrid(root);
+}
+
+// Issue grid (spec decision 8): cases x days of the selected month.
+function gridCell(c) {
+  if (!c) return "";
+  if (c.kind === "ok") return `<span class="font-bold text-success" title="OK">✓</span>`;
+  if (c.kind === "diff") return `<span class="font-bold text-danger">${escapeHtml(fmtBaht(c.diffBaht ?? 0, 2))}</span>`;
+  if (c.kind === "warn") return `<span class="font-bold text-warning">⚠</span>`;
+  return `<span class="text-gray-500">·</span>`;
+}
+
+async function renderGrid(root) {
+  const section = document.createElement("section");
+  section.className = "mt-4";
+  section.innerHTML = `<h2 class="text-sm font-extrabold text-gray-900">${t("report.grid")}</h2>
+    <p class="mt-0.5 text-[11px] text-gray-600">${t("report.gridLegend")}</p>
+    <div id="grid-body" class="mt-2 min-w-0"><p class="py-6 text-center text-sm text-gray-600">${t("report.loading")}</p></div>`;
+  // Right under the month picker: first thing in the view.
+  root.prepend(section);
+  const host = section.querySelector("#grid-body");
+  const branch = state.report.branch ?? state.meta.branches[0]?.branch_id;
+  try {
+    const grid = await api.reportGrid(branch, state.report.period);
+    if (!host.isConnected) return;
+    if (!grid.rows.length) {
+      host.innerHTML = `<p class="py-6 text-center text-sm text-gray-600">${t("report.gridEmpty")}</p>`;
+      return;
+    }
+    host.innerHTML = `<div class="max-w-full overflow-x-auto rounded-xl border border-hairline bg-white">
+      <table class="min-w-full border-collapse text-[11px]">
+        <thead><tr>
+          <th class="sticky left-0 z-10 bg-gray-50 px-2 py-2 text-left font-semibold text-gray-600"></th>
+          ${grid.dates.map((d) => `<th class="bg-gray-50 px-1.5 py-2 text-center font-semibold text-gray-600">${Number(d.slice(8))}</th>`).join("")}
+        </tr></thead>
+        <tbody class="divide-y divide-hairline">
+          ${grid.rows
+            .map(
+              (r) => `<tr>
+            <th class="sticky left-0 z-10 max-w-[110px] truncate whitespace-nowrap bg-white px-2 py-2 text-left font-semibold text-gray-900">${escapeHtml(r.name)}</th>
+            ${r.cells.map((c, i) => `<td class="whitespace-nowrap px-1.5 py-2 text-center ${c ? "cursor-pointer" : ""}" ${c ? `data-desk="${escapeHtml(r.deskId)}" data-date="${escapeHtml(grid.dates[i])}"` : ""}>${gridCell(c)}</td>`).join("")}
+          </tr>`
+            )
+            .join("")}
+        </tbody>
+      </table></div>`;
+    host.querySelectorAll("td[data-desk]").forEach((td) => td.addEventListener("click", () => openDeskDay(td.dataset.desk, td.dataset.date)));
+  } catch (err) {
+    host.innerHTML = `<p class="py-6 text-center text-sm text-danger">${escapeHtml(err.message || t("err.SERVER_ERROR"))}</p>`;
+  }
 }
 
 function render(root, data) {
