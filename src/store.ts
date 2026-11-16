@@ -17,6 +17,8 @@ import type {
   DocumentKind,
   ProposalStatus,
   SystemConfig,
+  GoldPriceRow,
+  GoldPriceSnapshot,
   StaffAccount,
   Transfer,
   TransferStatus,
@@ -195,6 +197,9 @@ export interface Store {
 
   config(): Promise<SystemConfig>;
   updateConfig(patch: Partial<SystemConfig>): Promise<SystemConfig>;
+  goldPrice(): Promise<GoldPriceRow | null>;
+  // Ascending daily snapshots in [from, to] plus the latest one before `from`.
+  goldPriceHistory(from: string, to: string): Promise<GoldPriceSnapshot[]>;
 
   transfers(filter: TransferFilter): Promise<Transfer[]>;
   getTransfer(id: string): Promise<Transfer | null>;
@@ -685,6 +690,14 @@ export class DemoStore implements Store {
 
   async config() {
     return this.db.config;
+  }
+  async goldPrice() {
+    return this.db.goldPrice;
+  }
+  async goldPriceHistory(from: string, to: string) {
+    const all = [...this.db.goldHistory].sort((a, b) => a.price_date.localeCompare(b.price_date));
+    const before = all.filter((s) => s.price_date < from).pop();
+    return [...(before ? [before] : []), ...all.filter((s) => s.price_date >= from && s.price_date <= to)];
   }
   async updateConfig(patch: Partial<SystemConfig>) {
     this.guard();
@@ -1344,6 +1357,22 @@ class SupabaseStore implements Store {
     return rows.length > 0;
   }
 
+  async goldPrice() {
+    try {
+      const [row] = await this.rest<GoldPriceRow[]>("gold_prices?id=eq.1&select=price_baht_sell,price_baht_buy,updated_at,price_updated_at");
+      return row ?? null;
+    } catch {
+      return null;
+    }
+  }
+  async goldPriceHistory(from: string, to: string) {
+    const cols = "select=price_date,price_baht_sell";
+    const [inRange, before] = await Promise.all([
+      this.restAll<GoldPriceSnapshot>(`gold_price_history?${cols}&price_date=gte.${enc(from)}&price_date=lte.${enc(to)}&order=price_date`),
+      this.rest<GoldPriceSnapshot[]>(`gold_price_history?${cols}&price_date=lt.${enc(from)}&order=price_date.desc&limit=1`),
+    ]);
+    return [...before, ...inRange];
+  }
   async config() {
     const [row] = await this.rest<SystemConfig[]>("system_config?id=eq.1&select=*");
     if (!row) throw new Error("system_config row is missing — run supabase/base.sql");

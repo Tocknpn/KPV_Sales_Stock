@@ -190,6 +190,18 @@ export interface DocumentRecord {
   rows?: DocumentRow[];
 }
 
+export interface GoldPriceRow {
+  price_baht_sell: number;
+  price_baht_buy: number | null;
+  updated_at: string | null;
+  price_updated_at: string | null;
+}
+
+export interface GoldPriceSnapshot {
+  price_date: string;
+  price_baht_sell: number;
+}
+
 export interface SystemConfig {
   id: 1;
   safety_buffer_days: number;

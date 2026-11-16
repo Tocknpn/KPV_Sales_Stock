@@ -4,6 +4,7 @@ import { storeFor, newRouter, HttpError, scopeBranch } from "../app";
 import { assertBranchAccess } from "../auth";
 import { businessDate, addDays, isValidMonth, monthRange } from "../time";
 import { buildDashboard, buildReport, AGING_LOOKBACK_DAYS } from "../logic";
+import { resolveGoldPrice, priceOn } from "../goldPrice";
 import { loadBranchStatuses } from "../replenishment";
 import type { Desk, SessionUser } from "../types";
 
@@ -32,7 +33,7 @@ r.get("/dashboard", async (c) => {
   const agingFrom = addDays(today, -AGING_LOOKBACK_DAYS);
 
   // One read covers both the aging window and the (shorter) movement period.
-  const [skus, branches, latestDays, latestRows, windowRows, inTransit, config] = await Promise.all([
+  const [skus, branches, latestDays, latestRows, windowRows, inTransit, config, goldRow] = await Promise.all([
     store.skus(),
     store.branches(),
     store.latestDeskDays({ branchId, deskId }),
@@ -40,7 +41,9 @@ r.get("/dashboard", async (c) => {
     store.ledger({ from: agingFrom, to: today, branchId, deskId }),
     store.transfers({ branchId, status: "in_transit" }),
     store.config(),
+    store.goldPrice(),
   ]);
+  const gold = resolveGoldPrice(goldRow, config, today);
   const statuses = await loadBranchStatuses(store, branchId ? [branchId] : branches.map((b) => b.branch_id), today);
   return c.json(
     buildDashboard({
@@ -54,6 +57,7 @@ r.get("/dashboard", async (c) => {
       agingRows: windowRows,
       inTransit,
       config,
+      lakPerBaht: gold.lakPerBaht,
       statuses,
       filter: { branchId, deskId, category: c.req.query("category") || undefined, stockFlag },
     })
@@ -63,18 +67,24 @@ r.get("/dashboard", async (c) => {
 r.get("/report", async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
-  const period = c.req.query("period") || businessDate(c.env).slice(0, 7);
+  const today = businessDate(c.env);
+  const period = c.req.query("period") || today.slice(0, 7);
   if (!isValidMonth(period)) throw new HttpError(400, "Invalid period", "BAD_MONTH");
   const branchId = scopeBranch(user, c.req.query("branchId") || undefined);
   const deskId = scopeDesk(user, await store.desks(), c.req.query("deskId") || undefined);
   const { from, to } = monthRange(period);
-  const [rows, days, skus, config] = await Promise.all([
+  const [rows, days, skus, config, goldRow, goldHistory] = await Promise.all([
     store.ledger({ from, to, branchId, deskId }),
     store.deskDays({ from, to, branchId, deskId }),
     store.skus(),
     store.config(),
+    store.goldPrice(),
+    store.goldPriceHistory(from, to),
   ]);
-  return c.json({ period, ...buildReport(rows, days, skus, { q: c.req.query("q") || undefined }, config) });
+  // A month is valued at the price in force on its last day (or today, if the month is still running).
+  const gold = resolveGoldPrice(goldRow, config, today);
+  const lakPerBaht = priceOn(to < today ? to : today, goldHistory, gold.lakPerBaht);
+  return c.json({ period, ...buildReport(rows, days, skus, { q: c.req.query("q") || undefined }, config, lakPerBaht) });
 });
 
 export default r;

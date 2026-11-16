@@ -64,10 +64,10 @@ describe("reorder point", () => {
 describe("valuation", () => {
   const config = { spot_lak_per_baht: 30000000 };
   it("values gold at Baht weight x gold price", () => {
-    expect(valueLak({ baht_weight: 0.5, unit_price_lak: 999 }, 4, config)).toBe(60000000);
+    expect(valueLak({ baht_weight: 0.5, unit_price_lak: 999 }, 4, config.spot_lak_per_baht)).toBe(60000000);
   });
   it("values items without gold weight at unit price", () => {
-    expect(valueLak({ baht_weight: 0, unit_price_lak: 45000 }, 3, config)).toBe(135000);
+    expect(valueLak({ baht_weight: 0, unit_price_lak: 45000 }, 3, config.spot_lak_per_baht)).toBe(135000);
   });
 });
 

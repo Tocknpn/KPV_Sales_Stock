@@ -12,6 +12,8 @@ import type {
   LedgerRow,
   DocumentRecord,
   SystemConfig,
+  GoldPriceRow,
+  GoldPriceSnapshot,
   StaffAccount,
   Transfer,
   AuditEntry,
@@ -32,6 +34,8 @@ export interface DemoData {
   documents: DocumentRecord[];
   docCounters: Record<string, number>;
   config: SystemConfig;
+  goldPrice: GoldPriceRow | null;
+  goldHistory: GoldPriceSnapshot[];
   transfers: Transfer[];
   audit: AuditEntry[];
   closedDays: ClosedDay[];
@@ -369,6 +373,8 @@ export function buildDemoData(today: string): DemoData {
     documents,
     docCounters: { [`B-MM/${year}`]: 2, [`B-TS/${year}`]: 1 },
     config: { id: 1, safety_buffer_days: 2, spot_lak_per_baht: 32500000, usd_to_lak_rate: 20800, default_lead_time_days: 7, warning_margin_days: 3, velocity_window_days: 28, updated_at: startedAt },
+    goldPrice: { price_baht_sell: 43230000, price_baht_buy: 42400000, updated_at: `${today}T02:00:04.000Z`, price_updated_at: null },
+    goldHistory: [],
     transfers: [],
     audit: [],
     closedDays: [],

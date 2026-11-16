@@ -8,6 +8,7 @@ import { requireManager, assertBranchAccess, isManagerOf } from "../auth";
 import { addDays, businessDate, datesInMonth, isValidMonth, laosDate } from "../time";
 import { buildDayStatus } from "../dayStatus";
 import { loadBranchStatuses } from "../replenishment";
+import { resolveGoldPrice } from "../goldPrice";
 import { buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, computeClosing, parseQty, validateDeskDay } from "../logic";
 import type { Desk, DeskDay, LedgerRow, MasterSku, SessionUser, StaffAccount, Transfer } from "../types";
 
@@ -282,7 +283,7 @@ async function historyMoves(store: Store, deskId: string, date: string, outgoing
 
 async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: string, date: string) {
   const desk = await requireDesk(store, user, deskId);
-  const [branches, skus, days, ledgerRows, staffAccounts, weights, config, earlier, laterDone, incoming, outgoing, allDesks] = await Promise.all([
+  const [branches, skus, days, ledgerRows, staffAccounts, weights, config, earlier, laterDone, incoming, outgoing, allDesks, goldRow] = await Promise.all([
     store.branches(),
     store.skus(),
     store.deskDays({ deskId, date, limit: 1 }),
@@ -295,11 +296,12 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
     store.transfers({ toDeskId: deskId, status: "in_transit" }),
     store.transfers({ fromDeskId: deskId, sentDate: date }),
     store.desks(),
+    store.goldPrice(),
   ]);
   const moves = await historyMoves(store, deskId, date, outgoing, staffAccounts, skus, allDesks);
   const day = days[0];
   const statuses = await loadBranchStatuses(store, [desk.branch_id], businessDate(c.env));
-  const detail = buildDeskDetail(desk, branches.find((b) => b.branch_id === desk.branch_id), day, skus, ledgerRows, staffAccounts, config, weights, statuses);
+  const detail = buildDeskDetail(desk, branches.find((b) => b.branch_id === desk.branch_id), day, skus, ledgerRows, staffAccounts, config, weights, statuses, resolveGoldPrice(goldRow, config, businessDate(c.env)).lakPerBaht);
   const skuName = (id: string) => skus.find((s) => s.sku_id === id)?.name_en ?? id;
   const deskName = (id: string) => {
     const d = allDesks.find((x) => x.desk_id === id);

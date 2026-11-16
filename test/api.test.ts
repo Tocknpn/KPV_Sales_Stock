@@ -447,8 +447,18 @@ describe("numbers agree across screens", () => {
     expect(dash.portfolio.desksDoneToday).toBe(0);
   });
 
-  it("value follows the gold price the admin enters", async () => {
+  it("value follows the gold_prices sell price", async () => {
     const admin = await asAdmin();
+    const dash = (await call(admin, "GET", "/dashboard?deskId=IT-D01")).json.portfolio;
+    expect(dash.lak_value).toBe(dash.total_baht_gold * 43230000);
+    expect(dash.spotLakPerBaht).toBe(43230000);
+    const meta = (await call(admin, "GET", "/app-meta")).json;
+    expect(meta.gold).toMatchObject({ lakPerBaht: 43230000, source: "gold_prices" });
+  });
+
+  it("value follows the gold price the admin enters when gold_prices is empty", async () => {
+    const admin = await asAdmin();
+    (getStore({} as never) as unknown as { db: { goldPrice: unknown } }).db.goldPrice = null;
     const before = (await call(admin, "GET", "/dashboard?deskId=IT-D01")).json.portfolio;
     expect(before.lak_value).toBe(before.total_baht_gold * 32500000);
     await call(admin, "POST", "/settings/config", { spotLakPerBaht: 40000000, usdToLakRate: 20000 });

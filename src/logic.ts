@@ -84,16 +84,16 @@ export function gramOf(sku: Pick<MasterSku, "std_gram_weight"> | undefined, qty:
   return qty * (sku?.std_gram_weight ?? 0);
 }
 
-// Value of `qty` pieces: gold is valued at Baht weight x the gold price the
-// admin entered; items with no gold weight (supplies) at their unit price.
+// Value of `qty` pieces: gold is valued at Baht weight x the gold price passed in
+// (resolved by resolveGoldPrice); items with no gold weight (supplies) at their unit price.
 export function valueLak(
   sku: Pick<MasterSku, "baht_weight" | "unit_price_lak"> | undefined,
   qty: number,
-  config: Pick<SystemConfig, "spot_lak_per_baht">
+  lakPerBaht: number
 ) {
   if (!sku) return 0;
   const baht = sku.baht_weight ?? 0;
-  if (baht > 0) return qty * baht * (config.spot_lak_per_baht ?? 0);
+  if (baht > 0) return qty * baht * (lakPerBaht ?? 0);
   return qty * (sku.unit_price_lak ?? 0);
 }
 
@@ -209,7 +209,8 @@ export function buildDeskDetail(
   config: SystemConfig,
   weights: SkuWeight[] = [],
   // Branch-wide status per "branchId|skuId"; the only source of low-stock alerts.
-  statuses: BranchStatuses = new Map()
+  statuses: BranchStatuses = new Map(),
+  lakPerBaht: number = config.spot_lak_per_baht
 ) {
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
   const staffById = new Map(staffAccounts.map((s) => [s.id, s]));
@@ -250,7 +251,7 @@ export function buildDeskDetail(
       hasVariance: variance !== null && variance !== 0,
       baht_weight_each: sku?.baht_weight ?? 0,
       gram_weight_each: sku?.std_gram_weight ?? 0,
-      value_lak: round2(valueLak(sku, closing, config)),
+      value_lak: round2(valueLak(sku, closing, lakPerBaht)),
       branch_status: branchRow?.status ?? "no_data",
       runway_days: branchRow?.runwayDays ?? null,
       avg_daily_sales: avg,
@@ -379,6 +380,8 @@ export interface DashboardInput {
   filter: DashboardFilter;
   // Branch-wide status per "branchId|skuId"; decides what counts as low stock.
   statuses?: BranchStatuses;
+  // Resolved gold price (see goldPrice.ts) used for every LAK value.
+  lakPerBaht: number;
 }
 
 interface LowItem {
@@ -397,7 +400,7 @@ interface Position {
 }
 
 export function buildDashboard(input: DashboardInput) {
-  const { today, skus, branches, desks, latestDays, latestRows, movementRows, agingRows, inTransit, config, filter } = input;
+  const { today, skus, branches, desks, latestDays, latestRows, movementRows, agingRows, inTransit, config, filter, lakPerBaht } = input;
   const statuses = input.statuses ?? new Map();
   // Low = the SKU's runway at this BRANCH is Critical or Warning.
   const branchStatus = (p: { branch_id: string; sku: MasterSku }) => statuses.get(`${p.branch_id}|${p.sku.sku_id}`);
@@ -488,7 +491,7 @@ export function buildDashboard(input: DashboardInput) {
     const sku = skuById.get(t.sku_id);
     transitPcs += t.qty;
     transitBaht += bahtOf(sku, t.qty);
-    transitLak += valueLak(sku, t.qty, config);
+    transitLak += valueLak(sku, t.qty, lakPerBaht);
   }
 
   let pcs = 0;
@@ -497,7 +500,7 @@ export function buildDashboard(input: DashboardInput) {
   for (const p of scoped) {
     pcs += p.qty;
     baht += bahtOf(p.sku, p.qty);
-    lak += valueLak(p.sku, p.qty, config);
+    lak += valueLak(p.sku, p.qty, lakPerBaht);
   }
   // Gold between two desks is still KPV's gold, so it stays in the total.
   if (!filter.stockFlag) {
@@ -548,7 +551,7 @@ export function buildDashboard(input: DashboardInput) {
         name_lo: b.name_lo,
         baht: round2(mine.reduce((s, p) => s + bahtOf(p.sku, p.qty), 0)),
         pcs: mine.reduce((s, p) => s + p.qty, 0),
-        lakValue: round2(mine.reduce((s, p) => s + valueLak(p.sku, p.qty, config), 0)),
+        lakValue: round2(mine.reduce((s, p) => s + valueLak(p.sku, p.qty, lakPerBaht), 0)),
         lowCount: new Set(mine.filter(isLow).map((p) => p.sku.sku_id)).size,
         criticalCount: new Set(mine.filter((p) => branchStatus(p)?.status === "critical").map((p) => p.sku.sku_id)).size,
         desksTotal: myDesks.length,
@@ -563,7 +566,7 @@ export function buildDashboard(input: DashboardInput) {
       total_pcs: pcs,
       lak_value: round2(lak),
       usd_value: config.usd_to_lak_rate > 0 ? round2(lak / config.usd_to_lak_rate) : 0,
-      spotLakPerBaht: config.spot_lak_per_baht,
+      spotLakPerBaht: lakPerBaht,
       usdToLakRate: config.usd_to_lak_rate,
       desksTotal: scopedDesks.length,
       desksDoneToday: scopedDesks.filter((d) => doneToday(d.desk_id)).length,
@@ -586,7 +589,7 @@ export function buildDashboard(input: DashboardInput) {
     capacity,
     donut,
     branchCards,
-    movement: buildMovement(movementRows.filter((r) => categoryOk(skuById.get(r.sku_id))), skus, config),
+    movement: buildMovement(movementRows.filter((r) => categoryOk(skuById.get(r.sku_id))), skus, lakPerBaht),
     watchlist: {
       lowCount: lowItems.length,
       overCount: over.length,
@@ -597,7 +600,7 @@ export function buildDashboard(input: DashboardInput) {
   };
 }
 
-export function buildMovement(movementRows: LedgerRow[], skus: MasterSku[], config: SystemConfig) {
+export function buildMovement(movementRows: LedgerRow[], skus: MasterSku[], lakPerBaht: number) {
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
   let inPcs = 0,
     inLak = 0,
@@ -607,10 +610,10 @@ export function buildMovement(movementRows: LedgerRow[], skus: MasterSku[], conf
     if (r.excluded) continue;
     const sku = skuById.get(r.sku_id);
     inPcs += movementIn(r);
-    inLak += valueLak(sku, movementIn(r), config);
+    inLak += valueLak(sku, movementIn(r), lakPerBaht);
     const out = movementOut(r);
     outPcs += out;
-    outLak += valueLak(sku, out, config);
+    outLak += valueLak(sku, out, lakPerBaht);
   }
   return { inPcs, inLak: round2(inLak), outPcs, outLak: round2(outLak) };
 }
@@ -666,7 +669,7 @@ export interface ReportFilter {
   q?: string;
 }
 
-export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus: MasterSku[], filter: ReportFilter, config: SystemConfig) {
+export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus: MasterSku[], filter: ReportFilter, config: SystemConfig, lakPerBaht: number = config.spot_lak_per_baht) {
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
   const statusByDay = new Map(periodDays.map((d) => [`${d.desk_id}__${d.ledger_date}`, d.status]));
   const statusOf = (r: LedgerRow) => statusByDay.get(`${r.desk_id}__${r.ledger_date}`);
@@ -696,7 +699,7 @@ export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus
   };
   const add = (bucket: { lak: number; pcs: number }, sku: MasterSku | undefined, qty: number) => {
     bucket.pcs += qty;
-    bucket.lak += valueLak(sku, qty, config);
+    bucket.lak += valueLak(sku, qty, lakPerBaht);
   };
 
   const items = [...groups.entries()].map(([key, groupRows]) => {
@@ -730,7 +733,7 @@ export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus
       delta: inSum - outSum + adjustSum,
       adjust: adjustSum,
       closing_qty: closing,
-      value_lak: round2(valueLak(sku, closing, config)),
+      value_lak: round2(valueLak(sku, closing, lakPerBaht)),
       fillPct: Math.max(0, Math.min(100, round1((closing / capacity) * 100))),
       desk_id: last.desk_id,
     };

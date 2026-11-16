@@ -4,6 +4,7 @@ import { getStore } from "../store";
 import { verifyPassword, normalizeUsername, signToken, requireAuth, authSecret, MAX_FAILED_LOGINS, LOCK_MINUTES } from "../auth";
 import { businessDate, isLive } from "../time";
 import { seedBlocked } from "../dataMode";
+import { resolveGoldPrice } from "../goldPrice";
 
 const r = newRouter();
 
@@ -79,9 +80,10 @@ r.post("/auth/logout", requireAuth, async (c) => c.json({ ok: true }));
 r.get("/app-meta", requireAuth, async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
-  const [branches, desks, config] = await Promise.all([store.branches(), store.desks(), store.config()]);
+  const [branches, desks, config, goldRow] = await Promise.all([store.branches(), store.desks(), store.config(), store.goldPrice()]);
+  const today = businessDate(c.env);
   const mine = <T extends { branch_id: string }>(rows: T[]) => (user.role !== "admin" ? rows.filter((x) => x.branch_id === user.branchId) : rows);
-  return c.json({ branches: mine(branches), desks: mine(desks), config, today: businessDate(c.env), live: isLive(c.env), user });
+  return c.json({ branches: mine(branches), desks: mine(desks), config, gold: resolveGoldPrice(goldRow, config, today), today, live: isLive(c.env), user });
 });
 
 export default r;
