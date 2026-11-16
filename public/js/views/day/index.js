@@ -19,6 +19,7 @@ import {
   openOutSheet,
   openCountNoteSheet,
   openSafeDropSheet,
+  openCaseInfoSheet,
   openReopenSheet,
   openConflictSheet,
   openRemoveItemSheet,
@@ -200,11 +201,7 @@ function renderTopbar() {
           ${detail.lastActorName ? `<span class="min-w-0 truncate">👤 ${escapeHtml(detail.lastActorName)}</span>` : ""}
         </div>
       </div>
-      ${
-        done
-          ? ""
-          : `<button id="day-menu" aria-label="${t("day.menu")}" class="focus-ring tap-target flex shrink-0 items-center justify-center rounded-full text-xl font-extrabold text-gray-600 active:bg-gray-100">⋯</button>`
-      }
+      <button id="day-menu" aria-label="${t("day.menu")}" class="focus-ring tap-target flex shrink-0 items-center justify-center rounded-full text-xl font-extrabold text-gray-600 active:bg-gray-100">⋯</button>
     </div>
     <div id="day-totals" class="mt-2 flex items-center justify-between gap-2 text-sm"></div>`;
   $("#day-back").addEventListener("click", () => (S?.hooks.onBack ? S.hooks.onBack() : unmountDay()));
@@ -546,13 +543,14 @@ function onInput(e) {
 }
 
 function openMenu() {
-  const options = [
-    { label: t("stock.addSku"), value: "add" },
-    { label: t("day.removeItem"), value: "remove" },
-    { label: t("day.safeDrop"), value: "safe" },
-  ];
+  const info = { label: t("day.caseInfo"), value: "info" };
+  // A Done day is read-only: only Case info is offered there.
+  const options = S?.detail?.status === "done"
+    ? [info]
+    : [info, { label: t("stock.addSku"), value: "add" }, { label: t("day.removeItem"), value: "remove" }, { label: t("day.safeDrop"), value: "safe" }];
   openActionSheet(t("day.menu"), options, async (opt) => {
     if (!S) return;
+    if (opt.value === "info") return openCaseInfoSheet(S.ctx);
     if (opt.value === "safe") return openSafeDropSheet(S.ctx);
     if (opt.value === "remove") return openRemoveItemSheet(S.ctx);
     await S.queue.flushAll();

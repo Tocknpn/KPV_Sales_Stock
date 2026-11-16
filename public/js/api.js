@@ -120,6 +120,7 @@ export const api = {
 
   myCases: (branchId) => request(`/my-cases?${query({ branchId })}`),
   assignDesk: (deskId, staffId, note) => post(`/desks/${encodeURIComponent(deskId)}/assign`, { staffId, note }),
+  deskInfo: (deskId) => request(`/desks/${encodeURIComponent(deskId)}/info`),
   releaseDesk: (deskId) => post(`/desks/${encodeURIComponent(deskId)}/release`),
   closedDays: (params) => request(`/closed-days?${query(params ?? {})}`),
   addClosedDays: (payload) => post(`/closed-days`, payload),

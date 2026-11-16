@@ -5,6 +5,7 @@
 import type {
   Branch,
   Desk,
+  InitialStock,
   MasterSku,
   SkuType,
   SkuWeight,
@@ -35,6 +36,8 @@ import { businessDate, isLive, laosDate } from "./time";
 import { computeClosing } from "./logic";
 import { actorHeaders, type Actor } from "./actor";
 import { auditEntry, type AuditOp } from "./audit";
+
+export type NewDesk = { branch_id: string; display_name: string; created_by: string; initial_stock: InitialStock };
 
 export type StoreErrorCode = "DAY_LOCKED" | "CONFLICT" | "INVALID" | "UNAVAILABLE" | "NEGATIVE" | "AUDIT_ACTOR_MISSING" | "DENIED" | "IMMUTABLE";
 
@@ -145,7 +148,7 @@ export interface RuleInput extends RuleTarget {
 export interface Store {
   branches(): Promise<Branch[]>;
   desks(): Promise<Desk[]>;
-  createDesk(input: { branch_id: string; display_name: string }): Promise<Desk>;
+  createDesk(input: NewDesk): Promise<Desk>;
 
   staffAccounts(): Promise<StaffAccount[]>;
   // Seed vs real row counts per table (the kpv_seed_counts() RPC).
@@ -333,7 +336,7 @@ export class DemoStore implements Store {
   async desks() {
     return this.db.desks;
   }
-  async createDesk(input: { branch_id: string; display_name: string }) {
+  async createDesk(input: NewDesk) {
     this.guard();
     const sameBranch = this.db.desks.filter((d) => d.branch_id === input.branch_id);
     const desk: Desk = {
@@ -343,6 +346,8 @@ export class DemoStore implements Store {
       active: true,
       sort_order: sameBranch.length + 1,
       created_at: this.now(),
+      created_by: input.created_by,
+      initial_stock: input.initial_stock,
     };
     this.db.desks.push(desk);
     this.log("desks", "INSERT", null, desk);
@@ -1147,7 +1152,7 @@ class SupabaseStore implements Store {
   async desks() {
     return this.rest<Desk[]>("desks?select=*&order=branch_id,sort_order");
   }
-  async createDesk(input: { branch_id: string; display_name: string }) {
+  async createDesk(input: NewDesk) {
     const existing = await this.rest<{ desk_id: string }[]>(`desks?branch_id=eq.${enc(input.branch_id)}&select=desk_id`);
     const [desk] = await this.rest<Desk[]>("desks", {
       method: "POST",
@@ -1157,6 +1162,8 @@ class SupabaseStore implements Store {
         display_name: input.display_name,
         active: true,
         sort_order: existing.length + 1,
+        created_by: input.created_by,
+        initial_stock: input.initial_stock,
       }),
     });
     return desk;

@@ -2,7 +2,7 @@
 // index.js:  { deskCard, date, detail, hooks, queue, row(sku), rowChanged(sku) }
 import { api } from "../../api.js";
 import { toast, openSheet, closeSheet, openActionSheet } from "../../ui.js";
-import { fmtDate, escapeHtml } from "../../util.js";
+import { fmtDate, fmtDateTime, fmtInt, fmtBaht, escapeHtml } from "../../util.js";
 import { t } from "../../i18n.js";
 import { clampQty } from "./save-queue.js";
 import { closingOf, outOf, skuName } from "./row.js";
@@ -309,6 +309,43 @@ export function openSafeDropSheet(ctx) {
       },
     }
   );
+}
+
+// --- case info ------------------------------------------------------------
+
+export function openCaseInfoSheet(ctx) {
+  const dash = "—";
+  openSheet(`<p class="py-6 text-center text-sm text-gray-600">…</p>`, {
+    title: t("day.caseInfo"),
+    onMount: async (body) => {
+      let info;
+      try {
+        info = await api.deskInfo(ctx.deskCard.desk_id);
+      } catch {
+        return closeSheet();
+      }
+      const init = info.initial;
+      const skuRows = init
+        ? Object.entries(init.skus)
+            .map(([id, qty]) => {
+              const row = ctx.row?.(id);
+              return `<li class="flex justify-between gap-3"><span class="min-w-0 truncate">${escapeHtml(id)}${row ? ` · ${escapeHtml(skuName(row))}` : ""}</span><span class="font-bold tabular-nums">${fmtInt(qty)}</span></li>`;
+            })
+            .join("")
+        : "";
+      const total = init ? `${fmtBaht(init.total_baht, 2)} Baht · ${fmtInt(init.total_pcs)} ${t("day.caseInfoPcs")} · ≈ ₭${fmtInt(init.valueLak)}` : dash;
+      const item = (label, value) =>
+        `<div class="flex justify-between gap-4 py-2"><dt class="text-gray-600">${label}</dt><dd class="text-right font-semibold text-gray-900">${value}</dd></div>`;
+      body.innerHTML = `
+        <dl class="divide-y divide-hairline text-sm">
+          ${item(t("day.caseInfoCreatedBy"), info.createdBy?.name ? escapeHtml(info.createdBy.name) : dash)}
+          ${item(t("day.caseInfoCreated"), info.createdAt ? fmtDateTime(info.createdAt) : dash)}
+          <div class="py-2"><dt class="mb-1 text-gray-600">${t("day.caseInfoOriginal")}</dt>
+            <dd>${skuRows ? `<ul class="flex flex-col gap-1 font-semibold text-gray-900">${skuRows}</ul>` : dash}</dd></div>
+          ${item(t("day.caseInfoTotal"), total)}
+        </dl>`;
+    },
+  });
 }
 
 // --- reopen a Done day ----------------------------------------------------

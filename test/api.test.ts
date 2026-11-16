@@ -252,6 +252,41 @@ describe("daily cycle", () => {
     expect(rowOf(detail, "GB-001").closing_baht).toBe(3);
   });
 
+  it("a new case freezes who made it and its starting stock", async () => {
+    const staff = await asStaff("B-MM");
+    const created = await call(staff, "POST", "/desks", {
+      branchId: "B-MM",
+      displayName: "Origin",
+      openingSkus: [{ sku_id: "RG-031", opening_qty: 3 }, { sku_id: "NK-011", opening_qty: 15 }],
+    });
+    expect(created.status).toBe(200);
+    const stored = (await getStore({} as any, { id: DEMO_STAFF["B-MM"] }).desks()).find((d) => d.desk_id === created.json.desk.desk_id)!;
+    expect(stored.created_by).toBe(DEMO_STAFF["B-MM"]);
+    expect(stored.initial_stock).toEqual({ skus: { "RG-031": 3, "NK-011": 15 }, total_pcs: 18, total_baht: 16.5 });
+  });
+
+  it("GET /desks/:id/info returns creator name, original stock and its value", async () => {
+    const staff = await asStaff("B-MM");
+    const created = await call(staff, "POST", "/desks", { branchId: "B-MM", displayName: "Origin", openingSkus: [{ sku_id: "RG-031", opening_qty: 3 }] });
+    const info = await call(staff, "GET", `/desks/${created.json.desk.desk_id}/info`);
+    expect(info.status).toBe(200);
+    expect(info.json.createdBy.id).toBe(DEMO_STAFF["B-MM"]);
+    expect(typeof info.json.createdBy.name).toBe("string");
+    expect(info.json.initial.skus).toEqual({ "RG-031": 3 });
+    expect(info.json.initial.total_pcs).toBe(3);
+    expect(info.json.initial.valueLak).toBeGreaterThan(0);
+    // An older case with no recorded origin shows nulls rather than failing.
+    const old = await call(staff, "GET", "/desks/MM-D01/info");
+    expect(old.status).toBe(200);
+    expect(old.json.createdBy).toBeNull();
+    expect(old.json.initial).toBeNull();
+  });
+
+  it("GET /desks/:id/info refuses staff of another branch", async () => {
+    const other = await asStaff("B-TS");
+    expect((await call(other, "GET", "/desks/MM-D01/info")).status).toBe(403);
+  });
+
   it("date rules: no future, staff only today, admin may record the past", async () => {
     const staff = await asStaff("B-MM");
     const admin = await asAdmin();

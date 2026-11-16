@@ -9,7 +9,7 @@ import { addDays, businessDate, datesInMonth, isValidMonth, laosDate } from "../
 import { buildDayStatus } from "../dayStatus";
 import { loadBranchStatuses } from "../replenishment";
 import { resolveGoldPrice, priceOn } from "../goldPrice";
-import { buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, computeClosing, parseQty, validateDeskDay } from "../logic";
+import { bahtOf, valueLak, buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, computeClosing, parseQty, validateDeskDay } from "../logic";
 import type { Desk, DeskDay, LedgerRow, MasterSku, SessionUser, StaffAccount, Transfer } from "../types";
 
 // Mounted behind requireAuth in src/index.ts.
@@ -220,7 +220,14 @@ r.post("/desks", async (c) => {
   }
 
   const today = businessDate(c.env);
-  const desk = await store.createDesk({ branch_id: branchId, display_name: displayName });
+  // The case's origin, frozen for good: who made it and what it started with.
+  const skuList = await store.skus();
+  const initial_stock = {
+    skus: Object.fromEntries(opening),
+    total_pcs: [...opening.values()].reduce((a, q) => a + q, 0),
+    total_baht: [...opening].reduce((a, [id, q]) => a + bahtOf(skuList.find((s) => s.sku_id === id), q), 0),
+  };
+  const desk = await store.createDesk({ branch_id: branchId, display_name: displayName, created_by: user.accountId, initial_stock });
   await store.insertDeskDay({ desk_id: desk.desk_id, ledger_date: today, branch_id: branchId, checked_in_by: user.accountId });
   const rows = await store.insertLedgerRows(
     [...opening.entries()].map(([sku_id, opening_qty]) => ({
@@ -234,6 +241,30 @@ r.post("/desks", async (c) => {
   );
   await audit(store, user, "desk.create", desk.desk_id, { display_name: displayName, opening: Object.fromEntries(opening) }, { branchId: desk.branch_id, deskId: desk.desk_id });
   return c.json({ desk, rows });
+});
+
+// Case info: who made the case, when, and what it started with (valued today).
+r.get("/desks/:deskId/info", async (c) => {
+  const store = storeFor(c);
+  const desk = await requireDesk(store, c.get("user"), c.req.param("deskId"));
+  const [staffAccounts, config, goldRow] = await Promise.all([store.staffAccounts(), store.config(), store.goldPrice()]);
+  const creator = desk.created_by ? staffAccounts.find((a) => a.id === desk.created_by) : undefined;
+  const { lakPerBaht } = resolveGoldPrice(goldRow, config, businessDate(c.env));
+  const skuList = await store.skus();
+  const initial = desk.initial_stock
+    ? {
+        ...desk.initial_stock,
+        valueLak: Math.round(Object.entries(desk.initial_stock.skus).reduce((sum, [id, q]) => sum + valueLak(skuList.find((s) => s.sku_id === id), q, lakPerBaht), 0) * 100) / 100,
+      }
+    : null;
+  return c.json({
+    deskId: desk.desk_id,
+    displayName: desk.display_name,
+    branchId: desk.branch_id,
+    createdAt: desk.created_at,
+    createdBy: desk.created_by ? { id: desk.created_by, name: creator?.display_name ?? null } : null,
+    initial,
+  });
 });
 
 // ---------------------------------------------------------------------------

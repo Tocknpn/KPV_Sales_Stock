@@ -5,6 +5,13 @@ export interface Branch {
   sort_order: number;
 }
 
+// A case's starting stock, frozen when it is created (null on older cases).
+export interface InitialStock {
+  skus: Record<string, number>;
+  total_pcs: number;
+  total_baht: number;
+}
+
 export interface Desk {
   desk_id: string;
   branch_id: string;
@@ -12,6 +19,8 @@ export interface Desk {
   active: boolean;
   sort_order: number;
   created_at: string;
+  created_by?: string | null;
+  initial_stock?: InitialStock | null;
   is_seed?: boolean;
 }
 
