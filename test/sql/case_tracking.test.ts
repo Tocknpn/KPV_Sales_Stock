@@ -109,4 +109,16 @@ describe('case origin edge cases', () => {
     const r = await db.query<{ ok: boolean }>(`select bool_and(price_date = kpv_today()) ok from gold_price_history`);
     expect(r.rows[0].ok).toBe(true);
   });
+
+  it('audit opening all invalid falls back to the first-day ledger', async () => {
+    await db.exec(`insert into desks (desk_id, branch_id, display_name) values ('MM-D06','B-MM','F')`);
+    await db.exec(`insert into master_sku (sku_id, name_en, category, baht_weight) values ('S1','s1','x',1)`);
+    await db.exec(`insert into desk_days (desk_id, ledger_date, branch_id) values ('MM-D06','2026-11-10','B-MM')`);
+    await db.exec(`insert into daily_stock_ledger (ledger_date, desk_id, branch_id, sku_id, opening_qty) values ('2026-11-10','MM-D06','B-MM','S1',3)`);
+    await db.exec(`insert into audit_log (actor_name, action, target, detail) values
+      ('x','desk.create','MM-D06','{"opening":{"A":0}}'::jsonb)`);
+    await db.exec(`select kpv_backfill_desk_origin()`);
+    const r = await db.query<{ initial_stock: any }>(`select initial_stock from desks where desk_id = 'MM-D06'`);
+    expect(r.rows[0].initial_stock.skus).toEqual({ S1: 3 });
+  });
 });

@@ -88,6 +88,10 @@ begin
        where jsonb_typeof(e.value) = 'number'
          and e.value::text ~ '^[0-9]+$'
          and e.value::text::numeric > 0;
+      -- everything filtered out: fall back to the ledger
+      if v_skus = '{}'::jsonb then
+        v_skus := null;
+      end if;
     end if;
 
     -- 2) no audit row: opening quantities of the earliest day
