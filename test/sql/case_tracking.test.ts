@@ -27,6 +27,17 @@ describe('gold price history', () => {
   });
 });
 
+describe('snapshot safety', () => {
+  it('a failing snapshot never fails the owner write', async () => {
+    await db.exec(`alter table gold_price_history add constraint t_never check (price_baht_sell < 0)`);
+    await db.exec(`insert into gold_prices (id, price_baht_sell, updated_at) values (1, 43230000, '2026-11-16 02:00+00')`);
+    await db.exec(`update gold_prices set price_baht_sell = 43300000 where id = 1`);
+    const r = await db.query<{ s: string }>(`select price_baht_sell::text s from gold_prices where id = 1`);
+    expect(r.rows[0].s).toBe('43300000');
+    expect(await history()).toEqual([]);
+  });
+});
+
 describe('frozen case origin', () => {
   it('origin_immutable: set once, never changed', async () => {
     await db.exec(`insert into desks (desk_id, branch_id, display_name) values ('MM-D01','B-MM','A')`);
@@ -119,6 +130,24 @@ describe('case origin edge cases', () => {
       ('x','desk.create','MM-D06','{"opening":{"A":0}}'::jsonb)`);
     await db.exec(`select kpv_backfill_desk_origin()`);
     const r = await db.query<{ initial_stock: any }>(`select initial_stock from desks where desk_id = 'MM-D06'`);
+    expect(r.rows[0].initial_stock.skus).toEqual({ S1: 3 });
+  });
+
+  it('keeps the audit creator when the opening is unusable and the ledger supplies the skus', async () => {
+    const u = await db.query<{ id: string }>(
+      `insert into staff_accounts (branch_id, display_name, pin_hash, role) values ('B-MM','U','h','staff') returning id`);
+    const U = u.rows[0].id;
+    await db.exec(`insert into desks (desk_id, branch_id, display_name) values ('MM-D07','B-MM','G')`);
+    await db.exec(`insert into master_sku (sku_id, name_en, category, baht_weight) values ('S1','s1','x',1)`);
+    await db.exec(`insert into desk_days (desk_id, ledger_date, branch_id) values ('MM-D07','2026-11-10','B-MM')`);
+    await db.exec(`insert into daily_stock_ledger (ledger_date, desk_id, branch_id, sku_id, opening_qty) values ('2026-11-10','MM-D07','B-MM','S1',3)`);
+    await db.query(
+      `insert into audit_log (actor_id, actor_name, action, target, detail)
+       values ($1, 'U', 'desk.create', 'MM-D07', '{"opening":{"A":0}}'::jsonb)`, [U]);
+    await db.exec(`select kpv_backfill_desk_origin()`);
+    const r = await db.query<{ created_by: string; initial_stock: any }>(
+      `select created_by, initial_stock from desks where desk_id = 'MM-D07'`);
+    expect(r.rows[0].created_by).toBe(U);
     expect(r.rows[0].initial_stock.skus).toEqual({ S1: 3 });
   });
 });

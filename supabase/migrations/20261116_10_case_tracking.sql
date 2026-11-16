@@ -23,19 +23,24 @@ create table if not exists gold_price_history (
 );
 
 create or replace function kpv_gold_price_snapshot() returns trigger
-language plpgsql as $$
+language plpgsql security definer set search_path = public as $$
 declare
   v_date date := coalesce((new.updated_at at time zone 'Asia/Vientiane')::date, kpv_today());
 begin
   if new.price_baht_sell is null then
     return new;
   end if;
-  insert into gold_price_history (price_date, price_baht_sell, price_baht_buy, captured_at)
-  values (v_date, new.price_baht_sell, new.price_baht_buy, now())
-  on conflict (price_date) do update
-    set price_baht_sell = excluded.price_baht_sell,
-        price_baht_buy  = excluded.price_baht_buy,
-        captured_at     = excluded.captured_at;
+  -- The owner's write must never fail because of this snapshot.
+  begin
+    insert into gold_price_history (price_date, price_baht_sell, price_baht_buy, captured_at)
+    values (v_date, new.price_baht_sell, new.price_baht_buy, now())
+    on conflict (price_date) do update
+      set price_baht_sell = excluded.price_baht_sell,
+          price_baht_buy  = excluded.price_baht_buy,
+          captured_at     = excluded.captured_at;
+  exception when others then
+    raise warning 'kpv_gold_price_snapshot failed: %', sqlerrm;
+  end;
   return new;
 end $$;
 
@@ -94,9 +99,9 @@ begin
       end if;
     end if;
 
-    -- 2) no audit row: opening quantities of the earliest day
+    -- 2) no usable audit opening: opening quantities of the earliest day
+    --    (the audit row's creator, if any, is kept)
     if v_skus is null then
-      v_creator := null;
       select coalesce(jsonb_object_agg(l.sku_id, l.opening_qty), '{}'::jsonb)
         into v_skus
         from daily_stock_ledger l
@@ -116,7 +121,7 @@ begin
       left join master_sku m on m.sku_id = e.key;
 
     update desks
-       set created_by = v_creator,
+       set created_by = coalesce(created_by, v_creator),
            initial_stock = jsonb_build_object('skus', v_skus, 'total_pcs', v_pcs, 'total_baht', v_baht)
      where desk_id = d.desk_id and initial_stock is null;
     v_n := v_n + 1;
