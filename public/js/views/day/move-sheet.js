@@ -46,7 +46,6 @@ export async function openMoveSheet({ desk, date, detail, rows, hooks, onDone, s
   let msg = "";
 
   const caseName = (id) => cases.find((d) => d.desk_id === id)?.display_name ?? "";
-  const holder = (d) => (d.holder_name ? ` · ${escapeHtml(d.holder_name)}` : "");
 
   function lineHtml(l, i) {
     const r = byId.get(l.skuId);
@@ -82,7 +81,7 @@ export async function openMoveSheet({ desk, date, detail, rows, hooks, onDone, s
         <div class="flex flex-col gap-2">${cases
           .map(
             (d) =>
-              `<button type="button" data-case="${escapeHtml(d.desk_id)}" ${busy || noStock ? "disabled" : ""} class="btn-primary w-full text-left">${escapeHtml(d.display_name)}${holder(d)}</button>`
+              `<button type="button" data-case="${escapeHtml(d.desk_id)}" ${busy || noStock ? "disabled" : ""} class="btn-primary w-full text-left">${escapeHtml(d.display_name)}</button>`
           )
           .join("")}</div>
         <button type="button" data-add class="btn-secondary mt-3 w-full" ${free.length && !busy ? "" : "disabled"}>${t("move.addItem")}</button>`;
@@ -94,7 +93,7 @@ export async function openMoveSheet({ desk, date, detail, rows, hooks, onDone, s
         </select>
         <label for="move-to" class="mb-1.5 block text-sm font-bold text-gray-700">${t("move.to")}</label>
         <select id="move-to" ${busy ? "disabled" : ""} class="input-filled">
-          ${cases.map((d) => `<option value="${escapeHtml(d.desk_id)}" ${d.desk_id === toDesk ? "selected" : ""}>${escapeHtml(d.display_name)}${holder(d)}</option>`).join("")}
+          ${cases.map((d) => `<option value="${escapeHtml(d.desk_id)}" ${d.desk_id === toDesk ? "selected" : ""}>${escapeHtml(d.display_name)}</option>`).join("")}
         </select>
         <button type="button" data-confirm class="btn-primary mt-4 w-full" ${busy || noStock ? "disabled" : ""}>${tf("move.confirmN", { n: lines.length, to: escapeHtml(caseName(toDesk)) })}</button>`;
     }

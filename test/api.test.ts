@@ -794,7 +794,7 @@ describe("compare-and-set entries, counts any time, one-step close", () => {
   });
 });
 
-describe("cards: streak, tier, holder and branch summary (CR3)", () => {
+describe("cards: streak, tier, value and branch summary (CR3)", () => {
   const db = () => (getStore({} as any) as any).db;
 
   it("overdue case is first; branchSummary counts", async () => {
@@ -809,7 +809,8 @@ describe("cards: streak, tier, holder and branch summary (CR3)", () => {
     expect(cards[0]).toMatchObject({ tier: "overdue", daysBehind: 3, lastDoneDate: "2026-11-08", streak: 0 });
     const d01 = cards.find((d: any) => d.desk_id === "MM-D01");
     expect(d01).toMatchObject({ tier: "on_track", streak: 3, daysBehind: 0, lastDoneByName: "Somchai S." });
-    expect(cards.find((d: any) => d.desk_id === "MM-D03")).toMatchObject({ tier: "on_track", streak: 0, daysBehind: 0, assignee: null });
+    expect(cards.find((d: any) => d.desk_id === "MM-D03")).toMatchObject({ tier: "on_track", streak: 0, daysBehind: 0 });
+    expect(cards.find((d: any) => d.desk_id === "MM-D03")).not.toHaveProperty("assignee");
     expect(res.json.branchSummary).toEqual({ cases: 4, checkedToday: 0, behind1: 0, overdue: 1 });
   });
 
@@ -820,15 +821,26 @@ describe("cards: streak, tier, holder and branch summary (CR3)", () => {
     expect(cards.find((d: any) => d.desk_id === "IT-D01")).toMatchObject({ tier: "done_today", streak: 3 });
   });
 
-  it("assignee started yesterday is stale; today is not", async () => {
+  it("cards carry valueLak and lastActorAt, and no holder fields", async () => {
+    const res = await call(await asStaff("B-MM"), "GET", "/stock/desks");
+    const cards = res.json.desks.filter((d: any) => d.branch_id === "B-MM");
+    for (const card of cards) {
+      expect(typeof card.valueLak).toBe("number");
+      expect(card).toHaveProperty("lastActorAt");
+      expect(card).not.toHaveProperty("assignee");
+      expect(card).not.toHaveProperty("holder");
+      expect(card).not.toHaveProperty("canTake");
+    }
+    const d01 = cards.find((d: any) => d.desk_id === "MM-D01");
+    expect(d01.valueLak).toBeGreaterThan(0);
+    expect(d01.lastActorName && d01.lastActorAt).toBeTruthy();
+  });
+
+  it("the retired /cases and assign routes are gone", async () => {
     const m = await asManager("B-MM");
-    await call(m, "POST", "/desks/MM-D01/assign", { staffId: DEMO_STAFF["B-MM"] });
-    await call(m, "POST", "/desks/MM-D02/assign", { staffId: DEMO_STAFF["B-MM"] });
-    const a = db().assignments.find((x: any) => x.desk_id === "MM-D01");
-    a.started_at = `${YESTERDAY}T05:00:00.000Z`;
-    const cards = (await call(m, "GET", "/stock/desks?branchId=B-MM")).json.desks;
-    expect(cards.find((d: any) => d.desk_id === "MM-D01").assignee).toMatchObject({ staffId: DEMO_STAFF["B-MM"], name: "Somchai S.", stale: true });
-    expect(cards.find((d: any) => d.desk_id === "MM-D02").assignee.stale).toBe(false);
+    expect((await call(m, "POST", "/cases/assign", { deskId: "MM-D01", staffId: DEMO_STAFF["B-MM"] })).status).toBe(404);
+    expect((await call(m, "GET", "/my-cases")).status).toBe(404);
+    expect((await call(m, "POST", "/desks/MM-D01/assign", { staffId: DEMO_STAFF["B-MM"] })).status).toBe(404);
   });
 });
 

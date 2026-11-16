@@ -229,7 +229,8 @@ export interface Store {
   // Automatic sales velocity per SKU for one branch (the branch_velocity RPC).
   branchVelocity(branchId: string, to: string, days: number): Promise<VelocityRow[]>;
 
-  // Case assignment. activeAssignments = the current holder of each case.
+  // Case assignment (retired: the desk_assignment table is kept, but nothing
+  // calls these any more). activeAssignments = the current holder of each case.
   // assignDesk ends the current holder and starts the new one atomically (no-op
   // when already the holder); releaseDesk ends without a successor.
   activeAssignments(filter: { branchId?: string }): Promise<DeskAssignment[]>;

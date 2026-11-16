@@ -124,7 +124,7 @@ r.get("/stock/desks", async (c) => {
   const today = businessDate(c.env);
   const date = requireDate(c.req.query("date"), today);
   const branchId = scopeBranch(user, c.req.query("branchId") || undefined);
-  const [desks, branches, skus, days, ledgerRows, staffAccounts, config, openEarlier, history, closed, assignments] = await Promise.all([
+  const [desks, branches, skus, days, ledgerRows, staffAccounts, config, openEarlier, history, closed, goldRow] = await Promise.all([
     store.desks(),
     store.branches(),
     store.skus(),
@@ -136,7 +136,7 @@ r.get("/stock/desks", async (c) => {
     // Check history for streaks: 400 days (a streak shows "365+" beyond that).
     store.deskDays({ branchId, from: addDays(today, -400), to: today }),
     store.closedDays({ branchId, from: addDays(today, -400), to: today }),
-    store.activeAssignments({ branchId }),
+    store.goldPrice(),
   ]);
   const scopedDesks = branchId ? desks.filter((d) => d.branch_id === branchId) : desks;
   const statuses = await loadBranchStatuses(store, [...new Set(scopedDesks.map((d) => d.branch_id))], today);
@@ -148,11 +148,11 @@ r.get("/stock/desks", async (c) => {
   for (const d of history) historyByDesk.set(d.desk_id, [...(historyByDesk.get(d.desk_id) ?? []), d]);
   const closedByBranch = new Map<string, Set<string>>();
   for (const cd of closed) closedByBranch.set(cd.branch_id, (closedByBranch.get(cd.branch_id) ?? new Set()).add(cd.closed_date));
-  const holderByDesk = new Map(assignments.map((a) => [a.desk_id, a]));
+  const { lakPerBaht } = resolveGoldPrice(goldRow, config, today);
   const deskById = new Map(desks.map((d) => [d.desk_id, d]));
   const none = new Set<string>();
 
-  const cards = buildDeskCards(scopedDesks, branches, skus, days, ledgerRows, staffAccounts, config, statuses).map((card) => {
+  const cards = buildDeskCards(scopedDesks, branches, skus, days, ledgerRows, staffAccounts, config, statuses, lakPerBaht).map((card) => {
     const desk = deskById.get(card.desk_id)!;
     const status = buildDayStatus({
       deskCreatedDate: laosDate(new Date(desk.created_at)),
@@ -160,7 +160,6 @@ r.get("/stock/desks", async (c) => {
       closedDates: closedByBranch.get(card.branch_id) ?? none,
       today,
     });
-    const held = holderByDesk.get(card.desk_id);
     return {
       ...card,
       openEarlierDate: blockedBy.get(card.desk_id) ?? null,
@@ -171,9 +170,6 @@ r.get("/stock/desks", async (c) => {
       lastDoneByName: status.lastDoneBy ? staffName.get(status.lastDoneBy) ?? null : null,
       daysBehind: status.daysBehind,
       tier: status.tier,
-      assignee: held
-        ? { staffId: held.staff_id, name: staffName.get(held.staff_id) ?? null, since: held.started_at, stale: laosDate(new Date(held.started_at)) < today }
-        : null,
     };
   });
   // Overdue cases first; the rest keep their order (Array.sort is stable).

@@ -140,10 +140,17 @@ export function validateDeskDay(rows: LedgerRow[]): DayFailure[] {
 // ---------------------------------------------------------------------------
 // Daily Stock
 // ---------------------------------------------------------------------------
-function lastActor(rows: LedgerRow[], day: DeskDay | undefined, staffById: Map<string, StaffAccount>) {
+// Who touched the case last and when, from the same row that gave the name:
+// the newest ledger row, else the day's done_by / checked_in_by stamp.
+function lastActor(rows: LedgerRow[], day: DeskDay | undefined, staffById: Map<string, StaffAccount>): { name: string; at: string | null } | null {
   const lastRow = rows.reduce<LedgerRow | null>((latest, r) => (!latest || r.updated_at > latest.updated_at ? r : latest), null);
-  const actorId = lastRow?.performed_by ?? day?.done_by ?? day?.checked_in_by ?? null;
-  return actorId ? staffById.get(actorId)?.display_name ?? null : null;
+  let actorId: string | null;
+  let at: string | null;
+  if (lastRow?.performed_by) [actorId, at] = [lastRow.performed_by, lastRow.updated_at];
+  else if (day?.done_by) [actorId, at] = [day.done_by, day.done_at ?? null];
+  else [actorId, at] = [day?.checked_in_by ?? null, day?.created_at ?? null];
+  const name = actorId ? staffById.get(actorId)?.display_name : undefined;
+  return name ? { name, at } : null;
 }
 
 // Branch-wide replenishment status of a SKU, keyed "branchId|skuId". Structural
@@ -159,7 +166,9 @@ export function buildDeskCards(
   staffAccounts: StaffAccount[],
   _config: SystemConfig,
   // Branch-wide status per "branchId|skuId" (see loadBranchStatuses).
-  statuses: BranchStatuses = new Map()
+  statuses: BranchStatuses = new Map(),
+  // Today's resolved gold price, for each card's value in LAK.
+  lakPerBaht = 0
 ) {
   const branchById = new Map(branches.map((b) => [b.branch_id, b]));
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
@@ -173,6 +182,7 @@ export function buildDeskCards(
       const rows = ledgerRows.filter((r) => r.desk_id === desk.desk_id && !r.excluded);
       let totalPcs = 0;
       let totalBaht = 0;
+      let totalLak = 0;
       // SKUs on this case whose BRANCH-wide runway is Critical (a case alone says nothing).
       let criticalCount = 0;
       for (const r of rows) {
@@ -180,19 +190,23 @@ export function buildDeskCards(
         const qty = currentQty(r, status);
         totalPcs += qty;
         totalBaht += bahtOf(sku, qty);
+        totalLak += valueLak(sku, qty, lakPerBaht);
         if (statuses.get(`${desk.branch_id}|${r.sku_id}`)?.status === "critical") criticalCount++;
       }
       const branch = branchById.get(desk.branch_id);
+      const actor = lastActor(rows, day, staffById);
       return {
         desk_id: desk.desk_id,
         branch_id: desk.branch_id,
         branch_name: branch?.name_en ?? desk.branch_id,
         branch_name_lo: branch?.name_lo ?? null,
         display_name: desk.display_name,
-        lastActorName: lastActor(rows, day, staffById),
+        lastActorName: actor?.name ?? null,
+        lastActorAt: actor?.at ?? null,
         status,
         totalPcs,
         totalBaht: round2(totalBaht),
+        valueLak: round2(totalLak),
         skuCount: rows.length,
         criticalCount,
       };
@@ -277,7 +291,7 @@ export function buildDeskDetail(
     branch_name: branch?.name_en ?? desk.branch_id,
     display_name: desk.display_name,
     date: day?.ledger_date ?? null,
-    lastActorName: lastActor(visibleRows, day, staffById),
+    lastActorName: lastActor(visibleRows, day, staffById)?.name ?? null,
     status,
     safe_drop_note: day?.safe_drop_note ?? null,
     // For the "Closed 18:42 by Noy" banner and the "Changed by Noy" conflict prompt.

@@ -119,11 +119,8 @@ export const api = {
   updateUser: (id, payload) => patch(`/users/${id}`, payload),
   audit: (params) => request(`/audit?${query(params ?? {})}`),
 
-  myCases: (branchId) => request(`/my-cases?${query({ branchId })}`),
-  assignDesk: (deskId, staffId, note) => post(`/desks/${encodeURIComponent(deskId)}/assign`, { staffId, note }),
   deskHistory: (deskId, to, days) => request(`/desks/${encodeURIComponent(deskId)}/history?${query({ to, days })}`),
   deskInfo: (deskId) => request(`/desks/${encodeURIComponent(deskId)}/info`),
-  releaseDesk: (deskId) => post(`/desks/${encodeURIComponent(deskId)}/release`),
   closedDays: (params) => request(`/closed-days?${query(params ?? {})}`),
   addClosedDays: (payload) => post(`/closed-days`, payload),
   removeClosedDay: (branchId, date) => request(`/closed-days?${query({ branchId, date })}`, { method: "DELETE" }),

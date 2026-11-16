@@ -2,7 +2,7 @@
 // username + password -> session stored. Accounts live in Supabase
 // (staff_accounts); an admin creates them in Settings > Users.
 import { api } from "../api.js";
-import { setSession, clearSession } from "../session.js";
+import { setSession } from "../session.js";
 import { t } from "../i18n.js";
 import { escapeHtml } from "../util.js";
 
@@ -22,18 +22,6 @@ function rememberUsername(u) {
   try {
     localStorage.setItem(LAST_USER_KEY, u);
   } catch {}
-}
-
-// "Switch user" on a shared tablet: end the session and reopen login empty.
-export async function switchUser() {
-  try {
-    await api.logout();
-  } catch {}
-  clearSession();
-  try {
-    localStorage.removeItem(LAST_USER_KEY);
-  } catch {}
-  window.location.reload();
 }
 
 const EYE = `<svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>`;

@@ -1,12 +1,10 @@
 import { api } from "../api.js";
 import { state, branchName } from "../state.js";
 import { toast, openSheet, closeSheet, openActionSheet } from "../ui.js";
-import { fmtBaht, fmtInt, fmtDate, icon, statusPillClasses, escapeHtml, fmtClock, laosDateOf, flameIcon } from "../util.js";
+import { fmtBaht, fmtInt, fmtDate, icon, statusPillClasses, escapeHtml, fmtClock, flameIcon } from "../util.js";
 import { t, tf, pickName } from "../i18n.js";
 import { renderCalendar } from "../calendar.js";
 import { isAdmin } from "../session.js";
-import { casesChipHtml, refreshCasesChip, wireCasesChip } from "./cases-switcher.js";
-import { switchUser } from "./login.js";
 import { mountDay, unmountDay } from "./day/index.js";
 
 const PURITY_OPTIONS = ["96.5%", "99.99%"];
@@ -46,36 +44,28 @@ export async function mountStock() {
 
 function renderTopbar() {
   const branches = state.meta.branches;
-  const staffLocked = !isAdmin(state.user);
+  const admin = isAdmin(state.user);
   const el = document.getElementById("topbar-slot");
+  const caret = `<svg class="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>`;
+  // Row 1: title, date chip, overdue/active badges. Row 2: the branch, as small grey
+  // text (a tappable chip only for an admin, who can switch branches).
   el.innerHTML = `
-    <div class="flex items-start justify-between">
-      <div>
-        <h1 class="text-lg font-extrabold text-gray-900">${t("stock.title")}</h1>
-        <p class="text-[11px] font-medium text-gray-600">${t("stock.subtitle")}</p>
-      </div>
-      <div id="stock-badges" class="flex flex-wrap justify-end gap-1.5"></div>
-    </div>
-    <div class="mt-3 flex items-center gap-2">
-      ${casesChipHtml()}
-      <button id="switch-user" class="chip ml-auto shrink-0 border-hairline bg-white text-gray-700">${t("switchUser.button")}</button>
-    </div>
-    <div class="mt-2 flex gap-2">
-      <button id="date-select" class="chip flex-1 justify-between border-hairline bg-white text-gray-700">
-        <span id="date-label">${fmtDate(state.stock.date)}</span>
-        <svg class="h-3.5 w-3.5 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
+    <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+      <h1 class="text-lg font-extrabold text-gray-900">${t("stock.title")}</h1>
+      <button id="date-select" class="chip shrink-0 gap-1 border-hairline bg-white py-1 text-gray-700">
+        <span id="date-label">${fmtDate(state.stock.date)}</span>${caret}
       </button>
+      <div id="stock-badges" class="ml-auto flex flex-wrap justify-end gap-1.5"></div>
+    </div>
+    <div class="mt-1">
       ${
-        staffLocked
-          ? `<span class="chip flex-1 justify-between border-hairline bg-gray-50 text-gray-500"><span class="truncate">${branchName(state.stock.branch)}</span></span>`
-          : `<button id="branch-select" class="chip flex-1 justify-between border-hairline bg-white text-gray-700">
-          <span id="branch-label" class="truncate">${branchName(state.stock.branch)}</span>
-          <svg class="h-3.5 w-3.5 shrink-0 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
-        </button>`
+        admin
+          ? `<button id="branch-select" class="chip max-w-full gap-1 border-hairline bg-white py-0.5 text-[11px] text-gray-600"><span id="branch-label" class="truncate">${escapeHtml(branchName(state.stock.branch))}</span>${caret}</button>`
+          : `<p id="branch-label" class="truncate text-[11px] font-medium text-gray-500">${escapeHtml(branchName(state.stock.branch))}</p>`
       }
     </div>`;
 
-  if (!staffLocked) {
+  if (admin) {
     document.getElementById("branch-select").addEventListener("click", () => {
       openActionSheet(
         t("stock.selectBranch"),
@@ -90,9 +80,6 @@ function renderTopbar() {
   }
 
   document.getElementById("date-select").addEventListener("click", (e) => openCalendarSheet(e.currentTarget));
-  document.getElementById("switch-user").addEventListener("click", () => switchUser());
-  wireCasesChip(() => state.stock.branch, () => refreshCards(false));
-  refreshCasesChip(state.stock.branch);
 }
 
 async function backToGrid() {
@@ -147,7 +134,7 @@ let currentCards = [];
 
 let currentToday = null;
 
-// showLoading=false re-renders in place (after a take/release) without the spinner flash.
+// showLoading=false re-renders in place without the spinner flash.
 async function refreshCards(showLoading = true) {
   const root = document.getElementById("view-root");
   if (showLoading) root.innerHTML = `<div class="py-16 text-center text-sm text-gray-600">${t("stock.loadingDesks")}</div>`;
@@ -156,7 +143,6 @@ async function refreshCards(showLoading = true) {
   currentToday = today;
   renderBadges(desks, branchSummary);
   renderBody(desks, branchSummary);
-  refreshCasesChip(state.stock.branch);
 }
 
 function renderBadges(desks, summary) {
@@ -165,8 +151,6 @@ function renderBadges(desks, summary) {
   if (!el) return;
   el.innerHTML = `
     ${summary?.overdue ? `<span class="status-pill bg-danger-bg text-danger">⚠ ${summary.overdue} ${t("stock.badgeOverdue")}</span>` : ""}
-    ${summary?.behind1 ? `<span class="status-pill bg-warning-bg text-warning">${summary.behind1} ${t("stock.badgeBehind")}</span>` : ""}
-    ${summary?.checkedToday ? `<span class="status-pill bg-success-bg text-success">${summary.checkedToday} ${t("stock.badgeDone")}</span>` : ""}
     ${active ? `<span class="status-pill bg-brand-100 text-brand-700">${active} ${t("stock.badgeActive")}</span>` : ""}
   `;
 }
@@ -179,8 +163,7 @@ function renderBody(desks, summary) {
         ? `<p id="branch-line" class="mb-3 text-xs font-bold ${summary.overdue ? "text-danger" : "text-gray-700"}">${tf("stock.branchLine", { cases: summary.cases, checked: summary.checkedToday, overdue: summary.overdue })}</p>`
         : ""
     }
-    <div id="overdue-strip" class="mb-3 hidden flex-col gap-3"></div>
-    <div id="desk-grid" class="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4"></div>
+    <div id="desk-list" class="flex flex-col gap-2"></div>
   `;
   renderFab();
   renderGrid(desks);
@@ -188,7 +171,7 @@ function renderBody(desks, summary) {
 
 // Lives outside #view-root (like report.js's sticky footer) so it floats
 // above the bottom nav near the Settings gear instead of scrolling with the
-// desk grid. app.js calls unmountStock() before mounting any other view.
+// case list. app.js calls unmountStock() before mounting any other view.
 function renderFab() {
   let host = document.getElementById("fab-new-case");
   if (!host) {
@@ -224,126 +207,57 @@ function blockedDate(desk) {
   return desk.status === "not_started" && desk.openEarlierDate ? desk.openEarlierDate : null;
 }
 
-// Tier look (spec CR3): left bar + tint + a text line that always names the tier.
-const TIER_STYLE = {
-  done_today: { bar: "border-l-success", tint: "", text: "text-success" },
-  on_track: { bar: "border-l-gray-300", tint: "", text: "text-gray-600" },
-  behind_1: { bar: "border-l-amber-500", tint: "bg-warning-bg", text: "text-warning" },
-  overdue: { bar: "border-l-danger", tint: "bg-danger-bg", text: "text-danger" },
-};
-
+// The warning line under an overdue card; other tiers say nothing extra.
 function tierText(d) {
   const last = d.lastDoneDate ? fmtDate(d.lastDoneDate) : null;
-  switch (d.tier) {
-    case "done_today":
-      return d.lastDoneByName
-        ? tf("stock.tierDoneToday", { time: d.lastDoneAt ? fmtClock(d.lastDoneAt) : "", name: d.lastDoneByName })
-        : tf("stock.tierDoneTodayNoName", { time: d.lastDoneAt ? fmtClock(d.lastDoneAt) : "" });
-    case "behind_1":
-      return tf("stock.tierBehind1", { date: last ?? "—" });
-    case "overdue":
-      return last ? tf("stock.tierOverdue", { n: d.daysBehind, date: last }) : tf("stock.tierOverdueNever", { n: d.daysBehind });
-    default:
-      return d.openedAt ? tf("stock.tierOnTrackOpen", { time: fmtClock(d.openedAt) }) : t("stock.tierOnTrackIdle");
-  }
+  return last ? tf("stock.tierOverdue", { n: d.daysBehind, date: last }) : tf("stock.tierOverdueNever", { n: d.daysBehind });
 }
 
-// A free case, or one whose holder is stale (took it on an earlier day), can be taken.
-// A same-day holder needs a manager (the server answers NOT_HOLDER).
-function canTake(d) {
-  if (isAdmin(state.user)) return false;
-  if (!d.assignee) return true;
-  return d.assignee.stale && d.assignee.staffId !== state.user.accountId;
-}
-
-function holderLine(d) {
-  const a = d.assignee;
-  if (!a) return `<span class="text-gray-500">${t("stock.noHolder")}</span>`;
-  const name = escapeHtml(a.name ?? "");
-  if (!a.stale) return `<span class="font-semibold text-gray-800">👤 ${tf("stock.holderSince", { name, time: fmtClock(a.since) })}</span>`;
-  const sinceDate = laosDateOf(a.since);
-  const yesterday = currentToday ? new Date(Date.parse(`${currentToday}T00:00:00Z`) - 86400000).toISOString().slice(0, 10) : null;
-  const when = sinceDate === yesterday ? t("stock.yesterday") : fmtDate(sinceDate);
-  return `<span class="text-gray-500">${tf("stock.lastHolder", { name, when })}</span>`;
-}
-
+// One compact row for every case. Overdue cases are sorted first by the server and
+// only add a red left bar and the warning line; the card is never bigger.
 function renderCard(d) {
-  const ts = TIER_STYLE[d.tier] ?? TIER_STYLE.on_track;
+  const overdue = d.tier === "overdue";
   const streak = d.streak > 365 ? "365+" : d.streak;
+  const blocked = blockedDate(d);
   return `
-    <div class="card flex flex-col gap-2.5 border-l-4 p-3.5 ${ts.bar} ${ts.tint}" data-card="${d.desk_id}" data-tier="${d.tier}">
-      <div class="flex items-center justify-between gap-2">
-        <div class="flex min-w-0 items-center gap-2">
-          ${
-            d.lastActorName
-              ? `<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-extrabold text-brand-700">${escapeHtml(d.lastActorName.slice(0, 2).toUpperCase())}</div>`
-              : ""
-          }
-          <div class="min-w-0">
-            <div class="truncate text-sm font-extrabold text-gray-900">${escapeHtml(d.display_name)}</div>
-            ${d.lastActorName ? `<div class="truncate text-[10px] font-medium text-gray-600">${t("stock.lastActorPrefix")} ${escapeHtml(d.lastActorName)}</div>` : ""}
-          </div>
+    <div class="card flex items-center gap-3 border-l-4 px-3 py-2.5 ${overdue ? "border-l-danger" : "border-l-transparent"}" data-card="${d.desk_id}" data-tier="${d.tier}">
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2">
+          <span class="truncate text-sm font-extrabold text-gray-900">${escapeHtml(d.display_name)}</span>
+          <span class="status-pill shrink-0 ${statusPillClasses(d.status)}">${statusLabel(d.status)}</span>
         </div>
-        <span class="status-pill shrink-0 ${statusPillClasses(d.status)}">${statusLabel(d.status)}</span>
-      </div>
-
-      <div class="flex items-start justify-between gap-2">
-        <p class="min-w-0 text-[11px] font-bold leading-snug ${ts.text}">${escapeHtml(tierText(d))}</p>
+        <div class="mt-0.5 flex items-center gap-2 text-xs font-bold text-gray-800">
+          <span>${fmtBaht(d.totalBaht)} Baht · ${fmtInt(d.totalPcs)} pcs</span>
+          ${d.streak > 0 ? `<span class="inline-flex shrink-0 items-center gap-0.5 text-[11px] font-extrabold text-brand-700">${flameIcon()}${streak}<span class="sr-only"> ${t("stock.streakDays")}</span></span>` : ""}
+          ${d.criticalCount > 0 ? `<span class="shrink-0 text-[11px] font-bold text-danger">⚠ ${d.criticalCount} ${t("stock.criticalShort")}</span>` : ""}
+        </div>
+        <div class="text-[11px] text-gray-500">≈ ${fmtInt(d.valueLak ?? 0)} LAK</div>
         ${
-          d.streak > 0
-            ? `<span class="inline-flex shrink-0 items-center gap-0.5 text-[11px] font-extrabold text-brand-700">${flameIcon()}${streak}<span class="sr-only"> ${t("stock.streakDays")}</span></span>`
+          d.lastActorName
+            ? `<div class="truncate text-[11px] text-gray-500">${escapeHtml(tf("stock.lastStamp", { name: d.lastActorName, time: d.lastActorAt ? fmtClock(d.lastActorAt) : "" }))}</div>`
             : ""
         }
+        ${overdue ? `<p class="mt-0.5 text-[11px] font-bold leading-snug text-danger">⚠ ${escapeHtml(tierText(d))}</p>` : ""}
+        ${blocked ? `<p class="mt-0.5 text-[11px] font-bold leading-snug text-warning">${tf("stock.finishFirst", { date: fmtDate(d.openEarlierDate) })}</p>` : ""}
       </div>
-
-      <div class="flex items-baseline gap-1">
-        <span class="text-xl font-extrabold text-gray-900">${fmtBaht(d.totalBaht)}</span>
-        <span class="text-[11px] font-semibold text-gray-600">Baht</span>
-      </div>
-      <div class="flex items-center justify-between text-[11px] text-gray-600">
-        <span>${fmtInt(d.totalPcs)} pcs</span>
-        ${d.criticalCount > 0 ? `<span class="font-bold text-danger">⚠ ${d.criticalCount} ${t("stock.criticalShort")}</span>` : ""}
-      </div>
-
-      <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-        <div class="min-w-0">${holderLine(d)}</div>
-        ${canTake(d) ? `<button data-take="${d.desk_id}" class="tap-target rounded-full border border-brand-600 px-3 text-[11px] font-bold text-brand-700 active:bg-brand-50">${t("stock.takeCase")}</button>` : ""}
-      </div>
-      ${
-        blockedDate(d)
-          ? `<p class="rounded-lg bg-warning-bg px-2 py-1.5 text-[10px] font-bold leading-tight text-warning">${tf("stock.finishFirst", { date: fmtDate(d.openEarlierDate) })}</p>`
-          : ""
-      }
-
-      <button data-action="${d.desk_id}" class="btn-${d.status === "done" ? "secondary" : "primary"} mt-1 w-full py-2 text-xs">
-        ${blockedDate(d) ? tf("stock.goToDate", { date: fmtDate(d.openEarlierDate) }) : actionLabel(d.status)}
+      <button data-action="${d.desk_id}" class="btn-${d.status === "done" ? "secondary" : "primary"} shrink-0 px-3 py-2 text-xs">
+        ${blocked ? tf("stock.goToDate", { date: fmtDate(d.openEarlierDate) }) : actionLabel(d.status)}
       </button>
     </div>`;
 }
 
 function renderGrid(desks) {
-  const grid = document.getElementById("desk-grid");
-  const strip = document.getElementById("overdue-strip");
+  const list = document.getElementById("desk-list");
   if (desks.length === 0) {
-    strip.classList.add("hidden");
-    grid.innerHTML = `<div class="col-span-full py-10 text-center text-sm text-gray-600">${t("stock.noDesks")}</div>`;
+    list.innerHTML = `<div class="py-10 text-center text-sm text-gray-600">${t("stock.noDesks")}</div>`;
     return;
   }
-
-  // Overdue cases are pinned in a full-width strip above the grid.
-  const overdue = desks.filter((d) => d.tier === "overdue");
-  const rest = desks.filter((d) => d.tier !== "overdue");
-  strip.classList.toggle("hidden", overdue.length === 0);
-  strip.classList.toggle("flex", overdue.length > 0);
-  strip.innerHTML = overdue.length
-    ? `<h2 class="text-xs font-extrabold uppercase tracking-wide text-danger">⚠ ${tf("stock.overdueStrip", { n: overdue.length })}</h2>${overdue.map((d) => renderCard(d)).join("")}`
-    : "";
-  grid.innerHTML = rest.map((d) => renderCard(d)).join("");
+  list.innerHTML = desks.map((d) => renderCard(d)).join("");
 
   const root = document.getElementById("view-root");
   root.querySelectorAll("[data-card]").forEach((card) => {
     card.addEventListener("click", (e) => {
-      if (e.target.closest("[data-action], [data-take]")) return;
+      if (e.target.closest("[data-action]")) return;
       const desk = currentCards.find((d) => d.desk_id === card.dataset.card);
       // Not started today has no opening-balance row to show yet (it's only
       // materialized on check-in), so tapping the card falls back to the
@@ -356,19 +270,6 @@ function renderGrid(desks) {
     btn.addEventListener("click", () => {
       const desk = currentCards.find((d) => d.desk_id === btn.dataset.action);
       handleCardAction(desk);
-    });
-  });
-  root.querySelectorAll("[data-take]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const desk = currentCards.find((d) => d.desk_id === btn.dataset.take);
-      btn.disabled = true;
-      try {
-        await api.assignDesk(desk.desk_id, state.user.accountId);
-        toast(tf("stock.takenToast", { case: desk.display_name }), "success");
-      } catch (err) {
-        toast(err.message, "error");
-      }
-      await refreshCards(false);
     });
   });
 }

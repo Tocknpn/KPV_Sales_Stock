@@ -4,13 +4,13 @@ import { tf, t } from "../public/js/i18n.js";
 
 describe("tf", () => {
   it("substitutes placeholders from the dictionary template", () => {
-    expect(tf("stock.tierOnTrackOpen", { time: "08:10" })).toContain("08:10");
-    expect(tf("stock.tierOnTrackOpen", { time: "08:10" })).not.toContain("{time}");
-    expect(tf("cases.takeOverConfirm", { name: "Noy" })).toContain("Noy");
+    expect(tf("stock.lastStamp", { name: "Noy", time: "08:10" })).toContain("08:10");
+    expect(tf("stock.lastStamp", { name: "Noy", time: "08:10" })).not.toContain("{time}");
+    expect(tf("stock.lastStamp", { name: "Noy", time: "08:10" })).toContain("Noy");
   });
 
   it("inserts $& and other replacement patterns literally", () => {
-    expect(tf("cases.takeOverConfirm", { name: "A$&B$1" })).toContain("A$&B$1");
+    expect(tf("stock.lastStamp", { name: "A$&B$1" })).toContain("A$&B$1");
   });
 
   it("does not re-scan a substituted value", () => {
@@ -21,7 +21,7 @@ describe("tf", () => {
   });
 
   it("leaves unknown placeholders untouched", () => {
-    expect(tf("stock.tierOnTrackOpen", {})).toContain("{time}");
-    expect(t("stock.tierOnTrackOpen")).toContain("{time}");
+    expect(tf("stock.lastStamp", {})).toContain("{time}");
+    expect(t("stock.lastStamp")).toContain("{time}");
   });
 });

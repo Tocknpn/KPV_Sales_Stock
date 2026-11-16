@@ -9,7 +9,7 @@ import moveRoutes from "./routes/moves";
 import documentRoutes from "./routes/documents";
 import insightRoutes from "./routes/insights";
 import settingsRoutes from "./routes/settings";
-import caseRoutes from "./routes/cases";
+import closedDayRoutes from "./routes/closedDays";
 import replenishmentRoutes from "./routes/replenishment";
 import auditRoutes from "./routes/audit";
 
@@ -28,7 +28,7 @@ app.route("/api", moveRoutes);
 app.route("/api", documentRoutes);
 app.route("/api", insightRoutes);
 app.route("/api", settingsRoutes);
-app.route("/api", caseRoutes);
+app.route("/api", closedDayRoutes);
 app.route("/api", replenishmentRoutes);
 app.route("/api", auditRoutes);
 
