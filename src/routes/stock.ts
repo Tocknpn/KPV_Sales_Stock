@@ -8,7 +8,7 @@ import { requireManager, assertBranchAccess, isManagerOf } from "../auth";
 import { addDays, businessDate, datesInMonth, isValidMonth, laosDate } from "../time";
 import { buildDayStatus } from "../dayStatus";
 import { loadBranchStatuses } from "../replenishment";
-import { resolveGoldPrice } from "../goldPrice";
+import { resolveGoldPrice, priceOn } from "../goldPrice";
 import { buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, computeClosing, parseQty, validateDeskDay } from "../logic";
 import type { Desk, DeskDay, LedgerRow, MasterSku, SessionUser, StaffAccount, Transfer } from "../types";
 
@@ -301,7 +301,11 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
   const moves = await historyMoves(store, deskId, date, outgoing, staffAccounts, skus, allDesks);
   const day = days[0];
   const statuses = await loadBranchStatuses(store, [desk.branch_id], businessDate(c.env));
-  const detail = buildDeskDetail(desk, branches.find((b) => b.branch_id === desk.branch_id), day, skus, ledgerRows, staffAccounts, config, weights, statuses, resolveGoldPrice(goldRow, config, businessDate(c.env)).lakPerBaht);
+  const today = businessDate(c.env);
+  const gold = resolveGoldPrice(goldRow, config, today);
+  // A past day is valued at the price in force that day; today at the live price.
+  const lakPerBaht = date < today ? priceOn(date, await store.goldPriceHistory(date, date), gold.lakPerBaht) : gold.lakPerBaht;
+  const detail = buildDeskDetail(desk, branches.find((b) => b.branch_id === desk.branch_id), day, skus, ledgerRows, staffAccounts, config, weights, statuses, lakPerBaht);
   const skuName = (id: string) => skus.find((s) => s.sku_id === id)?.name_en ?? id;
   const deskName = (id: string) => {
     const d = allDesks.find((x) => x.desk_id === id);

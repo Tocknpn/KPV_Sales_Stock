@@ -1367,11 +1367,15 @@ class SupabaseStore implements Store {
   }
   async goldPriceHistory(from: string, to: string) {
     const cols = "select=price_date,price_baht_sell";
-    const [inRange, before] = await Promise.all([
-      this.restAll<GoldPriceSnapshot>(`gold_price_history?${cols}&price_date=gte.${enc(from)}&price_date=lte.${enc(to)}&order=price_date`),
-      this.rest<GoldPriceSnapshot[]>(`gold_price_history?${cols}&price_date=lt.${enc(from)}&order=price_date.desc&limit=1`),
-    ]);
-    return [...before, ...inRange];
+    try {
+      const [inRange, before] = await Promise.all([
+        this.restAll<GoldPriceSnapshot>(`gold_price_history?${cols}&price_date=gte.${enc(from)}&price_date=lte.${enc(to)}&order=price_date`),
+        this.rest<GoldPriceSnapshot[]>(`gold_price_history?${cols}&price_date=lt.${enc(from)}&order=price_date.desc&limit=1`),
+      ]);
+      return [...before, ...inRange];
+    } catch {
+      return [];
+    }
   }
   async config() {
     const [row] = await this.rest<SystemConfig[]>("system_config?id=eq.1&select=*");

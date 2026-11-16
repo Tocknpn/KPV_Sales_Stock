@@ -210,7 +210,7 @@ export function buildDeskDetail(
   weights: SkuWeight[] = [],
   // Branch-wide status per "branchId|skuId"; the only source of low-stock alerts.
   statuses: BranchStatuses = new Map(),
-  lakPerBaht: number = config.spot_lak_per_baht
+  lakPerBaht: number
 ) {
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
   const staffById = new Map(staffAccounts.map((s) => [s.id, s]));
@@ -669,7 +669,7 @@ export interface ReportFilter {
   q?: string;
 }
 
-export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus: MasterSku[], filter: ReportFilter, config: SystemConfig, lakPerBaht: number = config.spot_lak_per_baht) {
+export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus: MasterSku[], filter: ReportFilter, config: SystemConfig, lakPerBaht: number) {
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
   const statusByDay = new Map(periodDays.map((d) => [`${d.desk_id}__${d.ledger_date}`, d.status]));
   const statusOf = (r: LedgerRow) => statusByDay.get(`${r.desk_id}__${r.ledger_date}`);

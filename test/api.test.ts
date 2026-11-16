@@ -458,13 +458,31 @@ describe("numbers agree across screens", () => {
 
   it("value follows the gold price the admin enters when gold_prices is empty", async () => {
     const admin = await asAdmin();
-    (getStore({} as never) as unknown as { db: { goldPrice: unknown } }).db.goldPrice = null;
-    const before = (await call(admin, "GET", "/dashboard?deskId=IT-D01")).json.portfolio;
-    expect(before.lak_value).toBe(before.total_baht_gold * 32500000);
-    await call(admin, "POST", "/settings/config", { spotLakPerBaht: 40000000, usdToLakRate: 20000 });
-    const after = (await call(admin, "GET", "/dashboard?deskId=IT-D01")).json.portfolio;
-    expect(after.lak_value).toBe(before.total_baht_gold * 40000000);
-    expect(after.usd_value).toBe(after.lak_value / 20000);
+    const db = (getStore({} as never) as unknown as { db: { goldPrice: unknown } }).db;
+    const saved = db.goldPrice;
+    try {
+      db.goldPrice = null;
+      const before = (await call(admin, "GET", "/dashboard?deskId=IT-D01")).json.portfolio;
+      expect(before.lak_value).toBe(before.total_baht_gold * 32500000);
+      await call(admin, "POST", "/settings/config", { spotLakPerBaht: 40000000, usdToLakRate: 20000 });
+      const after = (await call(admin, "GET", "/dashboard?deskId=IT-D01")).json.portfolio;
+      expect(after.lak_value).toBe(before.total_baht_gold * 40000000);
+      expect(after.usd_value).toBe(after.lak_value / 20000);
+    } finally {
+      db.goldPrice = saved;
+    }
+  });
+
+  it("a past day's desk detail is valued at that day's snapshot price", async () => {
+    const admin = await asAdmin();
+    const db = (getStore({} as never) as unknown as { db: { goldHistory: unknown[] } }).db;
+    db.goldHistory = [{ price_date: YESTERDAY, price_baht_sell: 30000000 }];
+    const past = await detailOf(admin, "IT-D01", YESTERDAY);
+    const now = await detailOf(admin, "IT-D01", TODAY);
+    const baht = (d: any) => d.rows.reduce((s: number, r: any) => s + r.closing_baht, 0);
+    expect(past.totals.valueLak).toBeGreaterThan(0);
+    expect(past.totals.valueLak).toBeCloseTo(baht(past) * 30000000, -3);
+    expect(now.totals.valueLak).toBeCloseTo(baht(now) * 43230000, -3);
   });
 
   it("low stock follows the branch status everywhere", async () => {
