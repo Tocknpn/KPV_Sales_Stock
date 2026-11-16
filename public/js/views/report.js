@@ -135,24 +135,8 @@ function gridCell(c) {
   return `<span class="text-gray-500">·</span>`;
 }
 
-async function renderGrid(root) {
-  const section = document.createElement("section");
-  section.className = "mt-4";
-  section.innerHTML = `<h2 class="text-sm font-extrabold text-gray-900">${t("report.grid")}</h2>
-    <p class="mt-0.5 text-[11px] text-gray-600">${t("report.gridLegend")}</p>
-    <div id="grid-body" class="mt-2 min-w-0"><p class="py-6 text-center text-sm text-gray-600">${t("report.loading")}</p></div>`;
-  // Right under the month picker: first thing in the view.
-  root.prepend(section);
-  const host = section.querySelector("#grid-body");
-  const branch = state.report.branch ?? state.meta.branches[0]?.branch_id;
-  try {
-    const grid = await loadGrid(branch, state.report.period);
-    if (!host.isConnected) return;
-    if (!grid.rows.length) {
-      host.innerHTML = `<p class="py-6 text-center text-sm text-gray-600">${t("report.gridEmpty")}</p>`;
-      return;
-    }
-    host.innerHTML = `<div class="max-w-full overflow-x-auto rounded-xl border border-hairline bg-white">
+function gridTable(grid) {
+  return `<div class="max-w-full overflow-x-auto rounded-xl border border-hairline bg-white">
       <table class="min-w-full border-collapse text-[11px]">
         <thead><tr>
           <th class="sticky left-0 z-10 bg-gray-50 px-2 py-2 text-left font-semibold text-gray-600"></th>
@@ -169,6 +153,34 @@ async function renderGrid(root) {
             .join("")}
         </tbody>
       </table></div>`;
+}
+
+async function renderGrid(root) {
+  const section = document.createElement("section");
+  section.className = "mt-4";
+  section.innerHTML = `<h2 class="text-sm font-extrabold text-gray-900">${t("report.grid")}</h2>
+    <p class="mt-0.5 text-[11px] text-gray-600">${t("report.gridLegend")}</p>
+    <div id="grid-body" class="mt-2 min-w-0"><p class="py-6 text-center text-sm text-gray-600">${t("report.loading")}</p></div>`;
+  // Right under the month picker: first thing in the view.
+  root.prepend(section);
+  const host = section.querySelector("#grid-body");
+  // One grid per branch: the chosen one, or every branch under "All branches".
+  const all = state.meta.branches ?? [];
+  const branches = state.report.branch ? all.filter((b) => b.branch_id === state.report.branch) : all;
+  const list = branches.length ? branches : [{ branch_id: state.report.branch ?? undefined }];
+  try {
+    const grids = await Promise.all(list.map((b) => loadGrid(b.branch_id, state.report.period)));
+    if (!host.isConnected) return;
+    host.innerHTML = grids
+      .map((grid, i) => {
+        const b = list[i];
+        const name = b.branch_id ? branchName(b.branch_id) : "";
+        return `<div class="${i > 0 ? "mt-4" : ""}">
+          ${name ? `<h3 class="mb-1.5 text-xs font-extrabold text-gray-800">${escapeHtml(name)}</h3>` : ""}
+          ${grid.rows.length ? gridTable(grid) : `<p class="py-6 text-center text-sm text-gray-600">${t("report.gridEmpty")}</p>`}
+        </div>`;
+      })
+      .join("");
     host.querySelectorAll("td[data-desk]").forEach((td) => td.addEventListener("click", () => openDeskDay(td.dataset.desk, td.dataset.date)));
   } catch (err) {
     host.innerHTML = `<p class="py-6 text-center text-sm text-danger">${escapeHtml(err.message || t("err.SERVER_ERROR"))}</p>`;

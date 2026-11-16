@@ -13,6 +13,9 @@ import { escapeHtml, fmtBaht, fmtClock, fmtDate } from "../../util.js";
 // Columns that are bookkeeping for the row, not something a person changed.
 const HIDDEN_FIELDS = new Set(["id", "desk_id", "sku_id", "ledger_date", "is_seed", "created_at", "updated_at", "performed_by", "closing_qty", "branch_id"]);
 
+// Who made a case and what it started with: summarised, never printed raw.
+const ORIGIN_FIELDS = new Set(["created_by", "initial_stock"]);
+
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
 // id -> display name for people. Filled from the audit entries on screen (actor_id
@@ -77,7 +80,9 @@ function buildSentence(e) {
   // Entries the Worker wrote itself (settings, reopen, ...): action and target.
   if (!e.table_name) {
     const detail = e.detail && typeof e.detail === "object" && "reason" in e.detail ? ` (${fmtValue(e.detail.reason)})` : "";
-    return [...head, `${e.action}${e.target ? ` ${fmtValue(e.target)}` : ""}${detail}`].join(" · ");
+    const label = t(`audit.action.${e.action}`);
+    const action = label === `audit.action.${e.action}` ? e.action : label;
+    return [...head, `${action}${e.target ? ` ${fmtValue(e.target)}` : ""}${detail}`].join(" · ");
   }
 
   if (e.table_name === "transfers") {
@@ -93,8 +98,10 @@ function buildSentence(e) {
 
   const ov = e.old_values ?? {};
   const nv = e.new_values ?? {};
-  const keys = [...new Set([...Object.keys(ov), ...Object.keys(nv)])].filter((k) => !HIDDEN_FIELDS.has(k));
+  const keys = [...new Set([...Object.keys(ov), ...Object.keys(nv)])].filter((k) => !HIDDEN_FIELDS.has(k) && !(e.table_name === "desks" && ORIGIN_FIELDS.has(k)));
   let parts;
+  // Mention the origin only when this entry is the one that set it.
+  const originPcs = e.table_name === "desks" && (e.op === "INSERT" || ov.initial_stock == null) ? nv.initial_stock?.total_pcs : undefined;
   if (e.op === "UPDATE") parts = keys.map((k) => `${fieldLabel(k)} ${fmtValue(ov[k])} → ${fmtValue(nv[k])}`);
   else {
     // A new or removed row lists only the values that carry something.
@@ -104,6 +111,8 @@ function buildSentence(e) {
       .map((k) => (e.op === "INSERT" ? `${fieldLabel(k)} → ${fmtValue(nv[k])}` : `${fieldLabel(k)} ${fmtValue(ov[k])} → —`));
     if (parts.length === 0) parts = [t(`audit.op.${e.op}`)];
   }
+  // The frozen origin is one short line, not a JSON dump.
+  if (originPcs != null && e.op !== "DELETE") parts.push(tf("history.originalSet", { n: originPcs }));
   return [...head, parts.join("; ")].join(" · ");
 }
 

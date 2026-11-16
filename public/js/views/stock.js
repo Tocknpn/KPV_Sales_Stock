@@ -1,7 +1,7 @@
 import { api } from "../api.js";
 import { state, branchName } from "../state.js";
 import { toast, openSheet, closeSheet, openActionSheet } from "../ui.js";
-import { fmtBaht, fmtInt, fmtDate, icon, statusPillClasses, escapeHtml, fmtClock, flameIcon } from "../util.js";
+import { fmtBaht, fmtInt, fmtDate, icon, statusPillClasses, escapeHtml, fmtClock, fmtLaosStamp, laosDateOf, flameIcon } from "../util.js";
 import { t, tf, pickName } from "../i18n.js";
 import { renderCalendar } from "../calendar.js";
 import { isAdmin } from "../session.js";
@@ -215,6 +215,13 @@ function tierText(d) {
 
 // One compact row for every case. Overdue cases are sorted first by the server and
 // only add a red left bar and the warning line; the card is never bigger.
+// "Last: name · HH:mm"; with the date when the action was not on the viewed day; no time when unknown.
+function lastStamp(d) {
+  if (!d.lastActorAt) return tf("stock.lastStampNoTime", { name: d.lastActorName });
+  const time = laosDateOf(d.lastActorAt) === state.stock.date ? fmtClock(d.lastActorAt) : fmtLaosStamp(d.lastActorAt);
+  return tf("stock.lastStamp", { name: d.lastActorName, time });
+}
+
 function renderCard(d) {
   const overdue = d.tier === "overdue";
   const streak = d.streak > 365 ? "365+" : d.streak;
@@ -234,7 +241,7 @@ function renderCard(d) {
         <div class="text-[11px] text-gray-500">≈ ${fmtInt(d.valueLak ?? 0)} LAK</div>
         ${
           d.lastActorName
-            ? `<div class="truncate text-[11px] text-gray-500">${escapeHtml(tf("stock.lastStamp", { name: d.lastActorName, time: d.lastActorAt ? fmtClock(d.lastActorAt) : "" }))}</div>`
+            ? `<div class="truncate text-[11px] text-gray-500">${escapeHtml(lastStamp(d))}</div>`
             : ""
         }
         ${overdue ? `<p class="mt-0.5 text-[11px] font-bold leading-snug text-danger">⚠ ${escapeHtml(tierText(d))}</p>` : ""}
