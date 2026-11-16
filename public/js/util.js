@@ -133,6 +133,16 @@ export function fmtClock(iso) {
   return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Vientiane" });
 }
 
+// "16/11 08:58": Laos-local DD/MM HH:mm of an ISO timestamp.
+export function fmtLaosStamp(iso) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Vientiane" })
+      .formatToParts(new Date(iso))
+      .map((p) => [p.type, p.value])
+  );
+  return `${parts.day}/${parts.month} ${parts.hour === "24" ? "00" : parts.hour}:${parts.minute}`;
+}
+
 export function laosDateOf(iso) {
   return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Asia/Vientiane" });
 }
