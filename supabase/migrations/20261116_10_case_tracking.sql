@@ -80,6 +80,16 @@ begin
      order by a.created_at
      limit 1;
 
+    if v_skus is not null then
+      -- keep only positive integer quantities (matches the ledger path's opening_qty > 0)
+      select coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
+        into v_skus
+        from jsonb_each(v_skus) e
+       where jsonb_typeof(e.value) = 'number'
+         and e.value::text ~ '^[0-9]+$'
+         and e.value::text::numeric > 0;
+    end if;
+
     -- 2) no audit row: opening quantities of the earliest day
     if v_skus is null then
       v_creator := null;
@@ -89,6 +99,10 @@ begin
        where l.desk_id = d.desk_id
          and l.opening_qty > 0
          and l.ledger_date = (select min(dd.ledger_date) from desk_days dd where dd.desk_id = d.desk_id);
+      -- nothing to freeze from: leave the origin null
+      if v_skus = '{}'::jsonb then
+        continue;
+      end if;
     end if;
 
     select coalesce(sum(e.value::int), 0),
