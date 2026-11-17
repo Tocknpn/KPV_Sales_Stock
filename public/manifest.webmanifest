@@ -1,6 +1,6 @@
 {
-  "name": "KPV Goldsmith & Retail Inventory",
-  "short_name": "KPV Inventory",
+  "name": "KPV Stock Tracking",
+  "short_name": "KPV Stock",
   "description": "Daily stock, documents, dashboard and reporting for gold cases.",
   "start_url": "/",
   "display": "standalone",

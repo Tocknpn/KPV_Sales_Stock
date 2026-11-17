@@ -99,7 +99,7 @@ const DICT = {
     "calendar.full": "ຄົບແລ້ວ",
 
     "login.title": "ເຂົ້າສູ່ລະບົບ",
-    "login.subtitle": "KPV ສະຕັອກ — ໃສ່ຊື່ຜູ້ໃຊ້ ແລະ ລະຫັດຜ່ານຂອງທ່ານ",
+    "login.subtitle": "KPV Stock Tracking — ໃສ່ຊື່ຜູ້ໃຊ້ ແລະ ລະຫັດຜ່ານຂອງທ່ານ",
     "login.username": "ຊື່ຜູ້ໃຊ້",
     "login.usernamePlaceholder": "ຕົວຢ່າງ: somchai",
     "login.password": "ລະຫັດຜ່ານ",
@@ -814,7 +814,7 @@ const DICT = {
     "calendar.full": "Complete",
 
     "login.title": "Sign In",
-    "login.subtitle": "KPV Stock — enter your username and password",
+    "login.subtitle": "KPV Stock Tracking — enter your username and password",
     "login.username": "Username",
     "login.usernamePlaceholder": "e.g. somchai",
     "login.password": "Password",

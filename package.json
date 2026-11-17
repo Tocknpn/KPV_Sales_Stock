@@ -2,7 +2,7 @@
   "name": "kpv-goldsmith-inventory",
   "version": "1.0.0",
   "private": true,
-  "description": "KPV Goldsmith & Retail Inventory - mobile web app (Cloudflare Worker + Supabase)",
+  "description": "KPV Stock Tracking - mobile web app (Cloudflare Worker + Supabase)",
   "type": "module",
   "scripts": {
     "build:css": "tailwindcss -i ./src/styles/input.css -o ./public/css/app.css --minify",
