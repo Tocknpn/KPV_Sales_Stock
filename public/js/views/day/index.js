@@ -578,11 +578,12 @@ function openMenu() {
     const { deskCard, date, detail, hooks } = S;
     hooks.openSkuPicker?.(
       S.rows.map((r) => r.sku_id),
-      async (sku) => {
+      async (skus, meta) => {
         // On a desk's very first day the starting stock can be typed in.
-        const opening = detail.isFirstDay ? await hooks.askOpeningQty(sku) : 0;
-        if (opening === null) return;
-        await api.addDeskSku(deskCard.desk_id, { date, sku_id: sku.sku_id, opening_qty: opening });
+        const openings = detail.isFirstDay ? await hooks.askOpeningQtys(skus, meta) : new Map();
+        if (openings === null) return;
+        await api.addDeskSkus(deskCard.desk_id, { date, items: skus.map((s) => ({ sku_id: s.sku_id, opening_qty: openings.get(s.sku_id) ?? 0 })) });
+        toast(tf("picker.addedN", { n: skus.length }), "success");
         await hooks.reload?.();
       }
     );

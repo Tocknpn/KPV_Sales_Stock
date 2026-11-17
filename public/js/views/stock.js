@@ -7,8 +7,7 @@ import { renderCalendar } from "../calendar.js";
 import { isAdmin } from "../session.js";
 import { mountDay, unmountDay } from "./day/index.js";
 import { go, pathFor, backTo } from "../router.js";
-
-const PURITY_OPTIONS = ["96.5%", "99.99%"];
+import { renderSkuPickerInto, openingRowsHtml, bindOpeningInputs } from "./sku-picker.js";
 
 function setStockDate(date) {
   state.stock.date = date;
@@ -389,7 +388,7 @@ function dayHooks(deskCard) {
     onBack: backToGrid,
     reload: () => reloadDeskDetail(deskCard),
     openSkuPicker: openSkuPickerSheet,
-    askOpeningQty,
+    askOpeningQtys,
   };
 }
 
@@ -402,23 +401,25 @@ async function reloadDeskDetail(deskCard) {
 }
 
 
-// Resolves to the typed opening quantity, or null when the sheet is closed.
-function askOpeningQty(sku) {
+// Opening balances for SKUs added on a case's first day. Resolves to a
+// Map sku_id -> qty, or null when the sheet is closed without confirming.
+function askOpeningQtys(skus, { types, weights }) {
   return new Promise((resolve) => {
     let answered = false;
+    const qty = new Map(skus.map((s) => [s.sku_id, 0]));
     openSheet(
       `
       <p class="mb-3 text-xs text-gray-600">${t("stock.firstDayOpeningHint")}</p>
-      <label for="first-opening" class="mb-1.5 block text-xs font-bold text-gray-600">${t("stock.openingQtyLabel")}</label>
-      <input id="first-opening" type="number" min="0" step="1" inputmode="numeric" value="0" class="input-filled text-center text-base font-extrabold" />
-      <button id="first-opening-ok" class="btn-primary mt-4 w-full">${t("stock.addSku")}</button>
+      <div id="opening-rows">${openingRowsHtml(skus.map((sku) => ({ sku, qty: 0 })), types, weights)}</div>
+      <button id="opening-ok" class="btn-primary mt-3 mb-2 w-full">${tf("picker.addN", { n: fmtInt(skus.length) })}</button>
     `,
       {
-        title: escapeHtml(productName(sku.name_en, sku.name_lo)),
+        title: t("picker.openingTitle"),
         onMount: (body) => {
-          body.querySelector("#first-opening-ok").addEventListener("click", () => {
+          bindOpeningInputs(body, (id, q) => qty.set(id, q));
+          body.querySelector("[data-opening-input]")?.focus();
+          body.querySelector("#opening-ok").addEventListener("click", () => {
             answered = true;
-            const qty = Math.max(0, Math.floor(Number(body.querySelector("#first-opening").value) || 0));
             closeSheet();
             resolve(qty);
           });
@@ -433,114 +434,20 @@ function askOpeningQty(sku) {
   });
 }
 
-// --- SKU picker (select existing / create new), reused by the desk-detail
-// "Add SKU" flow and the create-Case flow's opening-balance step. Only an
-// admin may create a brand-new SKU in the master list. ---
+// --- SKU picker sheet for a case's "Add SKU" ---
 
-async function renderSkuPickerInto(container, excludeSkuIds, onPick, onCancel) {
-  container.innerHTML = `<div class="py-10 text-center text-sm text-gray-600">${t("stock.loadingDesks")}</div>`;
-  const { skus } = await api.skus();
-  const available = skus.filter((s) => !excludeSkuIds.includes(s.sku_id));
-  const canCreate = isAdmin(state.user);
-  container.innerHTML = `
-    <button id="sku-back" class="mb-2 text-xs font-bold text-gray-500">&larr; ${t("login.back")}</button>
-    ${canCreate ? `<button id="create-new-sku" class="btn-primary mb-3 w-full py-2.5 text-xs">${t("stock.createNewSku")}</button>` : ""}
-    <div class="flex flex-col gap-1.5">
-      ${
-        available.length
-          ? available
-              .map(
-                (s) => `
-        <button data-pick-sku="${escapeHtml(s.sku_id)}" class="card flex items-center gap-2.5 p-2.5 text-left">
-          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">${icon(s.icon, "h-4 w-4")}</span>
-          <span class="min-w-0">
-            <span class="block truncate text-xs font-bold text-gray-900">${escapeHtml(productName(s.name_en, s.name_lo))}</span>
-            <span class="block text-[10px] text-gray-500">${escapeHtml([s.type_name, s.weight_name].filter(Boolean).join(" · ") || s.sku_id)}</span>
-          </span>
-        </button>`
-              )
-              .join("")
-          : `<div class="py-6 text-center text-xs text-gray-500">${canCreate ? "—" : t("stock.askAdminForSku")}</div>`
-      }
-    </div>`;
-  container.querySelector("#sku-back").addEventListener("click", onCancel);
-  container.querySelector("#create-new-sku")?.addEventListener("click", () => renderCreateSkuFormInto(container, onPick, onCancel));
-  container.querySelectorAll("[data-pick-sku]").forEach((btn) => {
-    btn.addEventListener("click", () => onPick(available.find((s) => s.sku_id === btn.dataset.pickSku)));
-  });
-}
-
-async function renderCreateSkuFormInto(container, onPick, onCancel) {
-  container.innerHTML = `<div class="py-10 text-center text-sm text-gray-600">${t("stock.loadingDesks")}</div>`;
-  const [{ types }, { weights }] = await Promise.all([api.skuTypes(), api.skuWeights()]);
-  const activeTypes = types.filter((ty) => ty.active);
-  const activeWeights = weights.filter((w) => w.active);
-  container.innerHTML = `
-    <button id="sku-back" class="mb-2 text-xs font-bold text-gray-500">&larr; ${t("login.back")}</button>
-    <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("stock.skuNameLabel")}</label>
-    <input id="sku-name" type="text" class="input-filled" />
-    <div class="mt-3 grid grid-cols-2 gap-2">
-      <div>
-        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuTypeLabel")}</label>
-        <select id="sku-type" class="input-filled">
-          ${activeTypes.map((ty) => `<option value="${ty.type_id}">${escapeHtml(ty.name_en)}</option>`).join("")}
-        </select>
-      </div>
-      <div>
-        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuWeightLabel")}</label>
-        <select id="sku-weight" class="input-filled">
-          ${activeWeights.map((w) => `<option value="${w.weight_id}">${escapeHtml(w.name_en)}</option>`).join("")}
-        </select>
-      </div>
-    </div>
-    <div class="mt-3 grid grid-cols-2 gap-2">
-      <div>
-        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.purityLabel")}</label>
-        <select id="sku-purity" class="input-filled">
-          <option value="">—</option>
-          ${PURITY_OPTIONS.map((p) => `<option value="${p}">${p}</option>`).join("")}
-        </select>
-      </div>
-      <div>
-        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.bahtWeightLabel")}</label>
-        <input id="sku-baht" type="number" step="0.01" min="0" value="0" class="input-filled" />
-      </div>
-    </div>
-    <label class="mt-3 mb-1.5 block text-xs font-bold text-gray-600">${t("settings.priceLabel")}</label>
-    <input id="sku-price" type="number" min="0" value="0" class="input-filled" />
-    <button id="create-sku-submit" class="btn-primary mt-4 w-full">${t("stock.createNewSku")}</button>
-  `;
-  container.querySelector("#sku-back").addEventListener("click", onCancel);
-  container.querySelector("#create-sku-submit").addEventListener("click", async () => {
-    const name_en = container.querySelector("#sku-name").value.trim();
-    if (!name_en) return toast(t("stock.needSkuName"), "error");
-    if (!activeTypes.length || !activeWeights.length) return toast(t("settings.needTypeAndWeight"), "error");
-    const sku = await api.createSku({
-      name_en,
-      type_id: container.querySelector("#sku-type").value,
-      weight_id: container.querySelector("#sku-weight").value,
-      purity: container.querySelector("#sku-purity").value || null,
-      baht_weight: Number(container.querySelector("#sku-baht").value || 0),
-      unit_price_lak: Number(container.querySelector("#sku-price").value || 0),
-    });
-    onPick(sku);
-  });
-}
-
-function openSkuPickerSheet(excludeSkuIds, onPick) {
+function openSkuPickerSheet(excludeSkuIds, onAdd) {
   openSheet(`<div id="sku-picker-root"></div>`, {
     title: t("stock.addSku"),
     onMount: (body) => {
-      const root = body.querySelector("#sku-picker-root");
-      renderSkuPickerInto(
-        root,
+      renderSkuPickerInto(body.querySelector("#sku-picker-root"), {
         excludeSkuIds,
-        (sku) => {
+        onAdd: (skus, meta) => {
           closeSheet();
-          onPick(sku);
+          onAdd(skus, meta);
         },
-        closeSheet
-      );
+        onCancel: closeSheet,
+      });
     },
   });
 }
@@ -550,64 +457,58 @@ function openSkuPickerSheet(excludeSkuIds, onPick) {
 async function openCreateCaseSheet() {
   let caseName = "";
   let mode = "form"; // "form" | "picker"
-  let rows = [];
+  let rows = []; // [{ sku, qty }]
+  let meta = { types: [], weights: [] };
+  let saving = false;
 
   const render = (body) => {
     if (mode === "picker") {
-      renderSkuPickerInto(
-        body,
-        rows.map((r) => r.sku_id),
-        (sku) => {
-          rows.push({ sku_id: sku.sku_id, name: productName(sku.name_en, sku.name_lo), icon: sku.icon, opening_qty: 0 });
+      renderSkuPickerInto(body, {
+        excludeSkuIds: rows.map((r) => r.sku.sku_id),
+        onAdd: (skus, loaded) => {
+          meta = loaded;
+          const firstNew = skus[0]?.sku_id;
+          rows.push(...skus.map((sku) => ({ sku, qty: 0 })));
+          mode = "form";
+          render(body);
+          body.querySelector(`[data-opening-row="${CSS.escape(firstNew ?? "")}"] [data-opening-input]`)?.focus();
+        },
+        onCancel: () => {
           mode = "form";
           render(body);
         },
-        () => {
-          mode = "form";
-          render(body);
-        }
-      );
+      });
       return;
     }
 
+    const summary = () => tf("picker.skuCount", { n: fmtInt(rows.length), pcs: fmtInt(rows.reduce((a, r) => a + r.qty, 0)) });
     body.innerHTML = `
       <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("stock.caseNumberLabel")}</label>
       <input id="case-name" type="text" maxlength="60" placeholder="${t("stock.caseNumberPlaceholder")}" value="${escapeHtml(caseName)}" class="input-filled" />
 
-      <div class="mt-4 mb-1.5">
+      <div class="mt-4 mb-1.5 flex items-baseline justify-between gap-2">
         <label class="text-xs font-bold text-gray-600">${t("stock.openingSkuSectionTitle")}</label>
+        ${rows.length ? `<span id="case-sku-summary" class="text-[11px] font-semibold text-gray-500">${summary()}</span>` : ""}
       </div>
-      <div id="case-sku-rows" class="flex flex-col gap-2"></div>
-      <button id="case-add-sku" class="btn-secondary mt-2.5 w-full py-2 text-xs">${t("stock.addSku")}</button>
+      <div id="case-sku-rows">${rows.length ? openingRowsHtml(rows, meta.types, meta.weights, { removable: true }) : `<div class="py-4 text-center text-xs text-gray-500">—</div>`}</div>
+      <button id="case-add-sku" class="btn-secondary mt-1 w-full py-2 text-xs">${t("stock.addSku")}</button>
 
-      <button id="create-case-submit" class="btn-primary mt-5 mb-2 w-full">${t("stock.createCaseButton")}</button>
+      <button id="create-case-submit" class="btn-primary mt-5 mb-2 w-full" ${saving ? "disabled" : ""}>${saving ? t("stock.creatingCase") : t("stock.createCaseButton")}</button>
     `;
 
     const rowsEl = body.querySelector("#case-sku-rows");
-    rowsEl.innerHTML = rows.length
-      ? rows
-          .map(
-            (r, i) => `
-        <div class="flex items-center gap-2 rounded-xl border border-hairline p-2" data-case-row="${i}">
-          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">${icon(r.icon, "h-4 w-4")}</span>
-          <span class="min-w-0 flex-1 truncate text-xs font-bold text-gray-900">${escapeHtml(r.name)}</span>
-          <input data-opening-input type="number" min="0" step="1" inputmode="numeric" value="${r.opening_qty}" aria-label="${t("stock.openingQtyLabel")}" class="w-16 rounded-lg border border-hairline py-1.5 text-center text-xs font-bold" />
-          <button data-remove-row aria-label="${t("documents.delete")}" class="tap-target text-gray-400 hover:text-danger">×</button>
-        </div>`
-          )
-          .join("")
-      : `<div class="py-4 text-center text-xs text-gray-500">—</div>`;
-
-    rowsEl.querySelectorAll("[data-case-row]").forEach((rowEl) => {
-      const idx = Number(rowEl.dataset.caseRow);
-      rowEl.querySelector("[data-opening-input]").addEventListener("input", (e) => {
-        rows[idx].opening_qty = Math.max(0, Math.floor(Number(e.target.value) || 0));
-      });
-      rowEl.querySelector("[data-remove-row]").addEventListener("click", () => {
-        rows.splice(idx, 1);
-        render(body);
-      });
+    bindOpeningInputs(rowsEl, (id, q) => {
+      rows.find((r) => r.sku.sku_id === id).qty = q;
+      const el = body.querySelector("#case-sku-summary");
+      if (el) el.textContent = summary();
     });
+    rowsEl.querySelectorAll("[data-remove-row]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const id = btn.closest("[data-opening-row]").dataset.openingRow;
+        rows = rows.filter((r) => r.sku.sku_id !== id);
+        render(body);
+      })
+    );
 
     body.querySelector("#case-name").addEventListener("input", (e) => {
       caseName = e.target.value;
@@ -617,17 +518,28 @@ async function openCreateCaseSheet() {
       render(body);
     });
 
-    body.querySelector("#create-case-submit").addEventListener("click", async () => {
+    const submit = body.querySelector("#create-case-submit");
+    submit.addEventListener("click", async () => {
+      if (saving) return;
       if (!caseName.trim()) return toast(t("stock.needCaseNumber"), "error");
       if (rows.length === 0) return toast(t("stock.needOneSku"), "error");
-      await api.createDesk({
-        branchId: state.stock.branch,
-        displayName: caseName.trim(),
-        openingSkus: rows.map((r) => ({ sku_id: r.sku_id, opening_qty: r.opening_qty })),
-      });
+      saving = true;
+      submit.disabled = true;
+      submit.textContent = t("stock.creatingCase");
+      try {
+        await api.createDesk({
+          branchId: state.stock.branch,
+          displayName: caseName.trim(),
+          openingSkus: rows.map((r) => ({ sku_id: r.sku.sku_id, opening_qty: r.qty })),
+        });
+      } catch (err) {
+        saving = false;
+        submit.disabled = false;
+        submit.textContent = t("stock.createCaseButton");
+        throw err;
+      }
       // The new case must show up in every desk picker straight away.
       state.meta = await api.meta();
-      destinationsCache = null;
       toast(t("stock.caseCreatedToast"), "success");
       closeSheet();
       await refreshCards();

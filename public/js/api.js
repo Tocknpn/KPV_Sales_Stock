@@ -87,7 +87,6 @@ export const api = {
   closeDay: (deskId, payload) => post(`/stock/desk/${deskId}/close`, payload),
   transitionDesk: (deskId, payload) => post(`/stock/desk/${deskId}/transition`, payload),
   reopenDesk: (deskId, payload) => post(`/stock/desk/${deskId}/reopen`, payload),
-  addDeskSku: (deskId, payload) => post(`/stock/desk/${deskId}/sku`, payload),
   // payload = { date, items: [{ sku_id, opening_qty? }] }
   addDeskSkus: (deskId, payload) => post(`/stock/desk/${deskId}/sku`, payload),
   removeDeskSku: (deskId, skuId, date) => request(`/stock/desk/${deskId}/sku/${encodeURIComponent(skuId)}?${query({ date })}`, { method: "DELETE" }),
