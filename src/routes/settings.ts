@@ -222,8 +222,10 @@ r.post("/skus/import", async (c) => {
     return { n, sku: b.sku };
   });
   const created = await store.createSkus(built.map((b) => b.sku));
-  await store.setCarried(built.map((b) => ({ branch_id: b.n.branch_id, sku_id: b.sku.sku_id, carried: true })));
-  for (const b of built) if (b.n.avg !== null || b.n.lead !== null) await writeSkuRule(store, b.sku.sku_id, [b.n.branch_id], b.n.avg, b.n.lead);
+  await store.setCarried(built.flatMap((b) => b.n.branches.map((x) => ({ branch_id: x.branch_id, sku_id: b.sku.sku_id, carried: true }))));
+  for (const b of built) {
+    for (const x of b.n.branches) if (x.avg !== null || x.lead !== null) await writeSkuRule(store, b.sku.sku_id, [x.branch_id], x.avg, x.lead);
+  }
 
   // Catalogue changes (admin only; planImport ignores them for others).
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
@@ -239,11 +241,13 @@ r.post("/skus/import", async (c) => {
 
   // Audit: one row per SKU and branch written, then the summary.
   for (const b of built) {
-    await audit(store, user, "sku.import_row", b.sku.sku_id, {
-      branch_id: b.n.branch_id,
-      before: null,
-      after: { name: b.n.name, type_id: b.n.type.type_id, weight_id: b.n.weight.weight_id, avg_daily_sell: b.n.avg, lead_time_days: b.n.lead },
-    });
+    for (const x of b.n.branches) {
+      await audit(store, user, "sku.import_row", b.sku.sku_id, {
+        branch_id: x.branch_id,
+        before: null,
+        after: { name: b.n.name, type_id: b.n.type.type_id, weight_id: b.n.weight.weight_id, avg_daily_sell: x.avg, lead_time_days: x.lead },
+      });
+    }
   }
   for (const u of plan.updatedRows) {
     const sku = skuById.get(u.sku_id)!;

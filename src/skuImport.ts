@@ -33,7 +33,9 @@ export interface ImportPlan {
   ignored: { line: number; field: CatalogueField }[];
   errors: { line: number; error: string }[];
   // What to write when the plan has no errors.
-  newSkus: { line: number; tempKey: string; name: string; type: SkuType; weight: SkuWeight; branch_id: string; avg: number | null; lead: number | null }[];
+  // One entry per new SKU (name + type + size); an all-branches file may list
+  // it once per branch, and it is then carried in each.
+  newSkus: { line: number; name: string; type: SkuType; weight: SkuWeight; branches: { branch_id: string; avg: number | null; lead: number | null }[] }[];
   skuPatches: Map<string, { name?: string; type?: SkuType; weight?: SkuWeight }>;
   rules: { sku_id: string; branch_id: string; avg: number | null; lead: number | null; before: { avg: number | null; lead: number | null } }[];
   carried: BranchSku[];
@@ -118,6 +120,10 @@ export function planImport(input: {
   const ruleOf = new Map(input.rules.filter((r) => r.scope === "sku" && r.branch_id).map((r) => [`${r.branch_id}|${r.scope_key}`, r]));
   const seen = new Map<string, number>(); // branch|sku -> first line
   const patchLine = new Map<string, number>(); // sku -> line of its first catalogue change
+  // A new SKU is name + type + size (name compared without case).
+  const identity = (name: string, typeId: string | null, weightId: string | null) => `${name.toLowerCase()}|${typeId ?? ""}|${weightId ?? ""}`;
+  const existingByIdentity = new Map(input.skus.map((s) => [identity(s.name_lo || s.name_en, s.type_id, s.weight_id), s]));
+  const newByIdentity = new Map<string, ImportPlan["newSkus"][number]>();
 
   input.rows.forEach((raw, i) => {
     const row = raw ?? {};
@@ -161,7 +167,18 @@ export function planImport(input: {
       if (!name) return fail("name is required");
       if (!type) return fail("type is required");
       if (!weight) return fail("grams is required");
-      plan.newSkus.push({ line, tempKey: `new-${line}`, name, type, weight, branch_id: branch, avg: avgR, lead: leadR });
+      const id = identity(name, type.type_id, weight.weight_id);
+      const existing = existingByIdentity.get(id);
+      if (existing) return fail(`this SKU already exists as ${existing.sku_id} — put ${existing.sku_id} in sku_id`);
+      const prior = newByIdentity.get(id);
+      if (prior) {
+        if (prior.branches.some((b) => b.branch_id === branch)) return fail(`the same new SKU is also on line ${prior.line}`);
+        prior.branches.push({ branch_id: branch, avg: avgR, lead: leadR });
+        return;
+      }
+      const entry = { line, name, type, weight, branches: [{ branch_id: branch, avg: avgR, lead: leadR }] };
+      newByIdentity.set(id, entry);
+      plan.newSkus.push(entry);
       plan.created++;
       return;
     }

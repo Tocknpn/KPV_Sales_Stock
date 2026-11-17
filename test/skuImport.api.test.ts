@@ -105,6 +105,32 @@ describe("SKU import", () => {
     expect(await skuOf("GB-001")).toMatchObject({ name_lo: "ທອງຄຳແທ່ງ 1 ບາດ" });
   });
 
+  it("all branches: one new SKU on several branch rows is created once", async () => {
+    const admin = await asAdmin();
+    const before = (await store().skus()).length;
+    const res = await imp(admin, [
+      { ...NEW_ROW, branch_id: "B-MM", avg_daily_sell: 1 },
+      { ...NEW_ROW, name: " ແຫວນໃໝ່ ", branch_id: "B-VT", avg_daily_sell: 4 },
+    ], { branchId: "all" });
+    expect(res.status).toBe(200);
+    expect(res.json.created).toBe(1);
+    expect((await store().skus()).length).toBe(before + 1);
+    const made = (await store().skus()).find((s) => s.name_lo === "ແຫວນໃໝ່")!;
+    expect((await store().branchSkus()).filter((b) => b.sku_id === made.sku_id && b.carried).map((b) => b.branch_id).sort()).toEqual(["B-MM", "B-VT"]);
+    expect(await ruleOf(made.sku_id, "B-MM")).toMatchObject({ avg_daily_sell: 1 });
+    expect(await ruleOf(made.sku_id, "B-VT")).toMatchObject({ avg_daily_sell: 4 });
+  });
+
+  it("the same new SKU twice in one branch is an error", async () => {
+    const res = await imp(await asAdmin(), [NEW_ROW, { ...NEW_ROW, avg_daily_sell: 9 }]);
+    expect(res.json.errors).toEqual([{ line: 3, error: "the same new SKU is also on line 2" }]);
+  });
+
+  it("a new row that matches an existing SKU is an error", async () => {
+    const res = await imp(await asAdmin(), [{ sku_id: "", name: "ທອງຄຳແທ່ງ 1 ບາດ", type: "ທອງຄຳແທ່ງ", grams: 15.244 }]);
+    expect(res.json.errors).toEqual([{ line: 2, error: "this SKU already exists as GB-001 — put GB-001 in sku_id" }]);
+  });
+
   it("staff import is forced to own branch", async () => {
     const staff = await asStaff("B-MM");
     const res = await imp(staff, [NEW_ROW], { branchId: "B-VT" });
