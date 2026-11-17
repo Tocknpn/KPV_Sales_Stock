@@ -87,7 +87,6 @@ describe("user level", () => {
       ["DELETE", "/documents/a0000000-0000-0000-0000-000000000001", undefined],
       ["POST", "/documents/a0000000-0000-0000-0000-000000000003/decision", { decision: "approved" }],
       ["POST", "/stock/desk/IT-D01/reopen", { date: TODAY, reason: "test" }],
-      ["GET", "/audit", undefined],
     ] as const;
     for (const [method, path, body] of denied) {
       expect((await call(staff, method, path, body)).status, `${method} ${path}`).toBe(403);
@@ -651,6 +650,9 @@ describe("branch scope", () => {
     expect((await call(staff, "GET", "/audit?branchId=B-TS")).status).toBe(403);
     const mine = await call(staff, "GET", "/audit?deskId=MM-D01");
     expect(mine.status).toBe(200);
+    const branch = await call(staff, "GET", "/audit");
+    expect(branch.status).toBe(200);
+    for (const e of branch.json.entries) expect([e.branch_id, e.to_branch_id]).toContain("B-MM");
     const manager = await asManager("B-MM");
     expect((await call(manager, "GET", "/audit?branchId=B-TS")).status).toBe(403);
   });

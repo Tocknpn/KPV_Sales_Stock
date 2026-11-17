@@ -1,11 +1,11 @@
 // The audit trail, read-only. There is deliberately no route that changes or
 // deletes an entry. Scope follows spec 4.8:
-//   staff    only one case (deskId) of their own branch, and only today (Laos)
-//   manager  their own branch
+//   staff, manager  their own branch, any date (staff widened to the
+//                   manager scope on 2026-11-17)
 //   admin    everything
 // Mounted behind requireAuth in src/index.ts.
 import { storeFor, newRouter, HttpError, requireDesk } from "../app";
-import { businessDate, addDays, isValidDate } from "../time";
+import { addDays, isValidDate } from "../time";
 import { parseAuditCursor, UUID_RE, SCOPE_ID_RE } from "../auditParams";
 
 const r = newRouter();
@@ -20,7 +20,6 @@ const laosStart = (date: string) => new Date(`${date}T00:00:00${LAOS_OFFSET}`).t
 r.get("/audit", async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
-  const today = businessDate(c.env);
   const q = (k: string) => c.req.query(k) || undefined;
 
   let deskId = q("deskId");
@@ -46,12 +45,7 @@ r.get("/audit", async (c) => {
     if (d !== undefined && !isValidDate(d)) throw new HttpError(400, "Invalid date", "BAD_DATE");
   }
 
-  if (user.role === "staff") {
-    if (!deskId) throw new HttpError(403, "Choose a case to see its history", "AUDIT_DENIED");
-    if (branchId || actorId) throw new HttpError(403, "History is limited to one case", "AUDIT_DENIED");
-    await requireDesk(store, user, deskId);
-    from = to = today;
-  } else if (user.role === "manager") {
+  if (user.role === "staff" || user.role === "manager") {
     if (!user.branchId) throw new HttpError(403, "Branch access denied", "BRANCH_DENIED");
     if (branchId && branchId !== user.branchId) throw new HttpError(403, "Branch access denied", "BRANCH_DENIED");
     if (deskId) await requireDesk(store, user, deskId);

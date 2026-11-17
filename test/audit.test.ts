@@ -87,7 +87,8 @@ describe("GET /api/audit", () => {
   // on the real Laos date.
   const write = (staff: any, sku = "GB-001", n = 1) => call(staff, "POST", "/stock/desk/MM-D01/entries", { date: today, changes: [{ sku_id: sku, field: "retail_sale", to: n }] }, today);
 
-  it("staff sees today's entries of a case in their branch only", async () => {
+  // Decided 2026-11-17: staff see their branch's history like a manager.
+  it("staff sees their own branch's history, any date, never another branch", async () => {
     const staff = await asStaff("B-MM", today);
     expect((await write(staff)).status).toBe(200);
 
@@ -96,17 +97,19 @@ describe("GET /api/audit", () => {
     expect(mine.json.entries.length).toBeGreaterThan(0);
     for (const e of mine.json.entries) expect([e.desk_id, e.to_desk_id]).toContain("MM-D01");
 
-    // no case → 403; another branch's case → 403; the filters cannot widen the scope
-    expect((await call(staff, "GET", "/audit", undefined, today)).status).toBe(403);
-    expect((await call(staff, "GET", "/audit?branchId=B-MM", undefined, today)).status).toBe(403);
-    expect((await call(staff, "GET", "/audit?deskId=IT-D01", undefined, today)).status).toBe(403);
-    expect((await call(staff, "GET", "/audit?deskId=MM-D01&actorId=00000000-0000-4000-8000-0000000000aa", undefined, today)).status).toBe(403);
-    const widened = await call(staff, "GET", "/audit?deskId=MM-D01&from=2000-01-01", undefined, today);
-    expect(widened.json.entries.length).toBe(mine.json.entries.length);
+    const branch = await call(staff, "GET", "/audit", undefined, today);
+    expect(branch.status).toBe(200);
+    expect(branch.json.entries.length).toBeGreaterThan(0);
+    for (const e of branch.json.entries) expect([e.branch_id, e.to_branch_id]).toContain("B-MM");
+    expect((await call(staff, "GET", "/audit?branchId=B-MM", undefined, today)).status).toBe(200);
 
-    // tomorrow, today's entries are no longer "today's"
+    // another branch → 403, by branch or by case
+    expect((await call(staff, "GET", "/audit?branchId=B-IT", undefined, today)).status).toBe(403);
+    expect((await call(staff, "GET", "/audit?deskId=IT-D01", undefined, today)).status).toBe(403);
+
+    // yesterday's entries stay visible tomorrow
     const next = await call(staff, "GET", "/audit?deskId=MM-D01", undefined, addDays(today, 1));
-    expect(next.json.entries).toHaveLength(0);
+    expect(next.json.entries.length).toBe(mine.json.entries.length);
   });
 
   it("an entry shows at both ends of a move", async () => {

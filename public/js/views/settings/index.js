@@ -13,7 +13,7 @@ const MENU = [
   { id: "sku", labelKey: "settings.menuSku", render: renderSku, icon: `<path stroke-linecap="round" stroke-linejoin="round" d="M3 8l9-4 9 4-9 4-9-4z"/><path stroke-linecap="round" stroke-linejoin="round" d="M3 8v9l9 4 9-4V8M12 12v9"/>` },
   { id: "exchange", labelKey: "settings.menuExchangeRate", render: renderExchangeRate, adminOnly: true, icon: `<path stroke-linecap="round" stroke-linejoin="round" d="M7 8h12l-3-3M17 16H5l3 3"/>` },
   { id: "users", labelKey: "settings.menuUsers", render: renderUsers, icon: `<circle cx="9" cy="8" r="3"/><path stroke-linecap="round" d="M3 20c1-3.5 3.3-5.5 6-5.5s5 2 6 5.5"/><circle cx="17.5" cy="9" r="2.3"/><path stroke-linecap="round" d="M15.8 14.3c2 .2 3.6 2 4.2 4.2"/>` },
-  { id: "audit", labelKey: "audit.menu", render: renderAudit, managerOnly: true, icon: `<path stroke-linecap="round" stroke-linejoin="round" d="M8 4h8l3 3v13H5V4h3z"/><path stroke-linecap="round" d="M9 12h6M9 16h6M9 8h3"/>` },
+  { id: "audit", labelKey: "audit.menu", render: renderAudit, icon: `<path stroke-linecap="round" stroke-linejoin="round" d="M8 4h8l3 3v13H5V4h3z"/><path stroke-linecap="round" d="M9 12h6M9 16h6M9 8h3"/>` },
 ];
 
 // Hidden since 2026-11-17: Replenishment (now inside SKU setting), Stock-out

@@ -129,7 +129,7 @@ Three roles. Staff and managers see only their own branch; admin sees all.
 | Users (create, role, branch, username, password reset) | no | no | yes |
 | Rename an SKU, change its type or size, deactivate it; types, sizes, exchange rate, config | no (gold price strip is readable) | no (gold price strip is readable) | yes |
 | Approve / reject proposals, delete documents | no | no | yes |
-| Audit history | own case, today | own branch | all |
+| Audit history | own branch | own branch | all |
 
 The Worker returns friendly errors; the database refuses the same actions
 through triggers keyed on the acting staff member (the Worker sends
