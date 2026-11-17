@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 // @ts-expect-error plain browser ES module without types
-import { groupSkusByType, filterSkus, toggleSelection, skuSizeLabel } from "../public/js/sku-groups.js";
+import { groupSkusByType, filterSkus, toggleSelection, skuSizeLabel, weightLabel, splitWeight, gramsOf } from "../public/js/sku-groups.js";
 
 const types = [
   { type_id: "T-RING", name_en: "Rings", name_lo: "ແຫວນ", sort_order: 2, active: true },
@@ -86,15 +86,15 @@ describe("skuSizeLabel (Lao units)", () => {
     expect(skuSizeLabel(w({ baht_weight: 10 }))).toBe("10 ບາດ");
   });
   it("quarters of a baht are salueng, fortieths are hun", () => {
-    expect(skuSizeLabel(w({ weight_name: "0.25 Baht", baht_weight: 0.25 }))).toBe("1 ສະລຶງ");
-    expect(skuSizeLabel(w({ baht_weight: 0.5 }))).toBe("2 ສະລຶງ");
+    expect(skuSizeLabel(w({ weight_name: "0.25 Baht", baht_weight: 0.25 }))).toBe("1 ສະຫຼຶງ");
+    expect(skuSizeLabel(w({ baht_weight: 0.5 }))).toBe("2 ສະຫຼຶງ");
     expect(skuSizeLabel(w({ baht_weight: 0.125 }))).toBe("5 ຫຸນ");
-    expect(skuSizeLabel(w({ baht_weight: 0.3 }))).toBe("1 ສະລຶງ 2 ຫຸນ");
+    expect(skuSizeLabel(w({ baht_weight: 0.3 }))).toBe("1 ສະຫຼຶງ 2 ຫຸນ");
     expect(skuSizeLabel(w({ baht_weight: 0.025 }))).toBe("1 ຫຸນ");
-    expect(skuSizeLabel(w({ baht_weight: 8.5 }))).toBe("8 ບາດ 2 ສະລຶງ");
+    expect(skuSizeLabel(w({ baht_weight: 8.5 }))).toBe("8 ບາດ 2 ສະຫຼຶງ");
   });
-  it("gram and kilogram sizes are shown in grams", () => {
-    expect(skuSizeLabel(w({ weight_name: "1kg", baht_weight: 66.6667 }))).toBe("1000 ກລາມ");
+  it("gram sizes in ກລາມ, 1000 g and up in ກິໂລ", () => {
+    expect(skuSizeLabel(w({ weight_name: "1kg", baht_weight: 66.6667 }))).toBe("1 ກິໂລ");
     expect(skuSizeLabel(w({ weight_name: "1g", baht_weight: 0.0667 }))).toBe("1 ກລາມ");
   });
   it("an uneven baht weight falls back to grams, from the stored grams first", () => {
@@ -102,9 +102,31 @@ describe("skuSizeLabel (Lao units)", () => {
     expect(skuSizeLabel(w({ baht_weight: 0.31 }))).toBe("4.73 ກລາມ");
   });
   it("reads the baht from the weight name when baht_weight is missing", () => {
-    expect(skuSizeLabel(w({ weight_name: "0.5 Baht", baht_weight: undefined }))).toBe("2 ສະລຶງ");
+    expect(skuSizeLabel(w({ weight_name: "0.5 Baht", baht_weight: undefined }))).toBe("2 ສະຫຼຶງ");
   });
   it("nothing known gives an empty label", () => {
     expect(skuSizeLabel(w({}))).toBe("");
+  });
+});
+
+describe("weightLabel / splitWeight / gramsOf (Weight form)", () => {
+  it("labels the seeded sizes in Lao", () => {
+    expect(weightLabel(3.811)).toBe("1 ສະຫຼຶງ");
+    expect(weightLabel(7.622)).toBe("2 ສະຫຼຶງ");
+    expect(weightLabel(15.244)).toBe("1 ບາດ");
+    expect(weightLabel(30.488)).toBe("2 ບາດ");
+    expect(weightLabel(1)).toBe("1 ກລາມ");
+    expect(weightLabel(3.75)).toBe("3.75 ກລາມ");
+    expect(weightLabel(1000)).toBe("1 ກິໂລ");
+    expect(weightLabel(0)).toBe("");
+  });
+  it("amount + unit round-trips through grams", () => {
+    for (const [amount, unit] of [["1", "ບາດ"], ["3", "ສະຫຼຶງ"], ["7", "ຫຸນ"], ["2", "ກິໂລ"], ["82.57", "ກລາມ"]]) {
+      const g = gramsOf(amount, unit);
+      expect(splitWeight(g)).toEqual({ amount, unit });
+    }
+    expect(gramsOf("1", "ສະຫຼຶງ")).toBe(3.811);
+    expect(gramsOf("", "ບາດ")).toBe(0);
+    expect(gramsOf("-1", "ບາດ")).toBe(0);
   });
 });

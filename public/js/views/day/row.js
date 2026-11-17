@@ -4,9 +4,9 @@
 //   dynamic mode  SKU | Opening | Stock-in | Retail | Wholesale | Destock | Move in/out | Closing
 //
 // Editable cells are plain inputs (numeric keypad) holding the DAY'S TOTAL for
-// that field: typing replaces it and it saves on change. Move in/out is signed;
-// its input holds the size and a ± strip under it holds the direction, because
-// the iPhone number pad has no minus key. In count mode the Closing column
+// that field: typing replaces it and it saves on change. Move in/out is signed:
+// type -5 for 5 moved out, 5 for 5 moved in; the strip under it shows the
+// direction, and its ± button flips the sign (the iPhone number pad has no minus). In count mode the Closing column
 // becomes the Count input, with the expected closing above it (tap = matches).
 import { t, productName } from "../../i18n.js";
 import { escapeHtml, fmtRunway } from "../../util.js";
@@ -25,8 +25,9 @@ export function skuName(r) {
   return productName(r.name_en, r.name_lo);
 }
 
+// Rows are grouped by Type, labelled in Lao (product groups are gone, 2026-11-17).
 export function groupKeyOf(r) {
-  return (r.group_name || r.category || "").trim();
+  return (r.type_label || r.category || "").trim();
 }
 
 /** The editable quantity columns for a stock-out mode, in screen order. */
@@ -80,6 +81,14 @@ function toneOf(field, value) {
 
 const label = (r, field) => `${skuName(r)} · ${t(LABEL[field])}`;
 
+// The direction strip under Move in/out: a label that follows the sign, and ±.
+export function moveStripHtml(v, pendingNeg = false) {
+  const neg = v < 0 || (v === 0 && pendingNeg);
+  return `<span data-move-label class="min-w-0 flex-1 truncate py-0.5 text-center">${neg ? t("grid.moveOut") : t("grid.moveIn")}</span>
+      <button type="button" data-act="sign" aria-pressed="${neg}" aria-label="${t("grid.signToggle")}"
+        class="shrink-0 border-l border-black/10 px-1.5 py-0.5">±</button>`;
+}
+
 function moveCell(r, readOnly) {
   const v = r.move_qty ?? 0;
   const linked = linkedMoveOf(r);
@@ -90,11 +99,10 @@ function moveCell(r, readOnly) {
   const neg = v < 0;
   return `
     <div class="${BOX} overflow-hidden" data-move-cell>
-      <input data-field="move_qty" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" enterkeyhint="next" autocomplete="off"
-        value="${Math.abs(v)}" aria-label="${escapeHtml(label(r, "move_qty"))}"
+      <input data-field="move_qty" type="text" inputmode="text" pattern="-?[0-9]*" maxlength="6" enterkeyhint="next" autocomplete="off" autocorrect="off" spellcheck="false"
+        value="${v}" aria-label="${escapeHtml(label(r, "move_qty"))}"
         class="${NUM} focus-ring pt-1 ${toneOf("move_qty", v)}" />
-      <button type="button" data-act="sign" aria-pressed="${neg}" aria-label="${t("grid.signToggle")}"
-        class="w-full shrink-0 py-0.5 text-[10px] font-extrabold leading-tight ${neg ? "bg-danger-bg text-danger" : "bg-success-bg text-success"}">${neg ? t("grid.moveOut") : t("grid.moveIn")}</button>
+      <div data-move-strip class="flex w-full shrink-0 items-stretch text-[10px] font-extrabold leading-tight ${neg ? "bg-danger-bg text-danger" : "bg-success-bg text-success"}">${moveStripHtml(v)}</div>
       ${legacy}
     </div>`;
 }
@@ -164,7 +172,7 @@ export function renderRow(r, view) {
   const { readOnly, mode, problems } = view;
   const bad = Boolean(problems && problems.size > 0);
   const low = r.branch_status === "critical" || r.branch_status === "warning";
-  const sub = [skuSizeLabel(r), r.purity].filter(Boolean).join(" · ");
+  const sub = skuSizeLabel(r);
   const extras = extrasHtml(r, view);
   return `
   <div data-sku="${escapeHtml(r.sku_id)}" class="rounded-xl px-1 py-1 ${bad ? "bg-danger-bg ring-2 ring-danger" : ""}">
@@ -194,18 +202,22 @@ export function patchRow(el, r, view, { force = false } = {}) {
   el.querySelectorAll("[data-field]").forEach((input) => {
     const field = input.dataset.field;
     const v = r[field] ?? 0;
-    if (input !== active) input.value = field === "move_qty" ? Math.abs(v) : v;
+    if (input !== active) input.value = v;
     if (field === "move_qty") {
       input.classList.remove("text-success", "text-danger", "text-gray-900");
       input.classList.add(toneOf("move_qty", v));
     }
   });
-  const sign = el.querySelector('[data-act="sign"]');
-  if (sign) {
-    const neg = (r.move_qty ?? 0) < 0 || sign.dataset.pendingNeg === "1";
-    sign.setAttribute("aria-pressed", String(neg));
-    sign.textContent = neg ? t("grid.moveOut") : t("grid.moveIn");
-    sign.className = `w-full shrink-0 py-0.5 text-[10px] font-extrabold leading-tight ${neg ? "bg-danger-bg text-danger" : "bg-success-bg text-success"}`;
+  const strip = el.querySelector("[data-move-strip]");
+  if (strip) {
+    const v = r.move_qty ?? 0;
+    const pending = strip.dataset.pendingNeg === "1";
+    const neg = v < 0 || (v === 0 && pending);
+    strip.innerHTML = moveStripHtml(v, pending);
+    strip.classList.toggle("bg-danger-bg", neg);
+    strip.classList.toggle("text-danger", neg);
+    strip.classList.toggle("bg-success-bg", !neg);
+    strip.classList.toggle("text-success", !neg);
   }
   const closing = closingOf(r);
   const closingEl = el.querySelector("[data-closing]");

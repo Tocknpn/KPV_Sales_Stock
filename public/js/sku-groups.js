@@ -45,31 +45,80 @@ export function toggleSelection(selected, skuId) {
   return next;
 }
 
-// Size in the Lao units staff use: ບາດ, ສະລຶງ (1/4 baht), ຫຸນ (1/40 baht, as in
-// the SKU data: "1 ຫຸນ" = 0.025 baht), or ກລາມ for gram sizes and for weights
-// that are not a whole number of hun.
-const GRAMS_PER_BAHT = 15.244;
+// Sizes in the Lao units staff use (decided 2026-11-17, every label in Lao):
+//   ບາດ = 15.244 g, ສະຫຼຶງ = 1/4 ບາດ, ຫຸນ = 1/40 ບາດ (as in the SKU data:
+//   "1 ຫຸນ" = 0.025 baht), ກລາມ for gram sizes, ກິໂລ from 1000 g up.
+export const GRAMS_PER_BAHT = 15.244;
+const GRAMS_PER_HUN = GRAMS_PER_BAHT / 40;
 const round2 = (n) => String(Math.round(n * 100) / 100);
+const round3 = (n) => Math.round(n * 1000) / 1000;
 
-export function skuSizeLabel(sku) {
-  const name = String(sku.weight_name ?? "").trim();
-  const gram = /^([\d.]+)\s*(kg|g)$/i.exec(name);
-  if (gram) return `${round2(Number(gram[1]) * (gram[2].toLowerCase() === "kg" ? 1000 : 1))} ກລາມ`;
+// The units of the Weight form, biggest first.
+export const WEIGHT_UNITS = [
+  { unit: "ກິໂລ", grams: 1000 },
+  { unit: "ບາດ", grams: GRAMS_PER_BAHT },
+  { unit: "ສະຫຼຶງ", grams: GRAMS_PER_BAHT / 4 },
+  { unit: "ຫຸນ", grams: GRAMS_PER_HUN },
+  { unit: "ກລາມ", grams: 1 },
+];
 
-  const fromName = /^([\d.]+)\s*baht$/i.exec(name);
-  const baht = sku.baht_weight > 0 ? Number(sku.baht_weight) : fromName ? Number(fromName[1]) : 0;
-  if (!(baht > 0)) return "";
+// Grams stored with 3 decimals: a whole number of hun within rounding.
+function wholeHun(grams) {
+  const hun = grams / GRAMS_PER_HUN;
+  const h = Math.round(hun);
+  return h > 0 && Math.abs(hun - h) < 0.005 ? h : null;
+}
 
-  const hunTotal = baht / 0.025;
-  if (Math.abs(hunTotal - Math.round(hunTotal)) < 1e-6) {
-    const h = Math.round(hunTotal);
+/** Lao label of a size in grams: "1 ບາດ 2 ສະຫຼຶງ", "1 ກິໂລ", "82.57 ກລາມ". */
+export function weightLabel(grams) {
+  const g = Number(grams);
+  if (!(g > 0)) return "";
+  const h = wholeHun(g);
+  if (h !== null) {
     const parts = [
       [Math.floor(h / 40), "ບາດ"],
-      [Math.floor((h % 40) / 10), "ສະລຶງ"],
+      [Math.floor((h % 40) / 10), "ສະຫຼຶງ"],
       [h % 10, "ຫຸນ"],
     ];
     return parts.filter(([n]) => n > 0).map(([n, unit]) => `${n} ${unit}`).join(" ");
   }
-  const grams = sku.std_gram_weight > 0 ? Number(sku.std_gram_weight) : baht * GRAMS_PER_BAHT;
-  return `${round2(grams)} ກລາມ`;
+  if (g >= 1000) return `${round2(g / 1000)} ກິໂລ`;
+  return `${round2(g)} ກລາມ`;
+}
+
+/** The Weight form's amount + unit for a size in grams (the reverse of gramsOf). */
+export function splitWeight(grams) {
+  const g = Number(grams);
+  if (!(g > 0)) return { amount: "", unit: "ບາດ" };
+  const h = wholeHun(g);
+  if (h !== null) {
+    if (h % 40 === 0) return { amount: String(h / 40), unit: "ບາດ" };
+    if (h % 10 === 0) return { amount: String(h / 10), unit: "ສະຫຼຶງ" };
+    return { amount: String(h), unit: "ຫຸນ" };
+  }
+  if (g >= 1000) return { amount: round2(g / 1000), unit: "ກິໂລ" };
+  return { amount: round2(g), unit: "ກລາມ" };
+}
+
+/** Grams of an amount in a Lao unit; 0 when not a number above 0. */
+export function gramsOf(amount, unit) {
+  const n = Number(amount);
+  const u = WEIGHT_UNITS.find((x) => x.unit === unit);
+  return u && Number.isFinite(n) && n > 0 ? round3(n * u.grams) : 0;
+}
+
+// Grams of a SKU: its size's grams, else a gram size name ("1g", "1kg"), else
+// its Baht weight, else a Baht size name ("0.25 Baht").
+function skuGrams(sku) {
+  if (sku.std_gram_weight > 0) return Number(sku.std_gram_weight);
+  const name = String(sku.weight_name ?? "").trim();
+  const gram = /^([\d.]+)\s*(kg|g)$/i.exec(name);
+  if (gram) return Number(gram[1]) * (gram[2].toLowerCase() === "kg" ? 1000 : 1);
+  if (sku.baht_weight > 0) return Number(sku.baht_weight) * GRAMS_PER_BAHT;
+  const baht = /^([\d.]+)\s*baht$/i.exec(name);
+  return baht ? Number(baht[1]) * GRAMS_PER_BAHT : 0;
+}
+
+export function skuSizeLabel(sku) {
+  return weightLabel(skuGrams(sku));
 }

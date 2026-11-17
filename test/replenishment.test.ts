@@ -11,102 +11,81 @@ function rule(scope: ReplenishmentRule["scope"], key: string, branch: string | n
 }
 
 describe("resolveParams", () => {
-  it("sku-branch beats sku beats group-branch beats group beats type-branch beats type", () => {
+  it("company SKU rule beats company Type rule; group and branch rules are ignored", () => {
     const rules = [
       rule("type", "NECKLACES", null, 1, null),
-      rule("type", "NECKLACES", "B1", 2, null),
-      rule("group", "Snake", null, 3, null),
-      rule("group", "Snake", "B1", 4, null),
       rule("sku", "S1", null, 5, null),
-      rule("sku", "S1", "B1", 6, null),
     ];
-    const order: [number, string][] = [];
-    for (let i = rules.length; i > 0; i--) {
-      const r = resolveParams(sku, "B1", rules.slice(0, i), config, 9);
-      order.push([r.avg.value!, r.avg.source]);
-    }
-    expect(order.map((o) => o[1])).toEqual(["sku-branch", "sku", "group-branch", "group", "type-branch", "type"]);
-    expect(order.map((o) => o[0])).toEqual([6, 5, 4, 3, 2, 1]);
-  });
-
-  it("a rule for another branch does not apply", () => {
-    const r = resolveParams(sku, "B1", [rule("sku", "S1", "B2", 6, 1)], config, null);
+    expect(resolveParams(sku, rules, config, 9).avg).toEqual({ value: 5, source: "sku" });
+    expect(resolveParams(sku, rules.slice(0, 1), config, 9).avg).toEqual({ value: 1, source: "type" });
+    const ignored = [rule("group", "Snake", null, 3, 3), rule("sku", "S1", "B1", 6, 6), rule("type", "NECKLACES", "B1", 2, 2)];
+    const r = resolveParams(sku, ignored, config, null);
     expect(r.avg).toEqual({ value: null, source: "none" });
     expect(r.lead).toEqual({ value: 7, source: "default" });
   });
 
   it("avg and lead resolve independently", () => {
-    const rules = [rule("sku", "S1", null, 5, null), rule("group", "Snake", null, 99, 10), rule("type", "NECKLACES", "B1", null, 2)];
-    const r = resolveParams(sku, "B1", rules, config, null);
+    const rules = [rule("sku", "S1", null, 5, null), rule("type", "NECKLACES", null, 99, 10)];
+    const r = resolveParams(sku, rules, config, null);
     expect(r.avg).toEqual({ value: 5, source: "sku" });
-    expect(r.lead).toEqual({ value: 10, source: "group" });
+    expect(r.lead).toEqual({ value: 10, source: "type" });
   });
 
   it("no avg rule falls back to auto, no lead rule to the default", () => {
-    const r = resolveParams(sku, "B1", [], config, 4.5);
+    const r = resolveParams(sku, [], config, 4.5);
     expect(r.avg).toEqual({ value: 4.5, source: "auto" });
     expect(r.lead).toEqual({ value: 7, source: "default" });
   });
 
   it("no avg rule and no auto velocity is none", () => {
-    expect(resolveParams(sku, "B1", [], config, null).avg).toEqual({ value: null, source: "none" });
-  });
-
-  it("a SKU without a group skips the group level", () => {
-    const r = resolveParams({ ...sku, group_name: null }, "B1", [rule("group", "Snake", null, 3, 3)], config, null);
-    expect(r.avg.source).toBe("none");
+    expect(resolveParams(sku, [], config, null).avg).toEqual({ value: null, source: "none" });
   });
 
   it("a manual 0 is a value, not 'unset'", () => {
-    expect(resolveParams(sku, "B1", [rule("sku", "S1", null, 0, null)], config, 5).avg).toEqual({ value: 0, source: "sku" });
+    expect(resolveParams(sku, [rule("sku", "S1", null, 0, null)], config, 5).avg).toEqual({ value: 0, source: "sku" });
   });
 });
 
-const base = { margin: 3, reorderLevel: 0 };
+const base = { margin: 3 };
 
 describe("runwayStatus", () => {
   it("runway at or below lead is critical", () => {
-    const r = runwayStatus({ ...base, position: 14, avg: 2, lead: 7, onHand: 14 });
-    expect(r).toMatchObject({ runwayDays: 7, status: "critical", fixedLevel: false });
+    const r = runwayStatus({ ...base, position: 14, avg: 2, lead: 7 });
+    expect(r).toMatchObject({ runwayDays: 7, status: "critical" });
   });
 
   it("lead < runway <= lead + margin is warning", () => {
-    expect(runwayStatus({ ...base, position: 15, avg: 2, lead: 7, onHand: 15 }).status).toBe("warning");
-    expect(runwayStatus({ ...base, position: 20, avg: 2, lead: 7, onHand: 20 }).status).toBe("warning");
-    expect(runwayStatus({ ...base, position: 21, avg: 2, lead: 7, onHand: 21 }).status).toBe("ok");
+    expect(runwayStatus({ ...base, position: 15, avg: 2, lead: 7 }).status).toBe("warning");
+    expect(runwayStatus({ ...base, position: 20, avg: 2, lead: 7 }).status).toBe("warning");
+    expect(runwayStatus({ ...base, position: 21, avg: 2, lead: 7 }).status).toBe("ok");
   });
 
   it("position 0 with an avg is critical", () => {
-    expect(runwayStatus({ ...base, position: 0, avg: 2, lead: 7, onHand: 0 })).toMatchObject({ status: "critical", runwayDays: 0 });
+    expect(runwayStatus({ ...base, position: 0, avg: 2, lead: 7 })).toMatchObject({ status: "critical", runwayDays: 0 });
   });
 
-  it("no avg: no data, or warning (fixed level) when on-hand is below reorder_level", () => {
-    expect(runwayStatus({ ...base, position: 3, avg: null, lead: 7, onHand: 3 })).toMatchObject({ status: "no_data", runwayDays: null, fixedLevel: false });
-    expect(runwayStatus({ ...base, reorderLevel: 5, position: 3, avg: null, lead: 7, onHand: 3 })).toMatchObject({ status: "warning", fixedLevel: true });
-    expect(runwayStatus({ ...base, reorderLevel: 5, position: 3, avg: null, lead: 7, onHand: 5 }).status).toBe("no_data");
-  });
-
-  it("the fixed level looks at on-hand, not position", () => {
-    expect(runwayStatus({ ...base, reorderLevel: 5, position: 9, avg: null, lead: 7, onHand: 3 }).status).toBe("warning");
+  it("no avg is no data, whatever the stock (no fixed reorder level any more)", () => {
+    expect(runwayStatus({ ...base, position: 3, avg: null, lead: 7 })).toMatchObject({ status: "no_data", runwayDays: null });
+    expect(runwayStatus({ ...base, position: 0, avg: null, lead: 7 }).status).toBe("no_data");
   });
 
   it("an avg of 0 never alerts", () => {
-    expect(runwayStatus({ ...base, position: 0, avg: 0, lead: 7, onHand: 0 })).toMatchObject({ status: "ok", runwayDays: null, suggestedQty: 0 });
+    expect(runwayStatus({ ...base, position: 0, avg: 0, lead: 7 })).toMatchObject({ status: "ok", runwayDays: null, suggestedQty: 0 });
   });
 
   it("suggested qty = ceil(avg x (lead + margin)) - position, never below 0", () => {
-    expect(runwayStatus({ ...base, position: 4, avg: 1.5, lead: 7, onHand: 4 }).suggestedQty).toBe(11); // ceil(1.5 x 10) - 4
+    expect(runwayStatus({ ...base, position: 4, avg: 1.5, lead: 7 }).suggestedQty).toBe(11); // ceil(1.5 x 10) - 4
   });
   it("suggested qty rounds up and floors at 0", () => {
-    expect(runwayStatus({ ...base, position: 4, avg: 1.55, lead: 7, onHand: 4 }).suggestedQty).toBe(12); // ceil(15.5)=16 - 4
-    expect(runwayStatus({ ...base, position: 100, avg: 1, lead: 7, onHand: 100 }).suggestedQty).toBe(0);
+    expect(runwayStatus({ ...base, position: 4, avg: 1.55, lead: 7 }).suggestedQty).toBe(12); // ceil(15.5)=16 - 4
+    expect(runwayStatus({ ...base, position: 100, avg: 1, lead: 7 }).suggestedQty).toBe(0);
   });
 });
 
 describe("needsReview", () => {
   it("flags a manual avg when auto differs by more than 50% with >= 14 in-stock days", () => {
     expect(needsReview({ source: "sku", manual: 2, autoAvg: 3.1, inStockDays: 14 })).toBe(true);
-    expect(needsReview({ source: "group-branch", manual: 2, autoAvg: 0.9, inStockDays: 20 })).toBe(true);
+    expect(needsReview({ source: "type", manual: 2, autoAvg: 0.9, inStockDays: 20 })).toBe(true);
   });
   it("does not flag within 50%, with too few days, or without a manual rule", () => {
     expect(needsReview({ source: "sku", manual: 2, autoAvg: 3, inStockDays: 14 })).toBe(false);

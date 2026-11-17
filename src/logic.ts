@@ -8,6 +8,7 @@ import type {
   Desk,
   MasterSku,
   SkuWeight,
+  SkuType,
   DeskDay,
   LedgerRow,
   DocumentRecord,
@@ -76,18 +77,16 @@ export function currentQty(row: Pick<LedgerRow, "closing_qty" | "counted_qty">, 
   return dayStatus === "done" ? carryQty(row) : row.closing_qty;
 }
 
-// Reorder point for one desk's stock of a SKU: enough to cover sales during
-// the order lead time plus the safety buffer. Until the admin has filled in
-// avg/day and lead time, the SKU's fixed reorder_level is used instead.
+// Reorder point from a branch status: enough to cover sales during the lead
+// time plus the warning margin (the level that clears the warning). 0 = not
+// known yet (no avg/day), so nothing can be "over" it either.
 export function reorderPoint(
-  sku: Pick<MasterSku, "avg_daily_sales" | "order_lead_time_days" | "reorder_level"> | undefined,
-  config: Pick<SystemConfig, "safety_buffer_days">
+  st: { avg: { value: number | null }; lead: { value: number } } | undefined,
+  config: Pick<SystemConfig, "warning_margin_days">
 ) {
-  if (!sku) return 5;
-  if (sku.avg_daily_sales != null && sku.avg_daily_sales > 0 && sku.order_lead_time_days != null) {
-    return Math.ceil(sku.avg_daily_sales * (sku.order_lead_time_days + (config.safety_buffer_days ?? 0)));
-  }
-  return sku.reorder_level ?? 5;
+  const avg = st?.avg.value ?? null;
+  if (avg == null || avg <= 0) return 0;
+  return Math.ceil(avg * (st!.lead.value + (config.warning_margin_days ?? 0)));
 }
 
 export function isLowStock(qty: number, point: number) {
@@ -102,17 +101,11 @@ export function gramOf(sku: Pick<MasterSku, "std_gram_weight"> | undefined, qty:
   return qty * (sku?.std_gram_weight ?? 0);
 }
 
-// Value of `qty` pieces: gold is valued at Baht weight x the gold price passed in
-// (resolved by resolveGoldPrice); items with no gold weight (supplies) at their unit price.
-export function valueLak(
-  sku: Pick<MasterSku, "baht_weight" | "unit_price_lak"> | undefined,
-  qty: number,
-  lakPerBaht: number
-) {
+// Value of `qty` pieces: every SKU is gold (decided 2026-11-17), valued at its
+// Baht weight x the gold price passed in (resolved by resolveGoldPrice).
+export function valueLak(sku: Pick<MasterSku, "baht_weight"> | undefined, qty: number, lakPerBaht: number) {
   if (!sku) return 0;
-  const baht = sku.baht_weight ?? 0;
-  if (baht > 0) return qty * baht * (lakPerBaht ?? 0);
-  return qty * (sku.unit_price_lak ?? 0);
+  return qty * (sku.baht_weight ?? 0) * (lakPerBaht ?? 0);
 }
 
 export function estLifetimeDays(sku: Pick<MasterSku, "avg_daily_sales"> | undefined, qty: number) {
@@ -180,7 +173,7 @@ function lastActor(rows: LedgerRow[], day: DeskDay | undefined, staffById: Map<s
 
 // Branch-wide replenishment status of a SKU, keyed "branchId|skuId". Structural
 // so logic.ts does not depend on replenishment.ts (which depends on it).
-export type BranchStatuses = Map<string, { status: "critical" | "warning" | "ok" | "no_data"; position: number; onHand: number; fixedLevel: boolean; avg: { value: number | null }; lead: { value: number }; runwayDays: number | null }>;
+export type BranchStatuses = Map<string, { status: "critical" | "warning" | "ok" | "no_data"; position: number; onHand: number; avg: { value: number | null }; lead: { value: number }; runwayDays: number | null }>;
 
 export function buildDeskCards(
   desks: Desk[],
@@ -249,9 +242,11 @@ export function buildDeskDetail(
   weights: SkuWeight[] = [],
   // Branch-wide status per "branchId|skuId"; the only source of low-stock alerts.
   statuses: BranchStatuses = new Map(),
-  lakPerBaht: number
+  lakPerBaht: number,
+  types: SkuType[] = []
 ) {
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
+  const typeById = new Map(types.map((ty, i) => [ty.type_id, { ty, order: ty.sort_order ?? i }]));
   const staffById = new Map(staffAccounts.map((s) => [s.id, s]));
   const weightById = new Map(weights.map((w) => [w.weight_id, w]));
   const status: CardStatus = day?.status ?? "not_started";
@@ -270,7 +265,10 @@ export function buildDeskDetail(
       name_lo: sku?.name_lo ?? null,
       category: sku?.category ?? "",
       weight_name: sku?.weight_id ? weightById.get(sku.weight_id)?.name_en ?? null : null,
-      purity: sku?.purity ?? null,
+      // The day grid groups by Type, labelled in Lao.
+      type_id: sku?.type_id ?? null,
+      type_label: (sku?.type_id && (typeById.get(sku.type_id)?.ty.name_lo || typeById.get(sku.type_id)?.ty.name_en)) || sku?.category || "",
+      type_order: (sku?.type_id && typeById.get(sku.type_id)?.order) ?? 999,
       // for the Lao size label (ບາດ / ສະລຶງ / ຫຸນ / ກລາມ)
       baht_weight: sku?.baht_weight ?? null,
       std_gram_weight: sku?.std_gram_weight ?? null,
@@ -468,7 +466,7 @@ export function buildDashboard(input: DashboardInput) {
       branch_id: r.branch_id,
       sku,
       qty: currentQty(r, statusByDesk.get(r.desk_id)),
-      point: reorderPoint(sku, config),
+      point: reorderPoint(statuses.get(`${r.branch_id}|${sku.sku_id}`), config),
     });
   }
 
@@ -493,8 +491,6 @@ export function buildDashboard(input: DashboardInput) {
     .filter((p) => p.point > 0 && p.qty > p.point * OVERSTOCK_MULTIPLIER)
     .sort((a, b) => b.qty - b.point * OVERSTOCK_MULTIPLIER - (a.qty - a.point * OVERSTOCK_MULTIPLIER));
   const lowItem = ({ sku, branchId, deskId, st }: LowItem) => {
-    const avg = st.avg.value;
-    const fixed = st.fixedLevel || avg == null;
     return {
       sku_id: sku.sku_id,
       name_en: sku.name_en,
@@ -502,10 +498,9 @@ export function buildDashboard(input: DashboardInput) {
       category: sku.category,
       desk_id: deskId,
       branch_id: branchId,
-      // Runway items compare the branch position with the level that clears the warning;
-      // a fixed-level warning compares what is on hand with the SKU's fixed level.
-      closing: fixed ? st.onHand : st.position,
-      reorder_level: fixed ? sku.reorder_level : Math.ceil((avg as number) * (st.lead.value + config.warning_margin_days)),
+      // The branch position against the level that clears the warning.
+      closing: st.position,
+      reorder_level: reorderPoint(st, config),
       status: st.status,
       runway_days: st.runwayDays,
     };
@@ -768,7 +763,6 @@ export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus
     add(kpi.out, sku, outSum);
     add(kpi.adjust, sku, adjustSum);
     add(kpi.closing, sku, closing);
-    const capacity = Math.max(reorderPoint(sku, config) * 4, 1);
     return {
       key,
       sku_id: last.sku_id,
@@ -780,11 +774,14 @@ export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus
       adjust: adjustSum,
       closing_qty: closing,
       value_lak: round2(valueLak(sku, closing, lakPerBaht)),
-      fillPct: Math.max(0, Math.min(100, round1((closing / capacity) * 100))),
+      fillPct: 0, // set below, against the biggest closing in the list
       desk_id: last.desk_id,
     };
   });
 
+  // Fill bar: each line's closing against the biggest closing in the report.
+  const biggest = Math.max(1, ...items.map((it) => it.closing_qty));
+  for (const it of items) it.fillPct = Math.max(0, Math.min(100, round1((it.closing_qty / biggest) * 100)));
   for (const bucket of Object.values(kpi)) bucket.lak = round2(bucket.lak);
   const doneDays = periodDays.filter((d) => d.status === "done").length;
 
@@ -816,8 +813,6 @@ export function skuSummary(skus: MasterSku[]) {
   for (const s of active) byCategory.set(s.category, (byCategory.get(s.category) ?? 0) + 1);
   return {
     total: active.length,
-    purity9999: active.filter((s) => s.purity === "99.99%").length,
-    purity965: active.filter((s) => s.purity === "96.5%").length,
     categories: [...byCategory.entries()].map(([category, count]) => ({ category, count })),
   };
 }

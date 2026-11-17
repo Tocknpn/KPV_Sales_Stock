@@ -4,25 +4,20 @@ import { state } from "../../state.js";
 import { fmtInt, fmtLaosStamp, escapeHtml } from "../../util.js";
 import { isAdmin, isManager, clearSession } from "../../session.js";
 import { renderSku } from "./sku.js";
-import { renderReplenishment } from "./replenishment.js";
 import { renderExchangeRate } from "./exchange-rate.js";
-import { renderStockOutMode } from "./stock-out-mode.js";
 import { go, pathFor, backTo } from "../../router.js";
 import { renderUsers } from "./users.js";
-import { renderClosedDays } from "./closed-days.js";
 import { renderAudit } from "./audit.js";
 
 const MENU = [
   { id: "sku", labelKey: "settings.menuSku", render: renderSku, icon: `<path stroke-linecap="round" stroke-linejoin="round" d="M3 8l9-4 9 4-9 4-9-4z"/><path stroke-linecap="round" stroke-linejoin="round" d="M3 8v9l9 4 9-4V8M12 12v9"/>` },
-  { id: "replenishment", labelKey: "settings.menuReplen", render: renderReplenishment, icon: `<circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M12 7v5l3.5 2"/>` },
   { id: "exchange", labelKey: "settings.menuExchangeRate", render: renderExchangeRate, adminOnly: true, icon: `<path stroke-linecap="round" stroke-linejoin="round" d="M7 8h12l-3-3M17 16H5l3 3"/>` },
-  { id: "stock-out", labelKey: "settings.menuStockOut", render: renderStockOutMode, adminOnly: true, icon: `<path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M4 12h10M4 17h6"/><path stroke-linecap="round" stroke-linejoin="round" d="M17 14l3 3-3 3"/>` },
   { id: "users", labelKey: "settings.menuUsers", render: renderUsers, icon: `<circle cx="9" cy="8" r="3"/><path stroke-linecap="round" d="M3 20c1-3.5 3.3-5.5 6-5.5s5 2 6 5.5"/><circle cx="17.5" cy="9" r="2.3"/><path stroke-linecap="round" d="M15.8 14.3c2 .2 3.6 2 4.2 4.2"/>` },
-  { id: "closed", labelKey: "closed.menu", render: renderClosedDays, managerOnly: true, icon: `<rect x="4" y="5" width="16" height="15" rx="2"/><path stroke-linecap="round" d="M4 10h16M9 3v4M15 3v4"/>` },
   { id: "audit", labelKey: "audit.menu", render: renderAudit, managerOnly: true, icon: `<path stroke-linecap="round" stroke-linejoin="round" d="M8 4h8l3 3v13H5V4h3z"/><path stroke-linecap="round" d="M9 12h6M9 16h6M9 8h3"/>` },
 ];
 
-// Closed days are for managers and admins; staff do not see the entry.
+// Hidden since 2026-11-17: Replenishment (now inside SKU setting), Stock-out
+// mode (fixed to the full layout) and Closed days (views kept, not listed).
 const visibleMenu = () => MENU.filter((m) => (!m.managerOnly || isManager(state.user)) && (!m.adminOnly || isAdmin(state.user)));
 
 function setTopbar(title, subtitle, onBack) {

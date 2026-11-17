@@ -1,23 +1,27 @@
 import { api } from "../../api.js";
 import { toast, openSheet, closeSheet } from "../../ui.js";
 import { icon, escapeHtml, fmtInt, ICONS, toggleSwitch, debounce } from "../../util.js";
-import { t, productName } from "../../i18n.js";
+import { t, tf, productName } from "../../i18n.js";
 import { state } from "../../state.js";
 import { isAdmin } from "../../session.js";
 import { parseCsv, csvRowsToSkus, CSV_TEMPLATE } from "../../csv.js";
-import { groupSkusByType, skuSizeLabel } from "../../sku-groups.js";
+import { groupSkusByType, skuSizeLabel, weightLabel, splitWeight, gramsOf, WEIGHT_UNITS } from "../../sku-groups.js";
 import { skeletonList } from "../../skeleton.js";
 
 // Staff can look at the master data; only an admin can change it.
 const canEdit = () => isAdmin(state.user);
-const PURITY_OPTIONS = ["96.5%", "99.99%"];
-const GRAMS_PER_BAHT = 15.244;
+const typeLabel = (ty) => productName(ty.name_en, ty.name_lo);
+const num = (n) => String(Math.round(Number(n) * 1000) / 1000);
 
 let activeTab = "sku";
 let skuGroupFilter = "all"; // "all" | type_id
 let skuSizeFilter = "all"; // "all" | weight_id
 let skuSearchQuery = "";
-let knownGroups = []; // existing product groups, suggested in the SKU form
+// Company-wide avg/day + lead time rules and the defaults (Settings > SKU is
+// where they are set since 2026-11-17; the separate replenishment menu is gone).
+let plan = { rules: [], config: { defaultLeadTimeDays: 7, warningMarginDays: 3 } };
+// Worst runway status of each SKU over the branches this user sees (sku_id -> row).
+let statusBySku = new Map();
 // Type groups the user opened in the SKU list (key = type_id, "none" = no type).
 // Starts empty: every group collapsed. Kept while the app is open.
 const openTypes = new Set();
@@ -176,30 +180,50 @@ function weightRow(w) {
   return `
     <div class="flex items-center gap-2.5 px-4 py-3">
       <button data-edit-weight="${w.weight_id}" class="min-w-0 flex-1 text-left">
-        <span class="block truncate text-xs font-bold text-gray-900">${escapeHtml(w.name_en)}</span>
-        <span class="block text-[10px] text-gray-500">${w.gram_value}g · ${w.active ? t("settings.activeLabel") : t("settings.inactiveLabel")}</span>
+        <span lang="lo" class="lao block truncate text-xs font-bold text-gray-900">${escapeHtml(weightLabel(w.gram_value) || w.name_en)}</span>
+        <span class="block text-[10px] text-gray-500">${num(w.gram_value)} ກລາມ · ${w.active ? t("settings.activeLabel") : t("settings.inactiveLabel")}</span>
       </button>
       ${canEdit() ? toggleSwitch(w.active, `data-toggle-weight="${w.weight_id}"`) : ""}
     </div>`;
 }
 
+// A size is typed as amount + Lao unit; the grams follow and the name is the Lao label.
 function openWeightForm(existing, body) {
+  const start = existing ? splitWeight(existing.gram_value) : { amount: "", unit: "ບາດ" };
   openSheet(
     `
-    <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.weightNameLabel")}</label>
-    <input id="weight-name" type="text" value="${existing ? escapeHtml(existing.name_en) : ""}" class="input-filled" />
-    <label class="mt-3 mb-1.5 block text-xs font-bold text-gray-600">${t("settings.weightGramLabel")}</label>
-    <input id="weight-gram" type="number" step="0.001" min="0" value="${existing ? existing.gram_value : ""}" class="input-filled" />
+    <div class="grid grid-cols-2 gap-2">
+      <div class="min-w-0">
+        <label for="weight-amount" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.weightAmountLabel")}</label>
+        <input id="weight-amount" type="number" step="any" min="0" inputmode="decimal" value="${escapeHtml(start.amount)}" class="input-filled" />
+      </div>
+      <div class="min-w-0">
+        <label for="weight-unit" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.weightUnitLabel")}</label>
+        <select id="weight-unit" lang="lo" class="input-filled">
+          ${WEIGHT_UNITS.map((u) => `<option value="${u.unit}" ${u.unit === start.unit ? "selected" : ""}>${u.unit}</option>`).join("")}
+        </select>
+      </div>
+    </div>
+    <p id="weight-preview" role="status" class="mt-2 text-[11px] font-semibold text-gray-600"></p>
     <button id="save-weight" class="btn-primary mt-4 w-full">${t("settings.save")}</button>
   `,
     {
       title: existing ? t("settings.editWeight") : t("settings.addWeight"),
       onMount: (sheetBody) => {
+        const amount = sheetBody.querySelector("#weight-amount");
+        const unit = sheetBody.querySelector("#weight-unit");
+        const preview = sheetBody.querySelector("#weight-preview");
+        const show = () => {
+          const g = gramsOf(amount.value, unit.value);
+          preview.textContent = g ? `${weightLabel(g)} = ${num(g)} ກລາມ` : "";
+        };
+        amount.addEventListener("input", show);
+        unit.addEventListener("change", show);
+        show();
         sheetBody.querySelector("#save-weight").addEventListener("click", async () => {
-          const name_en = sheetBody.querySelector("#weight-name").value.trim();
-          const gram_value = Number(sheetBody.querySelector("#weight-gram").value);
-          if (!name_en || !gram_value) return toast(t("stock.needSkuName"), "error");
-          const payload = { name_en, gram_value };
+          const gram_value = gramsOf(amount.value, unit.value);
+          if (!gram_value) return toast(t("err.BAD_WEIGHT"), "error");
+          const payload = { name_en: weightLabel(gram_value), gram_value };
           if (existing) await api.updateSkuWeight(existing.weight_id, payload);
           else await api.createSkuWeight(payload);
           closeSheet();
@@ -214,10 +238,10 @@ function openWeightForm(existing, body) {
 // --- SKU tab ---
 
 async function renderSkuTab(body) {
-  const [{ skus }, { types }, { weights }] = await Promise.all([api.skus(true), api.skuTypes(), api.skuWeights()]);
+  const [{ skus }, { types }, { weights }, rules] = await Promise.all([api.skus(true), api.skuTypes(), api.skuWeights(), api.replenishmentRules()]);
   const activeTypes = types.filter((ty) => ty.active);
   const activeWeights = weights.filter((w) => w.active);
-  knownGroups = [...new Set(skus.map((s) => s.group_name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  plan = rules;
 
   const searchOpen = skuSearchQuery.trim().length > 0;
 
@@ -226,11 +250,11 @@ async function renderSkuTab(body) {
       <div class="shrink-0 whitespace-nowrap text-[11px] font-semibold text-gray-600">${fmtInt(skus.filter((s) => s.active).length)} ${t("settings.activeSkus")}</div>
       <select id="sku-group-filter" class="chip min-h-0 min-w-0 flex-1 truncate border-hairline bg-white text-[11px] text-gray-600">
         <option value="all">${t("settings.filterGroupShort")}</option>
-        ${types.map((ty) => `<option value="${ty.type_id}" ${skuGroupFilter === ty.type_id ? "selected" : ""}>${escapeHtml(productName(ty.name_en, ty.name_lo))}</option>`).join("")}
+        ${types.map((ty) => `<option value="${ty.type_id}" ${skuGroupFilter === ty.type_id ? "selected" : ""}>${escapeHtml(typeLabel(ty))}</option>`).join("")}
       </select>
       <select id="sku-size-filter" class="chip min-h-0 min-w-0 flex-1 truncate border-hairline bg-white text-[11px] text-gray-600">
         <option value="all">${t("settings.filterSizeShort")}</option>
-        ${weights.map((w) => `<option value="${w.weight_id}" ${skuSizeFilter === w.weight_id ? "selected" : ""}>${escapeHtml(w.name_en)}</option>`).join("")}
+        ${weights.map((w) => `<option value="${w.weight_id}" ${skuSizeFilter === w.weight_id ? "selected" : ""}>${escapeHtml(weightLabel(w.gram_value) || w.name_en)}</option>`).join("")}
       </select>
       <button id="sku-search-toggle" aria-label="${t("settings.searchPlaceholder")}" class="tap-target flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-hairline text-gray-500 ${searchOpen ? "border-brand-600 bg-brand-50 text-brand-600" : "bg-white"}">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><circle cx="11" cy="11" r="6.5"/><path stroke-linecap="round" d="M20 20l-4.3-4.3"/></svg>
@@ -250,6 +274,7 @@ async function renderSkuTab(body) {
       <input id="sku-search" type="search" placeholder="${t("settings.searchPlaceholder")}" value="${escapeHtml(skuSearchQuery)}"
         class="chip min-h-0 w-full border-hairline bg-white text-gray-600 placeholder:text-gray-400" />
     </div>
+    <p class="mb-2 px-1 text-[11px] font-medium text-gray-600">${escapeHtml(tf("replen.defaults", { lead: num(plan.config.defaultLeadTimeDays), margin: num(plan.config.warningMarginDays) }))}</p>
     <div id="sku-list-wrap"></div>
   `;
 
@@ -284,6 +309,36 @@ async function renderSkuTab(body) {
   );
 
   renderSkuList(body, skus, types, weights, activeTypes, activeWeights);
+  // Status badges arrive after the list (one request per branch).
+  loadStatuses().then(() => body.isConnected && renderSkuList(body, skus, types, weights, activeTypes, activeWeights));
+}
+
+const STATUS_RANK = { critical: 0, warning: 1, ok: 2, no_data: 3 };
+
+async function loadStatuses() {
+  const u = state.user;
+  const branchIds = isAdmin(u) ? (state.meta?.branches ?? []).map((b) => b.branch_id) : u?.branchId ? [u.branchId] : [];
+  const results = await Promise.all(branchIds.map((b) => api.replenishment(b).catch(() => null)));
+  const next = new Map();
+  for (const res of results) {
+    for (const row of res?.rows ?? []) {
+      const cur = next.get(row.sku_id);
+      if (!cur || STATUS_RANK[row.status] < STATUS_RANK[cur.status]) next.set(row.sku_id, row);
+    }
+  }
+  statusBySku = next;
+}
+
+// The company-wide rule of a SKU or a Type, if any.
+const ruleOf = (scope, key) => plan.rules.find((r) => r.scope === scope && r.scope_key === key) ?? null;
+
+// What applies to a SKU: its own value, else its Type's, else auto / the default.
+function planOf(s) {
+  const own = ruleOf("sku", s.sku_id);
+  const type = s.type_id ? ruleOf("type", s.type_id) : null;
+  const avg = own?.avg_daily_sell ?? type?.avg_daily_sell ?? null;
+  const lead = own?.lead_time_days ?? type?.lead_time_days ?? null;
+  return { own, type, avg, lead: lead ?? plan.config.defaultLeadTimeDays, leadSet: lead != null };
 }
 
 function visibleSkus(skus) {
@@ -326,6 +381,14 @@ function renderSkuList(body, skus, types, weights, activeTypes, activeWeights) {
           <span lang="lo" class="lao min-w-0 flex-1 truncate text-xs font-extrabold uppercase tracking-wide">${escapeHtml(name)}</span>
           <span class="shrink-0 rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-bold text-gray-600">${g.items.length}</span>
         </button>
+        ${
+          canEdit() && g.typeId
+            ? `<div class="-mt-1 mb-1.5 flex items-center justify-end gap-2 px-2 text-[11px] text-gray-600">
+                <span class="min-w-0 truncate">${escapeHtml(typePlanText(g.typeId))}</span>
+                <button data-type-plan="${escapeHtml(g.typeId)}" class="tap-target shrink-0 rounded-full border border-brand-600 px-3 text-[11px] font-bold text-brand-700 active:bg-brand-50">${t("settings.typeSetAll")}</button>
+              </div>`
+            : ""
+        }
         <div id="sku-grp-${escapeHtml(keyOf(g))}" class="card divide-y divide-hairline p-0 ${open ? "" : "hidden"}">
           ${open ? g.items.map((s) => skuRow(s)).join("") : ""}
         </div>
@@ -348,6 +411,12 @@ function renderSkuList(body, skus, types, weights, activeTypes, activeWeights) {
       rerender();
     })
   );
+  wrap.querySelectorAll("[data-type-plan]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const g = groups.find((x) => x.typeId === btn.dataset.typePlan);
+      if (g) openTypePlanSheet(g, skus, body);
+    })
+  );
   wrap.querySelectorAll("[data-edit-sku]").forEach((btn) =>
     btn.addEventListener("click", () => canEdit() && openSkuForm(skus.find((s) => s.sku_id === btn.dataset.editSku), activeTypes, activeWeights, types, weights, body))
   );
@@ -361,17 +430,88 @@ function renderSkuList(body, skus, types, weights, activeTypes, activeWeights) {
   );
 }
 
+// "ຂາຍ/ມື້ 2 · ໄລຍະສັ່ງ 7 ມື້" for a Type header (blank parts = not set).
+function typePlanText(typeId) {
+  const r = ruleOf("type", typeId);
+  const parts = [];
+  if (r?.avg_daily_sell != null) parts.push(`${t("replen.avg")} ${num(r.avg_daily_sell)}`);
+  if (r?.lead_time_days != null) parts.push(`${t("replen.lead")} ${num(r.lead_time_days)} ${t("replen.d")}`);
+  return parts.join(" · ");
+}
+
+const STATUS_CLS = { critical: "bg-danger-bg text-danger", warning: "bg-warning-bg text-warning" };
+
 function skuRow(s) {
-  const subtitle = [s.group_name, skuSizeLabel(s), s.purity].filter(Boolean).join(" · ") || s.sku_id;
+  const p = planOf(s);
+  const avgText = p.avg != null ? num(p.avg) : t("replen.src.auto");
+  const planText = `${t("replen.avg")} ${avgText} · ${t("replen.lead")} ${num(p.lead)} ${t("replen.d")}`;
+  const subtitle = [skuSizeLabel(s), planText].filter(Boolean).join(" · ");
+  const st = statusBySku.get(s.sku_id);
+  const badge = st && STATUS_CLS[st.status] ? `<span class="status-pill mt-0.5 inline-flex px-1.5 py-0 text-[10px] ${STATUS_CLS[st.status]}">${t(`replen.status.${st.status}`)}</span>` : "";
   return `
     <div class="flex items-center gap-2.5 px-4 py-3">
       <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">${icon(s.icon, "h-4 w-4")}</span>
       <button data-edit-sku="${s.sku_id}" class="min-w-0 flex-1 text-left">
-        <span class="block truncate text-xs font-bold text-gray-900">${escapeHtml(productName(s.name_en, s.name_lo))}</span>
-        <span class="block text-[10px] text-gray-500">${escapeHtml(subtitle)} · ${s.active ? t("settings.activeLabel") : t("settings.inactiveLabel")}</span>
+        <span lang="lo" class="lao block truncate text-xs font-bold text-gray-900">${escapeHtml(productName(s.name_en, s.name_lo))}</span>
+        <span class="block text-[10px] text-gray-500">${escapeHtml(subtitle)}${s.active ? "" : ` · ${t("settings.inactiveLabel")}`}</span>
+        ${badge}
       </button>
       ${canEdit() ? toggleSwitch(s.active, `data-toggle-sku="${s.sku_id}"`) : ""}
     </div>`;
+}
+
+// Blank = null (inherit). undefined when the text is not a number >= 0.
+function readNumber(input) {
+  const v = input.value.trim();
+  if (v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+const planInputs = (prefix, avg, lead, placeholders) => `
+    <div class="mt-3 grid grid-cols-2 gap-2">
+      <div class="min-w-0">
+        <label for="${prefix}-avg" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.avgSellLabel")}</label>
+        <input id="${prefix}-avg" type="number" min="0" step="any" inputmode="decimal" value="${avg ?? ""}" placeholder="${escapeHtml(placeholders.avg)}" class="input-filled" />
+      </div>
+      <div class="min-w-0">
+        <label for="${prefix}-lead" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.leadTimeLabel")}</label>
+        <input id="${prefix}-lead" type="number" min="0" step="any" inputmode="decimal" value="${lead ?? ""}" placeholder="${escapeHtml(placeholders.lead)}" class="input-filled" />
+      </div>
+    </div>`;
+
+// One Type: the values typed apply to every SKU in it (each SKU's own value of
+// that field is replaced). A field left blank is not changed.
+function openTypePlanSheet(group, skus, body) {
+  const r = ruleOf("type", group.typeId);
+  const count = skus.filter((s) => s.active && s.type_id === group.typeId).length;
+  openSheet(
+    `
+    <p class="text-xs text-gray-600">${escapeHtml(tf("settings.typeSetAllHint", { n: count }))}</p>
+    ${planInputs("tp", r?.avg_daily_sell != null ? num(r.avg_daily_sell) : "", r?.lead_time_days != null ? num(r.lead_time_days) : "", { avg: t("replen.src.auto"), lead: num(plan.config.defaultLeadTimeDays) })}
+    <button id="tp-save" class="btn-primary mt-4 w-full">${escapeHtml(tf("settings.typeApply", { n: count }))}</button>`,
+    {
+      title: `${t("settings.typeSetAll")} · ${escapeHtml(typeLabel(group.type))}`,
+      onMount: (sheet) => {
+        sheet.querySelector("#tp-save").addEventListener("click", async (e) => {
+          const avg = readNumber(sheet.querySelector("#tp-avg"));
+          const lead = readNumber(sheet.querySelector("#tp-lead"));
+          if (avg === undefined || lead === undefined) return toast(t("err.BAD_RULE"), "error");
+          if (avg === null && lead === null) return toast(t("replen.needValue"), "error");
+          e.target.disabled = true;
+          try {
+            await api.bulkRule({ scope: "type", key: group.typeId, avgDailySell: avg, leadTimeDays: lead });
+          } catch (err) {
+            e.target.disabled = false;
+            throw err;
+          }
+          closeSheet();
+          toast(t("replen.saved"), "success");
+          renderSkuTab(body);
+        });
+      },
+    }
+  );
 }
 
 function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights, body) {
@@ -384,90 +524,68 @@ function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights,
   const weightOptions = existing && existing.weight_id && !activeWeights.some((w) => w.weight_id === existing.weight_id)
     ? [...activeWeights, allWeights.find((w) => w.weight_id === existing.weight_id)].filter(Boolean)
     : activeWeights;
+  const own = existing ? ruleOf("sku", existing.sku_id) : null;
+  // What a blank field falls back to, for the chosen Type.
+  const placeholdersFor = (typeId) => {
+    const tr = typeId ? ruleOf("type", typeId) : null;
+    return {
+      avg: tr?.avg_daily_sell != null ? num(tr.avg_daily_sell) : t("replen.src.auto"),
+      lead: num(tr?.lead_time_days ?? plan.config.defaultLeadTimeDays),
+    };
+  };
 
   openSheet(
     `
-    <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("stock.skuNameLabel")}</label>
-    <input id="new-sku-name" type="text" maxlength="120" value="${existing ? escapeHtml(existing.name_en) : ""}" class="input-filled" />
-    <label class="mb-1.5 mt-3 block text-xs font-bold text-gray-600">${t("settings.skuNameLoLabel")}</label>
-    <input id="new-sku-name-lo" type="text" maxlength="120" lang="lo" value="${existing?.name_lo ? escapeHtml(existing.name_lo) : ""}" class="input-filled" />
+    <label for="new-sku-name" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuNameLabel")}</label>
+    <input id="new-sku-name" type="text" maxlength="120" lang="lo" value="${existing ? escapeHtml(productName(existing.name_en, existing.name_lo)) : ""}" class="input-filled lao" />
     <div class="mt-3 grid grid-cols-2 gap-2">
-      <div>
-        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuTypeLabel")}</label>
-        <select id="new-sku-type" class="input-filled">
-          ${typeOptions.map((ty) => `<option value="${ty.type_id}" ${existing?.type_id === ty.type_id ? "selected" : ""}>${escapeHtml(ty.name_en)}</option>`).join("")}
+      <div class="min-w-0">
+        <label for="new-sku-type" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuTypeLabel")}</label>
+        <select id="new-sku-type" lang="lo" class="input-filled">
+          ${typeOptions.map((ty) => `<option value="${ty.type_id}" ${existing?.type_id === ty.type_id ? "selected" : ""}>${escapeHtml(typeLabel(ty))}</option>`).join("")}
         </select>
       </div>
-      <div>
-        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuWeightLabel")}</label>
-        <select id="new-sku-weight" class="input-filled">
-          ${weightOptions.map((w) => `<option value="${w.weight_id}" ${existing?.weight_id === w.weight_id ? "selected" : ""}>${escapeHtml(w.name_en)}</option>`).join("")}
+      <div class="min-w-0">
+        <label for="new-sku-weight" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuWeightLabel")}</label>
+        <select id="new-sku-weight" lang="lo" class="input-filled">
+          ${weightOptions.map((w) => `<option value="${w.weight_id}" ${existing?.weight_id === w.weight_id ? "selected" : ""}>${escapeHtml(weightLabel(w.gram_value) || w.name_en)}</option>`).join("")}
         </select>
       </div>
     </div>
-    <label for="new-sku-group" class="mb-1.5 mt-3 block text-xs font-bold text-gray-600">${t("settings.groupLabel")}</label>
-    <input id="new-sku-group" type="text" maxlength="80" list="sku-group-list" autocomplete="off" value="${existing?.group_name ? escapeHtml(existing.group_name) : ""}" class="input-filled" />
-    <datalist id="sku-group-list">${knownGroups.map((g) => `<option value="${escapeHtml(g)}"></option>`).join("")}</datalist>
-    <p class="mt-1.5 text-[11px] text-gray-500">${t("settings.groupHint")}</p>
-    <div class="mt-3 grid grid-cols-2 gap-2">
-      <div>
-        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.purityLabel")}</label>
-        <select id="new-sku-purity" class="input-filled">
-          <option value="">${t("settings.notGold")}</option>
-          ${PURITY_OPTIONS.map((p) => `<option value="${p}" ${existing?.purity === p ? "selected" : ""}>${p}</option>`).join("")}
-        </select>
-      </div>
-      <div>
-        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.bahtWeightLabel")}</label>
-        <input id="new-sku-baht" type="number" min="0" step="0.0001" inputmode="decimal" value="${existing ? existing.baht_weight ?? 0 : ""}" class="input-filled" />
-      </div>
-    </div>
-    <p class="mt-1.5 text-[11px] text-gray-500">${t("settings.bahtWeightHint")}</p>
-    <div class="mt-3 grid grid-cols-2 gap-2">
-      <div>
-        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.priceLabel")}</label>
-        <input id="new-sku-price" type="number" min="0" step="1000" inputmode="numeric" value="${existing ? existing.unit_price_lak ?? 0 : 0}" class="input-filled" />
-      </div>
-      <div>
-        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.reorderLevelLabel")}</label>
-        <input id="new-sku-reorder" type="number" min="0" step="1" inputmode="numeric" value="${existing ? existing.reorder_level ?? 5 : 5}" class="input-filled" />
-      </div>
-    </div>
-    <p class="mt-1.5 text-[11px] text-gray-500">${t("settings.reorderLevelHint")}</p>
+    ${planInputs("new-sku", own?.avg_daily_sell != null ? num(own.avg_daily_sell) : "", own?.lead_time_days != null ? num(own.lead_time_days) : "", placeholdersFor(existing?.type_id ?? typeOptions[0]?.type_id))}
+    <p class="mt-1.5 text-[11px] text-gray-500">${t("settings.planHint")}</p>
     <button id="save-sku" class="btn-primary mt-4 w-full">${t("settings.saveSku")}</button>
   `,
     {
-      title: existing ? productName(existing.name_en, existing.name_lo) : t("settings.addSku"),
+      title: existing ? escapeHtml(productName(existing.name_en, existing.name_lo)) : t("settings.addSku"),
       onMount: (sheetBody) => {
-        // Gold items: suggest the Baht weight from the chosen size until the
-        // admin types their own.
-        const bahtInput = sheetBody.querySelector("#new-sku-baht");
-        const suggestBaht = () => {
-          if (bahtInput.dataset.touched || !sheetBody.querySelector("#new-sku-purity").value) return;
-          const weight = allWeights.find((w) => w.weight_id === sheetBody.querySelector("#new-sku-weight").value);
-          if (weight) bahtInput.value = String(Math.round((weight.gram_value / GRAMS_PER_BAHT) * 10000) / 10000);
-        };
-        bahtInput.addEventListener("input", () => (bahtInput.dataset.touched = "1"));
-        if (existing) bahtInput.dataset.touched = "1";
-        sheetBody.querySelector("#new-sku-weight").addEventListener("change", suggestBaht);
-        sheetBody.querySelector("#new-sku-purity").addEventListener("change", suggestBaht);
-
-        sheetBody.querySelector("#save-sku").addEventListener("click", async () => {
-          const name_en = sheetBody.querySelector("#new-sku-name").value.trim();
-          if (!name_en) return toast(t("stock.needSkuName"), "error");
+        const typeSel = sheetBody.querySelector("#new-sku-type");
+        typeSel.addEventListener("change", () => {
+          const ph = placeholdersFor(typeSel.value);
+          sheetBody.querySelector("#new-sku-avg").placeholder = ph.avg;
+          sheetBody.querySelector("#new-sku-lead").placeholder = ph.lead;
+        });
+        sheetBody.querySelector("#save-sku").addEventListener("click", async (e) => {
+          const name = sheetBody.querySelector("#new-sku-name").value.trim();
+          if (!name) return toast(t("stock.needSkuName"), "error");
+          const avg = readNumber(sheetBody.querySelector("#new-sku-avg"));
+          const lead = readNumber(sheetBody.querySelector("#new-sku-lead"));
+          if (avg === undefined || lead === undefined) return toast(t("err.BAD_RULE"), "error");
           const payload = {
-            name_en,
-            name_lo: sheetBody.querySelector("#new-sku-name-lo").value.trim() || null,
-            type_id: sheetBody.querySelector("#new-sku-type").value,
+            name,
+            type_id: typeSel.value,
             weight_id: sheetBody.querySelector("#new-sku-weight").value,
-            group_name: sheetBody.querySelector("#new-sku-group").value.trim() || null,
-            purity: sheetBody.querySelector("#new-sku-purity").value || null,
-            baht_weight: Math.max(0, Number(bahtInput.value) || 0),
-            unit_price_lak: Math.max(0, Number(sheetBody.querySelector("#new-sku-price").value) || 0),
-            reorder_level: Math.max(0, Math.round(Number(sheetBody.querySelector("#new-sku-reorder").value) || 0)),
+            avg_daily_sell: avg,
+            lead_time_days: lead,
           };
-          if (existing) await api.updateSku(existing.sku_id, payload);
-          else await api.createSku(payload);
+          e.target.disabled = true;
+          try {
+            if (existing) await api.updateSku(existing.sku_id, payload);
+            else await api.createSku(payload);
+          } catch (err) {
+            e.target.disabled = false;
+            throw err;
+          }
           closeSheet();
           toast(t("settings.saveSku"), "success");
           renderSkuTab(body);

@@ -7,10 +7,8 @@ import { toast } from "../ui.js";
 import { icon, escapeHtml, fmtInt } from "../util.js";
 import { t, tf, productName } from "../i18n.js";
 import { isAdmin } from "../session.js";
-import { groupSkusByType, filterSkus, toggleSelection, skuSizeLabel } from "../sku-groups.js";
+import { groupSkusByType, filterSkus, toggleSelection, skuSizeLabel, weightLabel } from "../sku-groups.js";
 import { skeletonGrid } from "../skeleton.js";
-
-const PURITY_OPTIONS = ["96.5%", "99.99%"];
 
 const typeLabel = (type) => (type ? productName(type.name_en, type.name_lo) : "—");
 const CHECK = `<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>`;
@@ -239,51 +237,33 @@ async function renderCreateSkuFormInto(container, onCreated, onCancel) {
   const activeWeights = weights.filter((w) => w.active);
   container.innerHTML = `
     <button id="sku-back" class="mb-2 text-xs font-bold text-gray-500">&larr; ${t("login.back")}</button>
-    <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("stock.skuNameLabel")}</label>
-    <input id="sku-name" type="text" class="input-filled" />
+    <label for="sku-name" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuNameLabel")}</label>
+    <input id="sku-name" type="text" maxlength="120" lang="lo" class="input-filled lao" />
     <div class="mt-3 grid grid-cols-2 gap-2">
-      <div>
-        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuTypeLabel")}</label>
-        <select id="sku-type" class="input-filled">
+      <div class="min-w-0">
+        <label for="sku-type" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuTypeLabel")}</label>
+        <select id="sku-type" lang="lo" class="input-filled">
           ${activeTypes.map((ty) => `<option value="${ty.type_id}">${escapeHtml(productName(ty.name_en, ty.name_lo))}</option>`).join("")}
         </select>
       </div>
-      <div>
-        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuWeightLabel")}</label>
-        <select id="sku-weight" class="input-filled">
-          ${activeWeights.map((w) => `<option value="${w.weight_id}">${escapeHtml(w.name_en)}</option>`).join("")}
+      <div class="min-w-0">
+        <label for="sku-weight" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuWeightLabel")}</label>
+        <select id="sku-weight" lang="lo" class="input-filled">
+          ${activeWeights.map((w) => `<option value="${w.weight_id}">${escapeHtml(weightLabel(w.gram_value) || w.name_en)}</option>`).join("")}
         </select>
       </div>
     </div>
-    <div class="mt-3 grid grid-cols-2 gap-2">
-      <div>
-        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.purityLabel")}</label>
-        <select id="sku-purity" class="input-filled">
-          <option value="">—</option>
-          ${PURITY_OPTIONS.map((p) => `<option value="${p}">${p}</option>`).join("")}
-        </select>
-      </div>
-      <div>
-        <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.bahtWeightLabel")}</label>
-        <input id="sku-baht" type="number" step="0.01" min="0" value="0" class="input-filled" />
-      </div>
-    </div>
-    <label class="mt-3 mb-1.5 block text-xs font-bold text-gray-600">${t("settings.priceLabel")}</label>
-    <input id="sku-price" type="number" min="0" value="0" class="input-filled" />
     <button id="create-sku-submit" class="btn-primary mt-4 w-full">${t("stock.createNewSku")}</button>
   `;
   container.querySelector("#sku-back").addEventListener("click", onCancel);
   container.querySelector("#create-sku-submit").addEventListener("click", async () => {
-    const name_en = container.querySelector("#sku-name").value.trim();
-    if (!name_en) return toast(t("stock.needSkuName"), "error");
+    const name = container.querySelector("#sku-name").value.trim();
+    if (!name) return toast(t("stock.needSkuName"), "error");
     if (!activeTypes.length || !activeWeights.length) return toast(t("settings.needTypeAndWeight"), "error");
     const sku = await api.createSku({
-      name_en,
+      name,
       type_id: container.querySelector("#sku-type").value,
       weight_id: container.querySelector("#sku-weight").value,
-      purity: container.querySelector("#sku-purity").value || null,
-      baht_weight: Number(container.querySelector("#sku-baht").value || 0),
-      unit_price_lak: Number(container.querySelector("#sku-price").value || 0),
     });
     onCreated(sku);
   });

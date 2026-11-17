@@ -76,23 +76,26 @@ describe("carry forward", () => {
 });
 
 describe("reorder point", () => {
-  const config = { safety_buffer_days: 2 };
-  it("is avg/day x (lead time + safety buffer), rounded up", () => {
-    expect(reorderPoint({ avg_daily_sales: 2.5, order_lead_time_days: 3, reorder_level: 5 }, config)).toBe(13);
+  const config = { warning_margin_days: 3 };
+  const st = (avg: number | null, lead: number) => ({ avg: { value: avg }, lead: { value: lead } });
+  it("is avg/day x (lead time + warning margin), rounded up", () => {
+    expect(reorderPoint(st(2.5, 3), config)).toBe(15);
+    expect(reorderPoint(st(1.1, 7), config)).toBe(11);
   });
-  it("falls back to the fixed level until avg/day and lead time are filled in", () => {
-    expect(reorderPoint({ avg_daily_sales: null, order_lead_time_days: 3, reorder_level: 7 }, config)).toBe(7);
-    expect(reorderPoint({ avg_daily_sales: 2, order_lead_time_days: null, reorder_level: 7 }, config)).toBe(7);
+  it("is 0 (not known) without an avg/day; no fixed level any more", () => {
+    expect(reorderPoint(st(null, 7), config)).toBe(0);
+    expect(reorderPoint(st(0, 7), config)).toBe(0);
+    expect(reorderPoint(undefined, config)).toBe(0);
   });
 });
 
 describe("valuation", () => {
   const config = { spot_lak_per_baht: 30000000 };
   it("values gold at Baht weight x gold price", () => {
-    expect(valueLak({ baht_weight: 0.5, unit_price_lak: 999 }, 4, config.spot_lak_per_baht)).toBe(60000000);
+    expect(valueLak({ baht_weight: 0.5 }, 4, config.spot_lak_per_baht)).toBe(60000000);
   });
-  it("values items without gold weight at unit price", () => {
-    expect(valueLak({ baht_weight: 0, unit_price_lak: 45000 }, 3, config.spot_lak_per_baht)).toBe(135000);
+  it("every SKU is gold: no Baht weight is worth 0", () => {
+    expect(valueLak({ baht_weight: 0 }, 3, config.spot_lak_per_baht)).toBe(0);
   });
 });
 

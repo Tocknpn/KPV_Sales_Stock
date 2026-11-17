@@ -211,11 +211,8 @@ export function buildDemoData(today: string): DemoData {
     sku("SP-904", "Ceramic Mug", "ຈອກເຊລາມິກ", T.supplies, null, null, null, 0, 32000, 65000, 15, null, null, "mug"),
   ];
 
-  // The demo necklaces form one product family.
-  for (const s of skus) if (s.type_id === T.necklaces.type_id) s.group_name = "Snake Necklace";
-
   // Replenishment rules: the per-SKU numbers above as company-wide SKU rules (what the
-  // migration does for a live database), plus one group rule for the necklace family.
+  // migration does for a live database), plus one Type rule for the necklaces.
   const rule = (scope: ReplenishmentRule["scope"], scope_key: string, avg: number | null, lead: number | null): ReplenishmentRule => ({
     id: `00000000-0000-0000-0000-${String(1000 + ruleSeq++).padStart(12, "0")}`,
     scope,
@@ -230,7 +227,7 @@ export function buildDemoData(today: string): DemoData {
   let ruleSeq = 0;
   const rules: ReplenishmentRule[] = [
     ...skus.filter((s) => s.avg_daily_sales != null || s.order_lead_time_days != null).map((s) => rule("sku", s.sku_id, s.avg_daily_sales, s.order_lead_time_days)),
-    rule("group", "Snake Necklace", 1.5, 7),
+    rule("type", T.necklaces.type_id, 1.5, 7),
   ];
 
   // Four demo days per desk, oldest first; the last one is today.

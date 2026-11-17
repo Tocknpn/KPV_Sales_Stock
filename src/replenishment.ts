@@ -6,7 +6,7 @@ import type { Desk, DeskDay, LedgerRow, MasterSku, ReplenishmentRule, SystemConf
 import type { Store } from "./store";
 import { currentQty, soldOf } from "./logic";
 
-export type ParamSource = "sku-branch" | "sku" | "group-branch" | "group" | "type-branch" | "type" | "auto" | "default" | "none";
+export type ParamSource = "sku" | "type" | "auto" | "default" | "none";
 export type RunwayStatus = "critical" | "warning" | "ok" | "no_data";
 
 // Fewer in-stock days than this gives no automatic velocity (mirrors branch_velocity).
@@ -23,31 +23,26 @@ function round1(n: number) {
 }
 
 // ---------------------------------------------------------------------------
-// Rule precedence (spec 2.3): SKU+branch, SKU, group+branch, group, type+branch,
-// type. Average and lead time each take the first rule that has a value for
-// them; no average rule falls back to the automatic velocity, no lead time to
-// the configured default.
+// Rule precedence (decided 2026-11-17): company-wide SKU rule, then company-wide
+// type rule. Average and lead time each take the first rule that has a value
+// for them; no average rule falls back to the automatic velocity, no lead time
+// to the configured default. Group and branch rules are no longer used.
 // ---------------------------------------------------------------------------
 export function resolveParams(
-  sku: Pick<MasterSku, "sku_id" | "type_id" | "group_name">,
-  branchId: string,
+  sku: Pick<MasterSku, "sku_id" | "type_id">,
   rules: ReplenishmentRule[],
   config: Pick<SystemConfig, "default_lead_time_days">,
   autoAvg: number | null
 ): { avg: { value: number | null; source: ParamSource }; lead: { value: number; source: ParamSource } } {
-  const steps: { scope: ReplenishmentRule["scope"]; key: string | null; branch: boolean; source: ParamSource }[] = [
-    { scope: "sku", key: sku.sku_id, branch: true, source: "sku-branch" },
-    { scope: "sku", key: sku.sku_id, branch: false, source: "sku" },
-    { scope: "group", key: sku.group_name, branch: true, source: "group-branch" },
-    { scope: "group", key: sku.group_name, branch: false, source: "group" },
-    { scope: "type", key: sku.type_id, branch: true, source: "type-branch" },
-    { scope: "type", key: sku.type_id, branch: false, source: "type" },
+  const steps: { scope: ReplenishmentRule["scope"]; key: string | null; source: ParamSource }[] = [
+    { scope: "sku", key: sku.sku_id, source: "sku" },
+    { scope: "type", key: sku.type_id, source: "type" },
   ];
   let avg: { value: number | null; source: ParamSource } | null = null;
   let lead: { value: number; source: ParamSource } | null = null;
   for (const step of steps) {
     if (step.key == null || step.key === "") continue;
-    const rule = rules.find((r) => r.scope === step.scope && r.scope_key === step.key && (step.branch ? r.branch_id === branchId : r.branch_id === null));
+    const rule = rules.find((r) => r.scope === step.scope && r.scope_key === step.key && r.branch_id === null);
     if (!rule) continue;
     if (!avg && rule.avg_daily_sell != null) avg = { value: rule.avg_daily_sell, source: step.source };
     if (!lead && rule.lead_time_days != null) lead = { value: rule.lead_time_days, source: step.source };
@@ -67,23 +62,17 @@ export function runwayStatus(input: {
   avg: number | null;
   lead: number;
   margin: number;
-  reorderLevel: number;
-  onHand: number;
-}): { runwayDays: number | null; status: RunwayStatus; fixedLevel: boolean; suggestedQty: number } {
-  const { position, avg, lead, margin, reorderLevel, onHand } = input;
-  if (avg == null) {
-    // New SKU with nothing to plan from: only the old fixed level can warn.
-    const fixed = reorderLevel > 0 && onHand < reorderLevel;
-    return { runwayDays: null, status: fixed ? "warning" : "no_data", fixedLevel: fixed, suggestedQty: 0 };
-  }
+}): { runwayDays: number | null; status: RunwayStatus; suggestedQty: number } {
+  const { position, avg, lead, margin } = input;
+  // Nothing to plan from yet (no manual figure, too little sales history).
+  if (avg == null) return { runwayDays: null, status: "no_data", suggestedQty: 0 };
   // A manual 0 means "does not sell": nothing to run out of.
-  if (avg <= 0) return { runwayDays: null, status: "ok", fixedLevel: false, suggestedQty: 0 };
+  if (avg <= 0) return { runwayDays: null, status: "ok", suggestedQty: 0 };
   const runway = position / avg;
   const status: RunwayStatus = position <= 0 || runway <= lead ? "critical" : runway <= lead + margin ? "warning" : "ok";
   return {
     runwayDays: round1(Math.max(runway, 0)),
     status,
-    fixedLevel: false,
     suggestedQty: Math.max(0, Math.ceil(avg * (lead + margin)) - position),
   };
 }
@@ -159,7 +148,6 @@ export interface ReplenishmentRow {
   sku_id: string;
   name: string;
   name_lo: string | null;
-  group: string | null;
   type: string;
   onHand: number;
   inbound: number;
@@ -169,7 +157,6 @@ export interface ReplenishmentRow {
   lead: { value: number; source: ParamSource };
   runwayDays: number | null;
   status: RunwayStatus;
-  fixedLevel: boolean;
   suggestedQty: number;
   review: boolean;
 }
@@ -213,20 +200,17 @@ export function buildBranchRows(input: {
     const position = hand + inc;
     const v = velocityBySku.get(skuId);
     const auto = v?.velocity ?? null;
-    const params = resolveParams(sku, branchId, rules, config, auto);
+    const params = resolveParams(sku, rules, config, auto);
     const run = runwayStatus({
       position,
       avg: params.avg.value,
       lead: params.lead.value,
       margin: config.warning_margin_days,
-      reorderLevel: sku.reorder_level,
-      onHand: hand,
     });
     rows.push({
       sku_id: skuId,
-      name: sku.name_en,
+      name: sku.name_lo || sku.name_en,
       name_lo: sku.name_lo,
-      group: sku.group_name,
       type: sku.category,
       onHand: hand,
       inbound: inc,

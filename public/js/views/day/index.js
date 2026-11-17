@@ -326,18 +326,20 @@ function renderNotices() {
   el.innerHTML = parts.join("");
 }
 
-// Rows grouped by group_name (when the API has it), else by type; sizes by grams.
+// Rows grouped by Type (Lao label, in the Types' order); sizes by grams.
 function groupRows() {
   const groups = new Map();
+  const order = new Map();
   for (const r of S.rows) {
     const key = groupKeyOf(r);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(r);
+    order.set(key, Math.min(order.get(key) ?? Infinity, key ? r.type_order ?? 999 : Infinity));
   }
   for (const list of groups.values()) {
     list.sort((a, b) => (a.gram_weight_each ?? 0) - (b.gram_weight_each ?? 0) || skuName(a).localeCompare(skuName(b)));
   }
-  return [...groups.entries()].sort(([a], [b]) => (a || "￿").localeCompare(b || "￿"));
+  return [...groups.entries()].sort(([a], [b]) => order.get(a) - order.get(b) || (a || "￿").localeCompare(b || "￿"));
 }
 
 function groupMeta(list) {
@@ -481,21 +483,31 @@ function onAction(act, btn) {
   }
 }
 
-// Move in/out: the input holds the size, the strip under it the direction.
-// With no size yet, the direction is remembered for the number typed next.
+// Move in/out: ± flips the sign of what is there. With nothing typed yet, the
+// direction is remembered for the number typed next.
 function flipMoveSign(sku, btn) {
   const row = S.ctx.row(sku);
+  const strip = btn.closest("[data-move-strip]");
   const input = btn.closest("[data-move-cell]")?.querySelector('[data-field="move_qty"]');
-  const size = Math.abs(row.move_qty ?? 0) || clampQty(input?.value || 0);
-  const neg = !((row.move_qty ?? 0) < 0 || btn.dataset.pendingNeg === "1");
+  const current = row.move_qty ?? 0;
+  const size = Math.abs(current) || Math.abs(clampSigned(parseSigned(input?.value)));
+  const neg = !(current < 0 || strip?.dataset.pendingNeg === "1");
   if (!size) {
-    btn.dataset.pendingNeg = neg ? "1" : "";
+    if (strip) strip.dataset.pendingNeg = neg ? "1" : "";
     refreshRow(sku);
     input?.focus();
     return;
   }
-  btn.dataset.pendingNeg = "";
+  if (strip) strip.dataset.pendingNeg = "";
   saveField(sku, "move_qty", neg ? -size : size);
+}
+
+// "-5", "−5", "5", "-" or "" as a number (blank or a lone minus = 0).
+function parseSigned(raw) {
+  const v = String(raw ?? "").trim().replace(/[−–]/g, "-");
+  if (v === "" || v === "-") return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
 }
 
 // One typed value: check it locally (closing may not drop below zero), show it,
@@ -534,18 +546,25 @@ function onChange(e) {
   const field = input.dataset.field;
   if (!field) return;
   if (field === "move_qty") {
-    const sign = input.closest("[data-move-cell]")?.querySelector('[data-act="sign"]');
-    const neg = (S.ctx.row(sku).move_qty ?? 0) < 0 || sign?.dataset.pendingNeg === "1";
-    if (sign) sign.dataset.pendingNeg = "";
-    const size = clampQty(raw || 0);
-    return saveField(sku, field, clampSigned(neg ? -size : size));
+    // The sign typed decides the direction; ± pressed before typing a plain number makes it an out.
+    const strip = input.closest("[data-move-cell]")?.querySelector("[data-move-strip]");
+    const pendingNeg = strip?.dataset.pendingNeg === "1";
+    if (strip) strip.dataset.pendingNeg = "";
+    let to = clampSigned(parseSigned(raw));
+    if (pendingNeg && to > 0 && !/^\s*[-−–]/.test(raw)) to = -to;
+    return saveField(sku, field, to);
   }
   saveField(sku, field, clampQty(raw || 0));
 }
 
 function onInput(e) {
   if (!S) return;
-  if (e.target.matches("[data-count], [data-field]")) {
+  if (e.target.matches('[data-field="move_qty"]')) {
+    // Signed: one leading minus (any dash counts), then up to 5 digits.
+    const v = e.target.value.replace(/[−–]/g, "-");
+    const neg = v.trimStart().startsWith("-");
+    e.target.value = (neg ? "-" : "") + v.replace(/\D/g, "").slice(0, 5);
+  } else if (e.target.matches("[data-count], [data-field]")) {
     e.target.value = e.target.value.replace(/\D/g, "").slice(0, 5);
   }
 }

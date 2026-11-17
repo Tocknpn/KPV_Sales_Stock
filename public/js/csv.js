@@ -1,22 +1,16 @@
 // Minimal CSV reader for the SKU import (Excel "CSV UTF-8" files): quoted
 // fields, doubled quotes, commas or semicolons, CRLF or LF.
 
-export const CSV_COLUMNS = [
-  "sku_id",
-  "name_en",
-  "name_lo",
-  "type",
-  "weight",
-  "purity",
-  "baht_weight",
-  "unit_price_lak",
-  "reorder_level",
-  "avg_daily_sales",
-  "order_lead_time_days",
-  "group",
-];
+// The template's columns (decided 2026-11-17). Old files still import: their
+// name_lo / name_en become the name, avg_daily_sales / order_lead_time_days
+// the planning numbers, and purity, price, reorder level and group are ignored.
+export const CSV_COLUMNS = ["sku_id", "name", "type", "weight", "avg_daily_sell", "lead_time_days"];
+const ALIASES = { name_lo: "name", avg_daily_sales: "avg_daily_sell", order_lead_time_days: "lead_time_days" };
+const NAME_COLUMNS = ["name", "name_lo", "name_en"];
 
-export const CSV_TEMPLATE = `${CSV_COLUMNS.join(",")}\r\n,Gold Bar 1 Baht,ທອງຄຳແທ່ງ 1 ບາດ,Gold Bars,1 Baht,99.99%,1,0,5,2.5,3,\r\n`;
+export const CSV_TEMPLATE = `${CSV_COLUMNS.join(",")}
+,ທອງຄຳແທ່ງ 1 ບາດ,Gold Bars,1 Baht,2.5,3
+`;
 
 export function parseCsv(text) {
   const src = text.replace(/^﻿/, "");
@@ -58,16 +52,22 @@ export function parseCsv(text) {
 export function csvRowsToSkus(lines) {
   if (lines.length < 2) return { error: "The file has no data rows", rows: [] };
   const header = lines[0].map((h) => h.trim().toLowerCase());
-  if (!header.includes("name_en") || !header.includes("type")) {
-    return { error: "The first line must have the column names, including name_en and type", rows: [] };
+  if (!header.some((h) => NAME_COLUMNS.includes(h)) || !header.includes("type")) {
+    return { error: "The first line must have the column names, including name and type", rows: [] };
   }
   const body = lines.slice(1);
   while (body.length && body[body.length - 1].every((cell) => cell.trim() === "")) body.pop();
   const rows = body.map((cells) => {
     const obj = {};
-    header.forEach((name, i) => {
+    header.forEach((raw, i) => {
       const value = (cells[i] ?? "").trim();
-      if (CSV_COLUMNS.includes(name) && value !== "") obj[name] = value;
+      if (value === "") return;
+      if (raw === "name_en") {
+        if (obj.name === undefined) obj.name = value; // only when there is no Lao name
+        return;
+      }
+      const name = ALIASES[raw] ?? raw;
+      if (CSV_COLUMNS.includes(name)) obj[name] = value;
     });
     return obj;
   });

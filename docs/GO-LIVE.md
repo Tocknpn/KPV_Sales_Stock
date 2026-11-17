@@ -16,7 +16,7 @@ skip to section 2.)
 
 1. In **SQL Editor**, run these files in this order:
    1. `supabase/schema.sql`
-   2. `supabase/migrations/20261112_01_foundation.sql` to `20261116_13_plain_passwords.sql`, in name order
+   2. `supabase/migrations/20261112_01_foundation.sql` to `20261117_14_sku_simplify.sql`, in name order
    3. `supabase/users_roles.sql`
    4. `supabase/base.sql`
    5. `supabase/real_skus.sql` (the real product list; real rows, kept by the purge;
@@ -85,7 +85,7 @@ Do these in order, **before** the new code is deployed.
    ```
    Fix every row (correct the count or the entry in the old app). After v2 such
    a row can only be corrected, never pushed further down.
-3. Run `supabase/migrations/20261112_01_foundation.sql` to `20261116_13_plain_passwords.sql`
+3. Run `supabase/migrations/20261112_01_foundation.sql` to `20261117_14_sku_simplify.sql`
    in name order, then `supabase/users_roles.sql`. All are safe to run twice, but
    always re-run the **whole** sequence 01 to 13 and then `users_roles.sql`,
    never a single earlier file (migration 07 redefines a function that
@@ -251,7 +251,38 @@ On the live project, in this order:
 Locked out with no admin password: `npm run db:admin -- "Owner" owner 'a-password'`
 prints an insert (with `password_plain`) to paste into the SQL editor.
 
-## 9. If saving fails with "The database needs an update"
+## 9. Rollout: simpler SKUs, reorder settings in SKU setting (2026-11-17)
+
+What changes for people:
+
+- A SKU is now **Name (Lao) + Type + Size**, plus optional **avg sell/day** and
+  **order lead time**. English name, purity, price, group, Baht weight and the
+  fixed reorder level are gone from the forms. The Baht weight follows the size
+  (grams / 15.244), so every SKU counts as gold.
+- Sizes show in Lao everywhere (ບາດ, ສະຫຼຶງ, ຫຸນ, ກລາມ, ກິໂລ). New sizes are
+  typed as amount + unit in Settings, SKU, Weight.
+- Settings, SKU lists SKUs by Type. Each Type has **ຕັ້ງຄ່າທັງໝົດ** (set all):
+  the avg/day and lead time typed there apply to every SKU in the Type. The
+  separate Replenishment menu is gone. Rules are company-wide and admin only.
+- A SKU with no avg/day (none typed and too little sales history) shows no
+  alert; the old fixed reorder level no longer warns.
+- Settings no longer lists Closed days or Stock-out mode. Closed days already
+  saved still count; every day uses the full stock-out layout.
+- Move in/out takes a signed number: `-5` = 5 moved out, `5` = 5 moved in. The
+  ± button flips the sign (for phones whose keypad has no minus).
+
+On the live project, in this order:
+
+1. Run `supabase/migrations/20261117_14_sku_simplify.sql` in the SQL editor
+   (safe to re-run). It turns group rules into per-SKU rules, branch rules
+   into company-wide ones, sets each SKU's Baht weight from its size, copies
+   the English name into an empty Lao name, and sets stock-out mode to
+   `dynamic`. No column is dropped.
+2. Deploy the Worker (`npm run deploy`) to the **owner's Cloudflare account**.
+3. Check: Settings, SKU lists SKUs under their Type with "set all"; a SKU's
+   sizes read in Lao; the day grid accepts `-5` in Move in/out.
+
+## 10. If saving fails with "The database needs an update"
 
 The Worker is newer than the database: a migration has not been run, or
 PostgREST has not reloaded its schema. The Worker log names the missing column
@@ -267,5 +298,5 @@ left join information_schema.columns c
 ```
 
 For any row with `present = false`: run the missing migrations in name order
-(read sections 6–8 first for their pre-checks), then `supabase/users_roles.sql`,
+(read sections 6–9 first for their pre-checks), then `supabase/users_roles.sql`,
 then `notify pgrst, 'reload schema';`. Run the query again: every row `true`.

@@ -11,24 +11,38 @@ import type { MasterSku, SkuType, SkuWeight } from "../types";
 
 const r = newRouter();
 
-const PURITIES = ["96.5%", "99.99%"];
 const MAX_IMPORT_ROWS = 500;
+// Every SKU is gold (decided 2026-11-17): its Baht weight follows its size.
+export const GRAMS_PER_BAHT = 15.244;
+const bahtOfGrams = (g: number | null | undefined) => (g && g > 0 ? Math.round((g / GRAMS_PER_BAHT) * 10000) / 10000 : 0);
 // Same limits as replenishment rules (the engine reads only rules).
 const MAX_RULE_AVG = 9_999_999;
 const MAX_RULE_LEAD = 9999.9;
 
-// A SKU created with avg/day or lead time gets a company-wide SKU rule.
-async function writeSkuRules(store: Store, skus: MasterSku[]) {
-  for (const s of skus) {
-    if (s.avg_daily_sales == null && s.order_lead_time_days == null) continue;
-    await store.upsertRule({
-      scope: "sku",
-      scope_key: s.sku_id,
-      branch_id: null,
-      avg_daily_sell: s.avg_daily_sales == null ? null : Math.round(s.avg_daily_sales * 1000) / 1000,
-      lead_time_days: s.order_lead_time_days == null ? null : Math.round(s.order_lead_time_days * 10) / 10,
-    });
-  }
+// Avg/day and lead time live only in company-wide SKU rules; a blank value
+// inherits (Type rule, then automatic velocity / default lead time).
+async function writeSkuRule(store: Store, skuId: string, avg: number | null, lead: number | null) {
+  await store.upsertRule({
+    scope: "sku",
+    scope_key: skuId,
+    branch_id: null,
+    avg_daily_sell: avg == null ? null : Math.round(avg * 1000) / 1000,
+    lead_time_days: lead == null ? null : Math.round(lead * 10) / 10,
+  });
+}
+
+// The two planning numbers of a form / CSV line: { avg, lead } (null = blank) or an error text.
+function planNumbers(input: Record<string, any>): { avg: number | null; lead: number | null } | string {
+  const avg = nonNegative(input.avg_daily_sell ?? input.avg_daily_sales);
+  const lead = nonNegative(input.lead_time_days ?? input.order_lead_time_days);
+  if (Number.isNaN(avg) || (avg !== null && avg > MAX_RULE_AVG)) return `avg_daily_sell must be a number from 0 to ${MAX_RULE_AVG}`;
+  if (Number.isNaN(lead) || (lead !== null && lead > MAX_RULE_LEAD)) return `lead_time_days must be a number from 0 to ${MAX_RULE_LEAD}`;
+  return { avg, lead };
+}
+
+// The SKU name: one Lao name (name, or name_lo; old files may only have name_en).
+function skuNameOf(input: Record<string, any>) {
+  return String(input.name ?? input.name_lo ?? input.name_en ?? "").trim().slice(0, 120);
 }
 
 function slug(name: string) {
@@ -38,12 +52,6 @@ function slug(name: string) {
 function newSkuId() {
   const rand = crypto.getRandomValues(new Uint8Array(3));
   return `SKU-${Date.now().toString(36).toUpperCase()}${[...rand].map((b) => (b % 36).toString(36)).join("").toUpperCase()}`;
-}
-
-// Product group: free text, blank = none.
-function groupName(value: unknown): string | null {
-  const g = String(value ?? "").trim().slice(0, 80);
-  return g || null;
 }
 
 function nonNegative(value: unknown): number | null {
@@ -72,48 +80,50 @@ r.get("/skus", async (c) => {
   });
 });
 
+type BuiltSku = { sku: NewSku; avg: number | null; lead: number | null };
+
 // Validates one SKU input (form or CSV line). Returns the SKU or an error text.
-function buildSku(input: Record<string, any>, types: SkuType[], weights: SkuWeight[]): NewSku | string {
-  const name_en = String(input.name_en ?? "").trim();
-  if (!name_en) return "name_en is required";
-  const type = types.find((t) => t.type_id === input.type_id || t.name_en.toLowerCase() === String(input.type ?? "").trim().toLowerCase());
+// Purity, price, group and fixed reorder level are no longer asked for and are
+// ignored if sent (decided 2026-11-17).
+function buildSku(input: Record<string, any>, types: SkuType[], weights: SkuWeight[]): BuiltSku | string {
+  const name = skuNameOf(input);
+  if (!name) return "name is required";
+  const typeKey = String(input.type ?? "").trim().toLowerCase();
+  const type = types.find(
+    (t) => t.type_id === input.type_id || (typeKey !== "" && (t.name_en.toLowerCase() === typeKey || (t.name_lo ?? "").toLowerCase() === typeKey))
+  );
   if (!type) return "unknown type";
   const weightKey = String(input.weight ?? "").trim().toLowerCase();
-  const weight = weights.find((w) => w.weight_id === input.weight_id || (weightKey !== "" && w.name_en.toLowerCase() === weightKey));
+  const weight = weights.find(
+    (w) => w.weight_id === input.weight_id || (weightKey !== "" && (w.name_en.toLowerCase() === weightKey || w.weight_id.toLowerCase() === weightKey))
+  );
   if ((input.weight_id || weightKey) && !weight) return "unknown weight";
-  const purity = input.purity ? String(input.purity).trim() : null;
-  if (purity && !PURITIES.includes(purity)) return "purity must be 96.5% or 99.99%";
-  const numbers = {
-    baht_weight: nonNegative(input.baht_weight),
-    unit_cost_lak: nonNegative(input.unit_cost_lak),
-    unit_price_lak: nonNegative(input.unit_price_lak),
-    reorder_level: nonNegative(input.reorder_level),
-    avg_daily_sales: nonNegative(input.avg_daily_sales),
-    order_lead_time_days: nonNegative(input.order_lead_time_days),
-  };
-  for (const [field, value] of Object.entries(numbers)) if (Number.isNaN(value)) return `${field} must be a number, 0 or more`;
-  if (numbers.reorder_level !== null && !Number.isInteger(numbers.reorder_level)) return "reorder_level must be a whole number";
-  if (numbers.avg_daily_sales !== null && numbers.avg_daily_sales > MAX_RULE_AVG) return `avg_daily_sales must be at most ${MAX_RULE_AVG}`;
-  if (numbers.order_lead_time_days !== null && numbers.order_lead_time_days > MAX_RULE_LEAD) return `order_lead_time_days must be at most ${MAX_RULE_LEAD}`;
+  const plan = planNumbers(input);
+  if (typeof plan === "string") return plan;
   const sku_id = String(input.sku_id ?? "").trim();
   if (sku_id && !/^[A-Za-z0-9_-]{1,40}$/.test(sku_id)) return "sku_id may only contain letters, digits, - and _";
   return {
-    sku_id: sku_id || newSkuId(),
-    name_en: name_en.slice(0, 120),
-    name_lo: input.name_lo ? String(input.name_lo).trim().slice(0, 120) : null,
-    category: type.name_en,
-    type_id: type.type_id,
-    weight_id: weight?.weight_id ?? null,
-    std_gram_weight: weight?.gram_value ?? null,
-    purity: purity as MasterSku["purity"],
-    baht_weight: numbers.baht_weight ?? 0,
-    unit_cost_lak: numbers.unit_cost_lak ?? 0,
-    unit_price_lak: numbers.unit_price_lak ?? 0,
-    reorder_level: numbers.reorder_level ?? 5,
-    avg_daily_sales: numbers.avg_daily_sales,
-    order_lead_time_days: numbers.order_lead_time_days,
-    group_name: groupName(input.group_name ?? input.group),
-    icon: input.icon ? String(input.icon) : type.icon,
+    sku: {
+      sku_id: sku_id || newSkuId(),
+      // name_en is NOT NULL and the fallback everywhere: it mirrors the Lao name.
+      name_en: name,
+      name_lo: name,
+      category: type.name_en,
+      type_id: type.type_id,
+      weight_id: weight?.weight_id ?? null,
+      std_gram_weight: weight?.gram_value ?? null,
+      purity: null,
+      baht_weight: bahtOfGrams(weight?.gram_value),
+      unit_cost_lak: 0,
+      unit_price_lak: 0,
+      reorder_level: 0,
+      avg_daily_sales: null,
+      order_lead_time_days: null,
+      group_name: null,
+      icon: input.icon ? String(input.icon) : type.icon,
+    },
+    avg: plan.avg,
+    lead: plan.lead,
   };
 }
 
@@ -121,16 +131,16 @@ r.post("/skus", requireAdmin, async (c) => {
   const store = storeFor(c);
   const body = await readBody(c);
   const [types, weights] = await Promise.all([store.skuTypes(), store.skuWeights()]);
-  if (!body.weight_id) throw new HttpError(400, "name_en, type_id and weight_id are required", "BAD_SKU");
-  const sku = buildSku(body, types, weights);
-  if (typeof sku === "string") throw new HttpError(400, sku, "BAD_SKU");
-  const [created] = await store.createSkus([sku]);
-  await writeSkuRules(store, [created]);
+  if (!body.weight_id) throw new HttpError(400, "name, type_id and weight_id are required", "BAD_SKU");
+  const built = buildSku(body, types, weights);
+  if (typeof built === "string") throw new HttpError(400, built, "BAD_SKU");
+  const [created] = await store.createSkus([built.sku]);
+  if (built.avg !== null || built.lead !== null) await writeSkuRule(store, created.sku_id, built.avg, built.lead);
   await audit(store, c.get("user"), "sku.create", created.sku_id, { name_en: created.name_en });
   return c.json(created);
 });
 
-// CSV import. Body: { rows: [{ name_en, name_lo, type, weight, purity, ... }] }
+// CSV import. Body: { rows: [{ sku_id, name, type, weight, avg_daily_sell, lead_time_days }] }
 // (the browser parses the file). Every row is validated first; if any row is
 // wrong nothing is imported and the errors are returned per line.
 r.post("/skus/import", requireAdmin, async (c) => {
@@ -143,19 +153,19 @@ r.post("/skus/import", requireAdmin, async (c) => {
   const [types, weights, existing] = await Promise.all([store.skuTypes(), store.skuWeights(), store.skus()]);
   const taken = new Set(existing.map((s) => s.sku_id.toLowerCase()));
   const errors: { line: number; error: string }[] = [];
-  const skus: NewSku[] = [];
+  const built: BuiltSku[] = [];
   rows.forEach((row, i) => {
     const line = i + 2; // line 1 is the CSV header
-    const sku = buildSku(row ?? {}, types, weights);
-    if (typeof sku === "string") return errors.push({ line, error: sku });
-    if (taken.has(sku.sku_id.toLowerCase())) return errors.push({ line, error: `sku_id ${sku.sku_id} already exists` });
-    taken.add(sku.sku_id.toLowerCase());
-    skus.push(sku);
+    const b = buildSku(row ?? {}, types, weights);
+    if (typeof b === "string") return errors.push({ line, error: b });
+    if (taken.has(b.sku.sku_id.toLowerCase())) return errors.push({ line, error: `sku_id ${b.sku.sku_id} already exists` });
+    taken.add(b.sku.sku_id.toLowerCase());
+    built.push(b);
   });
   if (errors.length > 0) throw new HttpError(422, "Nothing was imported — fix these rows and try again", "IMPORT_INVALID", { errors });
 
-  const created = await store.createSkus(skus);
-  await writeSkuRules(store, created);
+  const created = await store.createSkus(built.map((b) => b.sku));
+  for (const b of built) if (b.avg !== null || b.lead !== null) await writeSkuRule(store, b.sku.sku_id, b.avg, b.lead);
   await audit(store, c.get("user"), "sku.import", `${created.length} SKUs`, { sku_ids: created.map((s) => s.sku_id).slice(0, 50) });
   return c.json({ imported: created.length });
 });
@@ -164,23 +174,18 @@ r.patch("/skus/:id", requireAdmin, async (c) => {
   const store = storeFor(c);
   const body = await readBody(c);
   const patch: Partial<MasterSku> = {};
-  if (body.name_en !== undefined) {
-    if (!String(body.name_en).trim()) throw new HttpError(400, "name_en cannot be empty", "BAD_SKU");
-    patch.name_en = String(body.name_en).trim().slice(0, 120);
+  const nameInput = body.name ?? body.name_lo ?? body.name_en;
+  if (nameInput !== undefined) {
+    const name = String(nameInput ?? "").trim().slice(0, 120);
+    if (!name) throw new HttpError(400, "name cannot be empty", "BAD_SKU");
+    patch.name_en = name;
+    patch.name_lo = name;
   }
-  if (body.name_lo !== undefined) patch.name_lo = body.name_lo ? String(body.name_lo).trim().slice(0, 120) : null;
   if (body.active !== undefined) patch.active = Boolean(body.active);
-  if (body.group_name !== undefined || body.group !== undefined) patch.group_name = groupName(body.group_name ?? body.group);
-  if (body.purity !== undefined) {
-    if (body.purity && !PURITIES.includes(body.purity)) throw new HttpError(400, "purity must be 96.5% or 99.99%", "BAD_SKU");
-    patch.purity = body.purity || null;
-  }
-  for (const field of ["baht_weight", "unit_cost_lak", "unit_price_lak", "reorder_level"] as const) {
-    if (body[field] === undefined) continue;
-    const n = nonNegative(body[field]);
-    if (n === null || Number.isNaN(n)) throw new HttpError(400, `${field} must be a number, 0 or more`, "BAD_SKU");
-    patch[field] = field === "reorder_level" ? Math.round(n) : n;
-  }
+  // Planning numbers: sent = set (blank = inherit); not sent = unchanged.
+  const planSent = body.avg_daily_sell !== undefined || body.lead_time_days !== undefined;
+  const plan = planSent ? planNumbers(body) : null;
+  if (typeof plan === "string") throw new HttpError(400, plan, "BAD_SKU");
   if (body.type_id || body.weight_id) {
     const [types, weights] = await Promise.all([store.skuTypes(), store.skuWeights()]);
     if (body.type_id) {
@@ -194,11 +199,14 @@ r.patch("/skus/:id", requireAdmin, async (c) => {
       if (!weight) throw new HttpError(400, "Unknown weight_id", "BAD_SKU");
       patch.weight_id = weight.weight_id;
       patch.std_gram_weight = weight.gram_value;
+      patch.baht_weight = bahtOfGrams(weight.gram_value);
     }
   }
   const sku = await store.updateSku((c.req.param("id") ?? ""), patch);
   if (!sku) throw new HttpError(404, "SKU not found", "NOT_FOUND");
-  await audit(store, c.get("user"), "sku.update", sku.sku_id, patch as Record<string, unknown>);
+  if (plan) await writeSkuRule(store, sku.sku_id, plan.avg, plan.lead);
+  const changes = plan ? { ...patch, avg_daily_sell: plan.avg, lead_time_days: plan.lead } : patch;
+  await audit(store, c.get("user"), "sku.update", sku.sku_id, changes as Record<string, unknown>);
   return c.json(sku);
 });
 
@@ -253,8 +261,9 @@ r.post("/sku-weights", requireAdmin, async (c) => {
   const name_en = String(body.name_en ?? "").trim();
   const gram_value = Number(body.gram_value);
   if (!name_en || !(gram_value > 0)) throw new HttpError(400, "name_en and a gram_value above 0 are required", "BAD_WEIGHT");
-  const weight_id = slug(body.weight_id || name_en);
-  if (!weight_id) throw new HttpError(400, "name_en must contain letters or digits", "BAD_WEIGHT");
+  // Names are Lao now, which slug() drops: fall back to the grams.
+  const weight_id = slug(body.weight_id || name_en) || `W_${String(gram_value).replace(/[.]/g, "_")}`;
+  if ((await store.skuWeights()).some((w) => w.weight_id === weight_id)) throw new HttpError(409, "That size already exists", "WEIGHT_EXISTS");
   const weight = await store.createSkuWeight({ weight_id, name_en, gram_value });
   await audit(store, c.get("user"), "sku_weight.create", weight.weight_id, { name_en, gram_value });
   return c.json(weight);
@@ -279,7 +288,7 @@ r.patch("/sku-weights/:id", requireAdmin, async (c) => {
   // Keep each SKU's gram weight equal to its size definition.
   if (patch.gram_value !== undefined) {
     for (const s of (await store.skus()).filter((x) => x.weight_id === weight.weight_id)) {
-      await store.updateSku(s.sku_id, { std_gram_weight: weight.gram_value });
+      await store.updateSku(s.sku_id, { std_gram_weight: weight.gram_value, baht_weight: bahtOfGrams(weight.gram_value) });
     }
   }
   await audit(store, c.get("user"), "sku_weight.update", weight.weight_id, patch as Record<string, unknown>);
@@ -315,7 +324,9 @@ r.post("/settings/config", requireAdmin, async (c) => {
     if (n === null || Number.isNaN(n)) throw new HttpError(400, `${key} must be a number, 0 or more`, "BAD_CONFIG");
     patch[column] = n;
   }
-  // Company-wide; each case-day keeps the mode it was opened in.
+  // Company-wide; each case-day keeps the mode it was opened in. The menu for it
+  // is hidden since 2026-11-17 (every day uses "dynamic"); the API stays so the
+  // setting can come back.
   if (body.stockOutMode !== undefined) {
     if (body.stockOutMode !== "dynamic" && body.stockOutMode !== "single") {
       throw new HttpError(400, "stockOutMode must be dynamic or single", "BAD_CONFIG");

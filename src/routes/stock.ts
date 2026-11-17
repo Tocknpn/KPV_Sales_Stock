@@ -371,7 +371,7 @@ async function historyMoves(store: Store, deskId: string, date: string, outgoing
 
 async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: string, date: string) {
   const desk = await requireDesk(store, user, deskId);
-  const [branches, skus, days, ledgerRows, staffAccounts, weights, config, earlier, laterDone, incoming, outgoing, allDesks, goldRow] = await Promise.all([
+  const [branches, skus, days, ledgerRows, staffAccounts, weights, config, earlier, laterDone, incoming, outgoing, allDesks, goldRow, types] = await Promise.all([
     store.branches(),
     store.skus(),
     store.deskDays({ deskId, date, limit: 1 }),
@@ -385,6 +385,7 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
     store.transfers({ fromDeskId: deskId, sentDate: date }),
     store.desks(),
     store.goldPrice(),
+    store.skuTypes(),
   ]);
   const moves = await historyMoves(store, deskId, date, outgoing, staffAccounts, skus, allDesks);
   const day = days[0];
@@ -393,7 +394,7 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
   const gold = resolveGoldPrice(goldRow, config, today);
   // A past day is valued at the price in force that day; today at the live price.
   const lakPerBaht = date < today ? priceOn(date, await store.goldPriceHistory(date, date), gold.lakPerBaht) : gold.lakPerBaht;
-  const detail = buildDeskDetail(desk, branches.find((b) => b.branch_id === desk.branch_id), day, skus, ledgerRows, staffAccounts, config, weights, statuses, lakPerBaht);
+  const detail = buildDeskDetail(desk, branches.find((b) => b.branch_id === desk.branch_id), day, skus, ledgerRows, staffAccounts, config, weights, statuses, lakPerBaht, types);
   const skuName = (id: string) => skus.find((s) => s.sku_id === id)?.name_en ?? id;
   const deskName = (id: string) => {
     const d = allDesks.find((x) => x.desk_id === id);

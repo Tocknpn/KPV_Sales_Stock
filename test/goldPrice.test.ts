@@ -44,6 +44,6 @@ describe("priceOn", () => {
 
 describe("valueLak with a resolved price", () => {
   it("values gold at baht weight x price", () => {
-    expect(valueLak({ baht_weight: 0.5, unit_price_lak: 1 }, 2, 43230000)).toBe(43230000);
+    expect(valueLak({ baht_weight: 0.5 }, 2, 43230000)).toBe(43230000);
   });
 });

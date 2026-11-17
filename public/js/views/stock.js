@@ -9,6 +9,7 @@ import { mountDay, unmountDay } from "./day/index.js";
 import { go, pathFor, backTo } from "../router.js";
 import { renderSkuPickerInto, openingRowsHtml, bindOpeningInputs } from "./sku-picker.js";
 import { skeletonCards, skeletonCalendar } from "../skeleton.js";
+import { skuSizeLabel } from "../sku-groups.js";
 
 function setStockDate(date) {
   state.stock.date = date;
@@ -310,7 +311,7 @@ async function openOpeningBalanceSheet(deskCard) {
         <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">${icon(r.icon, "h-4 w-4")}</span>
         <div class="min-w-0 flex-1">
           <div class="truncate text-xs font-bold text-gray-900">${escapeHtml(productName(r.name_en, r.name_lo))}</div>
-          <div class="truncate text-[10px] text-gray-500">${escapeHtml([r.category, r.weight_name].filter(Boolean).join(" · ") || r.sku_id)}</div>
+          <div class="truncate text-[10px] text-gray-500">${escapeHtml([r.type_label || r.category, skuSizeLabel(r)].filter(Boolean).join(" · ") || r.sku_id)}</div>
         </div>
         <div class="shrink-0 text-right">
           <div class="text-sm font-extrabold text-gray-900">${r.opening_qty}</div>

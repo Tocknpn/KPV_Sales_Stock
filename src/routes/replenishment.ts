@@ -1,30 +1,20 @@
 // Replenishment: branch-wide runway per SKU, and the average-daily-sell / lead-time
 // rules behind it. Reads: any logged-in user (staff see their own branch).
-// Rules: admin any, branch manager their own branch only.
+// Rules: company-wide only, admin only (decided 2026-11-17: they are set in
+// Settings > SKU, next to each SKU and per Type).
 // Mounted behind requireAuth in src/index.ts.
 import { storeFor, newRouter, readBody, HttpError, audit, scopeBranch } from "../app";
-import { requireManager, isManagerOf } from "../auth";
+import { requireAdmin } from "../auth";
 import { businessDate } from "../time";
 import { loadBranchRows } from "../replenishment";
 import type { RuleTarget, Store } from "../store";
-import type { MasterSku, RuleScope, SessionUser } from "../types";
+import type { RuleScope } from "../types";
 
 const r = newRouter();
 
-const SCOPES: RuleScope[] = ["sku", "group", "type"];
+const SCOPES: RuleScope[] = ["sku", "type"];
 const MAX_AVG = 9_999_999;
 const MAX_LEAD = 9999.9;
-
-function denied(): never {
-  throw new HttpError(403, "You are not allowed to change these rules", "ROLE_DENIED");
-}
-
-// Admin: any rule. Manager: a rule of their own branch. Everyone else: read only.
-function assertMayEdit(user: SessionUser, branchId: string | null) {
-  if (user.role === "admin") return;
-  if (branchId !== null && isManagerOf(user, branchId)) return;
-  denied();
-}
 
 // undefined / null / "" = inherit (null). Otherwise a number in range, rounded to the column's precision.
 function parseValue(value: unknown, field: string, max: number, decimals: number): number | null {
@@ -33,17 +23,6 @@ function parseValue(value: unknown, field: string, max: number, decimals: number
   if (!Number.isFinite(n) || n < 0 || n > max) throw new HttpError(400, `${field} must be a number from 0 to ${max}`, "BAD_RULE");
   const f = 10 ** decimals;
   return Math.round(n * f) / f;
-}
-
-async function parseBranch(store: Store, value: unknown): Promise<string | null> {
-  if (value === undefined || value === null || value === "") return null;
-  const id = String(value);
-  if (!(await store.branches()).some((b) => b.branch_id === id)) throw new HttpError(400, "Unknown branch", "BAD_BRANCH");
-  return id;
-}
-
-function skusOfScope(skus: MasterSku[], scope: RuleScope, key: string): MasterSku[] {
-  return skus.filter((s) => s.active && (scope === "sku" ? s.sku_id === key : scope === "group" ? s.group_name === key : s.type_id === key));
 }
 
 // ---------------------------------------------------------------------------
@@ -70,79 +49,78 @@ r.get("/replenishment", async (c) => {
 // ---------------------------------------------------------------------------
 async function validScopeKey(store: Store, scope: RuleScope, key: string) {
   if (scope === "type") return (await store.skuTypes()).some((t) => t.type_id === key);
-  const skus = await store.skus();
-  return scope === "sku" ? skus.some((s) => s.sku_id === key) : skus.some((s) => s.group_name === key);
+  return (await store.skus()).some((s) => s.sku_id === key);
 }
 
-r.put("/replenishment/rules", requireManager, async (c) => {
+// GET /replenishment/rules: the company-wide rules and defaults (Settings > SKU).
+r.get("/replenishment/rules", async (c) => {
+  const store = storeFor(c);
+  const [rules, config] = await Promise.all([store.rules(), store.config()]);
+  return c.json({
+    rules: rules.filter((x) => x.branch_id === null && (x.scope === "sku" || x.scope === "type")),
+    config: { defaultLeadTimeDays: config.default_lead_time_days, warningMarginDays: config.warning_margin_days, velocityWindowDays: config.velocity_window_days },
+  });
+});
+
+r.put("/replenishment/rules", requireAdmin, async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const scope = body.scope as RuleScope;
-  if (!SCOPES.includes(scope)) throw new HttpError(400, "scope must be sku, group or type", "BAD_RULE");
+  if (!SCOPES.includes(scope)) throw new HttpError(400, "scope must be sku or type", "BAD_RULE");
   const key = String(body.key ?? "").trim();
   if (!key || !(await validScopeKey(store, scope, key))) throw new HttpError(400, `Unknown ${scope}`, "BAD_RULE");
-  const branchId = await parseBranch(store, body.branchId);
-  assertMayEdit(user, branchId);
   const avg = parseValue(body.avgDailySell, "avgDailySell", MAX_AVG, 3);
   const lead = parseValue(body.leadTimeDays, "leadTimeDays", MAX_LEAD, 1);
-  const rule = await store.upsertRule({ scope, scope_key: key, branch_id: branchId, avg_daily_sell: avg, lead_time_days: lead });
-  await audit(store, user, rule ? "replenishment.rule" : "replenishment.rule_clear", `${scope}:${key}`, { branchId, avg_daily_sell: avg, lead_time_days: lead }, { branchId });
+  const rule = await store.upsertRule({ scope, scope_key: key, branch_id: null, avg_daily_sell: avg, lead_time_days: lead });
+  await audit(store, user, rule ? "replenishment.rule" : "replenishment.rule_clear", `${scope}:${key}`, { avg_daily_sell: avg, lead_time_days: lead });
   return c.json({ rule });
 });
 
 // ---------------------------------------------------------------------------
-// POST /replenishment/rules/bulk: one group or type rule for every SKU in it.
-// SKU-level numbers are kept unless clearOverrides; dryRun only counts.
+// POST /replenishment/rules/bulk: one Type rule that applies to every SKU in
+// the Type. The value given replaces that field on the Type's SKU rules too
+// ("apply to all"); a field left blank is not touched. dryRun only counts.
 // ---------------------------------------------------------------------------
-r.post("/replenishment/rules/bulk", requireManager, async (c) => {
+r.post("/replenishment/rules/bulk", requireAdmin, async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
-  const scope = body.scope as RuleScope;
-  if (scope !== "group" && scope !== "type") throw new HttpError(400, "scope must be group or type", "BAD_RULE");
+  if (body.scope !== "type") throw new HttpError(400, "scope must be type", "BAD_RULE");
   const key = String(body.key ?? "").trim();
-  if (!key || !(await validScopeKey(store, scope, key))) throw new HttpError(400, `Unknown ${scope}`, "BAD_RULE");
-  const branchId = await parseBranch(store, body.branchId);
-  assertMayEdit(user, branchId);
+  if (!key || !(await validScopeKey(store, "type", key))) throw new HttpError(400, "Unknown type", "BAD_RULE");
   const avg = parseValue(body.avgDailySell, "avgDailySell", MAX_AVG, 3);
   const lead = parseValue(body.leadTimeDays, "leadTimeDays", MAX_LEAD, 1);
   const dryRun = body.dryRun === true;
   if (!dryRun && avg === null && lead === null) throw new HttpError(400, "Give avgDailySell or leadTimeDays", "BAD_RULE");
-  const clearOverrides = body.clearOverrides === true;
 
   const [skus, rules] = await Promise.all([store.skus(), store.rules()]);
-  const inScope = skusOfScope(skus, scope, key);
-  const skuIds = new Set(inScope.map((s) => s.sku_id));
-  const groups = new Set(inScope.map((s) => s.group_name).filter((g): g is string => Boolean(g)));
-
-  // Narrower rules at the same branch level: a group's SKU rules; a type's group and SKU rules.
-  const narrower = rules.filter(
-    (x) => x.branch_id === branchId && ((x.scope === "sku" && skuIds.has(x.scope_key)) || (scope === "type" && x.scope === "group" && groups.has(x.scope_key)))
-  );
-  const overriddenSkus = new Set<string>();
-  for (const x of narrower) {
-    if (x.scope === "sku") overriddenSkus.add(x.scope_key);
-    else for (const s of inScope) if (s.group_name === x.scope_key) overriddenSkus.add(s.sku_id);
-  }
-  const preview = { affected: inScope.length, overrides: overriddenSkus.size };
+  const skuIds = new Set(skus.filter((s) => s.active && s.type_id === key).map((s) => s.sku_id));
+  const skuRules = rules.filter((x) => x.scope === "sku" && x.branch_id === null && skuIds.has(x.scope_key));
+  const preview = { affected: skuIds.size, overrides: skuRules.length };
   if (dryRun) return c.json(preview);
 
-  // A value left out keeps what the rule already has.
-  const existing = rules.find((x) => x.scope === scope && x.scope_key === key && x.branch_id === branchId);
+  const existing = rules.find((x) => x.scope === "type" && x.scope_key === key && x.branch_id === null);
   const rule = await store.upsertRule({
-    scope,
+    scope: "type",
     scope_key: key,
-    branch_id: branchId,
+    branch_id: null,
     avg_daily_sell: avg ?? existing?.avg_daily_sell ?? null,
     lead_time_days: lead ?? existing?.lead_time_days ?? null,
   });
+  // The SKU-level value of each field that was given goes, so the Type value applies.
   let cleared = 0;
-  if (clearOverrides && narrower.length > 0) {
-    const targets: RuleTarget[] = narrower.map((x) => ({ scope: x.scope, scope_key: x.scope_key, branch_id: x.branch_id }));
-    cleared = await store.deleteRules(targets);
+  const emptied: RuleTarget[] = [];
+  for (const x of skuRules) {
+    const nextAvg = avg !== null ? null : x.avg_daily_sell;
+    const nextLead = lead !== null ? null : x.lead_time_days;
+    if (nextAvg === x.avg_daily_sell && nextLead === x.lead_time_days) continue;
+    cleared++;
+    if (nextAvg === null && nextLead === null) emptied.push({ scope: "sku", scope_key: x.scope_key, branch_id: null });
+    else await store.upsertRule({ scope: "sku", scope_key: x.scope_key, branch_id: null, avg_daily_sell: nextAvg, lead_time_days: nextLead });
   }
-  await audit(store, user, "replenishment.bulk", `${scope}:${key}`, { branchId, avg_daily_sell: avg, lead_time_days: lead, clearOverrides, cleared, affected: preview.affected }, { branchId });
+  if (emptied.length > 0) await store.deleteRules(emptied);
+  await audit(store, user, "replenishment.bulk", `type:${key}`, { avg_daily_sell: avg, lead_time_days: lead, cleared, affected: preview.affected });
   return c.json({ ...preview, rule, cleared });
 });
 

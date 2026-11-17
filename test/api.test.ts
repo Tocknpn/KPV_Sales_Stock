@@ -602,7 +602,25 @@ describe("SKU master data", () => {
     expect(good.json.imported).toBe(2);
     expect(await count()).toBe(before + 2);
     const ring = (await call(admin, "GET", "/skus")).json.skus.find((s: any) => s.sku_id === "RG-100");
-    expect(ring).toMatchObject({ category: "Rings & Accessories", std_gram_weight: 7.622, baht_weight: 0.5, avg_daily_sales: 1.5 });
+    // One Lao name; every SKU is gold with its Baht weight from the size; purity / group ignored.
+    expect(ring).toMatchObject({ name_lo: "Ring A", name_en: "Ring A", category: "Rings & Accessories", std_gram_weight: 7.622, baht_weight: 0.5, purity: null, group_name: null });
+  });
+
+  it("a SKU is one Lao name + type + size; editing sets the name and the planning numbers", async () => {
+    const admin = await asAdmin();
+    const made = await call(admin, "POST", "/skus", { sku_id: "LAO-1", name: "ແຫວນ 1 ສະຫຼຶງ", type_id: "RINGS_ACCESSORIES", weight_id: "BAHT_025", purity: "96.5%", unit_price_lak: 5, reorder_level: 9 });
+    expect(made.status).toBe(200);
+    expect(made.json).toMatchObject({ name_lo: "ແຫວນ 1 ສະຫຼຶງ", name_en: "ແຫວນ 1 ສະຫຼຶງ", baht_weight: 0.25, purity: null, unit_price_lak: 0, group_name: null });
+    expect((await call(admin, "POST", "/skus", { name: " ", type_id: "RINGS_ACCESSORIES", weight_id: "BAHT_025" })).status).toBe(400);
+
+    const rules = async () => (await getStore({} as any).rules()).filter((x) => x.scope === "sku" && x.scope_key === "LAO-1");
+    const edited = await call(admin, "PATCH", "/skus/LAO-1", { name: "ແຫວນໃໝ່", weight_id: "BAHT_1", avg_daily_sell: 2, lead_time_days: 5 });
+    expect(edited.json).toMatchObject({ name_lo: "ແຫວນໃໝ່", name_en: "ແຫວນໃໝ່", baht_weight: 1 });
+    expect(await rules()).toMatchObject([{ avg_daily_sell: 2, lead_time_days: 5, branch_id: null }]);
+    // Blank = inherit: both blank removes the SKU rule.
+    await call(admin, "PATCH", "/skus/LAO-1", { avg_daily_sell: null, lead_time_days: "" });
+    expect(await rules()).toEqual([]);
+    expect((await call(admin, "PATCH", "/skus/LAO-1", { avg_daily_sell: -1 })).status).toBe(400);
   });
 
   it("avg/day and lead time on create and import become company-wide SKU rules", async () => {
@@ -612,9 +630,9 @@ describe("SKU master data", () => {
       return rule ? { avg: { value: rule.avg_daily_sell, source: "sku" }, lead: { value: rule.lead_time_days, source: "sku" } } : undefined;
     };
 
-    const made = await call(admin, "POST", "/skus", { sku_id: "NEW-1", name_en: "New A", type_id: "GOLD_BARS", weight_id: "BAHT_1", avg_daily_sales: 4, order_lead_time_days: 6, group: "Fresh" });
+    const made = await call(admin, "POST", "/skus", { sku_id: "NEW-1", name: "New A", type_id: "GOLD_BARS", weight_id: "BAHT_1", avg_daily_sell: 4, lead_time_days: 6, group: "Fresh" });
     expect(made.status).toBe(200);
-    expect(made.json.group_name).toBe("Fresh");
+    expect(made.json.group_name).toBe(null);
     expect(await row("NEW-1")).toMatchObject({ avg: { value: 4 }, lead: { value: 6 } });
 
     // A bad row imports nothing, and writes no rule.

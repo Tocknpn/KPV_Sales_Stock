@@ -107,6 +107,7 @@ export const api = {
   settingsSummary: () => request("/settings/summary"),
   saveConfig: (payload) => post("/settings/config", payload),
   replenishment: (branchId) => request(`/replenishment?${query({ branchId })}`),
+  replenishmentRules: () => request("/replenishment/rules"),
   saveRule: (payload) => request("/replenishment/rules", { method: "PUT", body: JSON.stringify(payload) }),
   bulkRule: (payload) => post("/replenishment/rules/bulk", payload),
   about: () => request("/settings/about"),
