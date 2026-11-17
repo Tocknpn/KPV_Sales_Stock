@@ -76,8 +76,8 @@ describe("user level", () => {
   it("only admin changes master data, users, config and locked days", async () => {
     const staff = await asStaff("B-MM");
     const denied = [
-      ["POST", "/skus", { name_en: "X", type_id: "GOLD_BARS", weight_id: "BAHT_1" }],
       ["PATCH", "/skus/GB-001", { active: false }],
+      ["PATCH", "/skus/GB-001", { name: "x" }],
       ["POST", "/skus/import", { rows: [] }],
       ["POST", "/sku-types", { name_en: "X" }],
       ["POST", "/settings/config", { spotLakPerBaht: 1 }],
@@ -614,23 +614,25 @@ describe("SKU master data", () => {
     expect((await call(admin, "POST", "/skus", { name: " ", type_id: "RINGS_ACCESSORIES", weight_id: "BAHT_025" })).status).toBe(400);
 
     const rules = async () => (await getStore({} as any).rules()).filter((x) => x.scope === "sku" && x.scope_key === "LAO-1");
-    const edited = await call(admin, "PATCH", "/skus/LAO-1", { name: "ແຫວນໃໝ່", weight_id: "BAHT_1", avg_daily_sell: 2, lead_time_days: 5 });
+    const edited = await call(admin, "PATCH", "/skus/LAO-1", { name: "ແຫວນໃໝ່", weight_id: "BAHT_1", avg_daily_sell: 2, lead_time_days: 5, branchId: "B-MM" });
     expect(edited.json).toMatchObject({ name_lo: "ແຫວນໃໝ່", name_en: "ແຫວນໃໝ່", baht_weight: 1 });
-    expect(await rules()).toMatchObject([{ avg_daily_sell: 2, lead_time_days: 5, branch_id: null }]);
+    expect(await rules()).toMatchObject([{ avg_daily_sell: 2, lead_time_days: 5, branch_id: "B-MM" }]);
+    expect((await call(admin, "PATCH", "/skus/LAO-1", { avg_daily_sell: 2 })).json.code).toBe("BRANCH_REQUIRED");
     // Blank = inherit: both blank removes the SKU rule.
-    await call(admin, "PATCH", "/skus/LAO-1", { avg_daily_sell: null, lead_time_days: "" });
+    await call(admin, "PATCH", "/skus/LAO-1", { avg_daily_sell: null, lead_time_days: "", branchId: "B-MM" });
     expect(await rules()).toEqual([]);
     expect((await call(admin, "PATCH", "/skus/LAO-1", { avg_daily_sell: -1 })).status).toBe(400);
   });
 
-  it("avg/day and lead time on create and import become company-wide SKU rules", async () => {
+  it("avg/day and lead time on create and import become SKU rules in the branches given", async () => {
     const admin = await asAdmin();
     const row = async (id: string) => {
-      const rule = (await getStore({} as any).rules()).find((x) => x.scope === "sku" && x.scope_key === id && x.branch_id === null);
+      const rule = (await getStore({} as any).rules()).find((x) => x.scope === "sku" && x.scope_key === id && x.branch_id === "B-VT");
       return rule ? { avg: { value: rule.avg_daily_sell, source: "sku" }, lead: { value: rule.lead_time_days, source: "sku" } } : undefined;
     };
 
-    const made = await call(admin, "POST", "/skus", { sku_id: "NEW-1", name: "New A", type_id: "GOLD_BARS", weight_id: "BAHT_1", avg_daily_sell: 4, lead_time_days: 6, group: "Fresh" });
+    expect((await call(admin, "POST", "/skus", { sku_id: "NEW-0", name: "New 0", type_id: "GOLD_BARS", weight_id: "BAHT_1", avg_daily_sell: 4 })).json.code).toBe("BRANCH_REQUIRED");
+    const made = await call(admin, "POST", "/skus", { sku_id: "NEW-1", name: "New A", type_id: "GOLD_BARS", weight_id: "BAHT_1", avg_daily_sell: 4, lead_time_days: 6, group: "Fresh", allBranches: true });
     expect(made.status).toBe(200);
     expect(made.json.group_name).toBe(null);
     expect(await row("NEW-1")).toMatchObject({ avg: { value: 4 }, lead: { value: 6 } });
@@ -667,6 +669,74 @@ describe("SKU master data", () => {
     await call(admin, "PATCH", "/sku-types/GOLD_BARS", { name_en: "Bars" });
     const bar = (await call(admin, "GET", "/skus")).json.skus.find((s: any) => s.sku_id === "GB-001");
     expect(bar.category).toBe("Bars");
+  });
+});
+
+describe("SKU per branch", () => {
+  const skuOf = async (s: any, id: string, branch?: string) =>
+    (await call(s, "GET", `/skus${branch ? `?branchId=${branch}` : ""}`)).json.skus.find((x: any) => x.sku_id === id);
+  const carriedIn = async (id: string) =>
+    (await getStore({} as any).branchSkus()).filter((b) => b.sku_id === id && b.carried).map((b) => b.branch_id).sort();
+  const newSku = { name: "ແຫວນໃໝ່", type_id: "RINGS_ACCESSORIES", weight_id: "BAHT_025" };
+
+  it("staff creates SKU carried only in own branch", async () => {
+    const staff = await asStaff("B-MM");
+    const made = await call(staff, "POST", "/skus", { ...newSku, sku_id: "ST-1", avg_daily_sell: 2, branchId: "B-MM" });
+    expect(made.status).toBe(200);
+    expect(await carriedIn("ST-1")).toEqual(["B-MM"]);
+    expect(await skuOf(staff, "ST-1")).toMatchObject({ carried: true, plan: { avg: 2, lead: null } });
+    expect((await call(staff, "POST", "/skus", { ...newSku, sku_id: "ST-2", branchId: "B-VT" })).json.code).toBe("BRANCH_DENIED");
+  });
+
+  it("admin creates SKU carried everywhere", async () => {
+    const admin = await asAdmin();
+    expect((await call(admin, "POST", "/skus", { ...newSku, sku_id: "AD-1" })).status).toBe(200);
+    expect(await carriedIn("AD-1")).toEqual(["B-IT", "B-MM", "B-TS", "B-VT"]);
+  });
+
+  it("staff rename is refused", async () => {
+    for (const s of [await asStaff("B-MM"), await asManager("B-MM")]) {
+      for (const body of [{ name: "x" }, { type_id: "GOLD_BARS" }, { weight_id: "BAHT_1" }, { active: false }]) {
+        const res = await call(s, "PATCH", "/skus/GB-001", body);
+        expect(res.status).toBe(403);
+        expect(res.json.code).toBe("ROLE_DENIED");
+      }
+    }
+  });
+
+  it("staff sets own avg; other branch unchanged", async () => {
+    const staff = await asStaff("B-MM");
+    expect((await call(staff, "PATCH", "/skus/GB-001", { avg_daily_sell: 9, lead_time_days: 1 })).status).toBe(200);
+    expect((await skuOf(staff, "GB-001")).plan).toEqual({ avg: 9, lead: 1 });
+    expect((await skuOf(await asAdmin(), "GB-001", "B-VT")).plan).toEqual({ avg: 2.5, lead: 3 });
+    expect((await call(staff, "PATCH", "/skus/GB-001", { avg_daily_sell: 9, branchId: "B-VT" })).json.code).toBe("BRANCH_DENIED");
+  });
+
+  it("carried off refused while stock held", async () => {
+    const staff = await asStaff("B-MM");
+    const res = await call(staff, "PUT", "/skus/GB-001/carried", { carried: false });
+    expect(res.status).toBe(409);
+    expect(res.json.code).toBe("STOCK_HELD");
+    expect((await skuOf(staff, "GB-001")).carried).toBe(true);
+  });
+
+  it("carried off refused while inbound", async () => {
+    const admin = await asAdmin();
+    expect((await call(admin, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "TS-D01", skuId: "GB-001", qty: 3 })).status).toBe(200);
+    expect((await call(admin, "PUT", "/skus/GB-001/carried", { branchId: "B-TS", carried: false })).json.code).toBe("STOCK_HELD");
+  });
+
+  it("carried off allowed at zero", async () => {
+    const staff = await asStaff("B-MM");
+    const res = await call(staff, "PUT", "/skus/SP-904/carried", { carried: false });
+    expect(res.status).toBe(200);
+    expect((await skuOf(staff, "SP-904")).carried).toBe(false);
+    expect((await skuOf(await asAdmin(), "SP-904", "B-VT")).carried).toBe(true);
+    expect((await call(staff, "PUT", "/skus/SP-904/carried", { branchId: "B-VT", carried: false })).json.code).toBe("BRANCH_DENIED");
+    const log = await getStore({} as any).auditLog({ limit: 5 });
+    expect(log.some((e) => e.action === "sku.carried")).toBe(true);
+    expect((await call(staff, "PUT", "/skus/SP-904/carried", { carried: true })).status).toBe(200);
+    expect((await skuOf(staff, "SP-904")).carried).toBe(true);
   });
 });
 
@@ -714,6 +784,7 @@ describe("branch manager", () => {
     expect((await call(manager, "PATCH", `/users/${DEMO_STAFF["B-MM"]}`, { password: "111111" })).status).toBe(403);
     expect((await call(manager, "PATCH", `/users/${DEMO_STAFF["B-MM"]}`, { username: "hacked" })).status).toBe(403);
     expect((await call(manager, "PATCH", "/skus/GB-001", { active: false })).status).toBe(403);
+    expect((await call(manager, "POST", "/sku-types", { name_en: "X" })).status).toBe(403);
     expect((await call(manager, "GET", "/audit?branchId=B-IT")).status).toBe(403);
   });
 

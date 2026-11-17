@@ -1,8 +1,11 @@
-// Settings: SKU master data (incl. CSV import), system config,
-// user management. Reads are open to every logged-in user;
-// every change is admin only.
+// Settings: SKU master data (incl. import), system config, user management.
+// Reads are open to every logged-in user. Since 2026-11-17 any logged-in user
+// may add a SKU, set their own branch's avg/day and lead time, and switch
+// whether their branch carries a SKU; renaming, type, size, deactivating,
+// Types, Sizes, config and users stay admin only.
 // Mounted behind requireAuth in src/index.ts.
-import { storeFor, newRouter, readBody, HttpError, audit } from "../app";
+import { storeFor, newRouter, readBody, HttpError, audit, scopeBranch, targetBranches } from "../app";
+import { loadHeld } from "../replenishment";
 import type { NewSku, Store } from "../store";
 import { requireAdmin, requireManager, hashPassword, isValidPassword, normalizeUsername, isValidUsername, isManagerOf, MIN_PASSWORD } from "../auth";
 import { isLive } from "../time";
@@ -19,16 +22,18 @@ const bahtOfGrams = (g: number | null | undefined) => (g && g > 0 ? Math.round((
 const MAX_RULE_AVG = 9_999_999;
 const MAX_RULE_LEAD = 9999.9;
 
-// Avg/day and lead time live only in company-wide SKU rules; a blank value
-// inherits (Type rule, then automatic velocity / default lead time).
-async function writeSkuRule(store: Store, skuId: string, avg: number | null, lead: number | null) {
-  await store.upsertRule({
-    scope: "sku",
-    scope_key: skuId,
-    branch_id: null,
-    avg_daily_sell: avg == null ? null : Math.round(avg * 1000) / 1000,
-    lead_time_days: lead == null ? null : Math.round(lead * 10) / 10,
-  });
+// Avg/day and lead time live only in per-branch SKU rules; a blank value
+// inherits (the branch's Type rule, then automatic velocity / default lead time).
+async function writeSkuRule(store: Store, skuId: string, branchIds: string[], avg: number | null, lead: number | null) {
+  for (const branch_id of branchIds) {
+    await store.upsertRule({
+      scope: "sku",
+      scope_key: skuId,
+      branch_id,
+      avg_daily_sell: avg == null ? null : Math.round(avg * 1000) / 1000,
+      lead_time_days: lead == null ? null : Math.round(lead * 10) / 10,
+    });
+  }
 }
 
 // The two planning numbers of a form / CSV line: { avg, lead } (null = blank) or an error text.
@@ -63,20 +68,37 @@ function nonNegative(value: unknown): number | null {
 // ---------------------------------------------------------------------------
 // SKUs
 // ---------------------------------------------------------------------------
+// GET /skus?branchId=&all=1: every SKU; with a branch (a staff / manager always
+// gets their own) each one also has carried and that branch's own plan numbers.
 r.get("/skus", async (c) => {
   const store = storeFor(c);
   const includeInactive = c.req.query("all") === "1";
-  const [skus, types, weights] = await Promise.all([store.skus(), store.skuTypes(), store.skuWeights()]);
+  const branchId = scopeBranch(c.get("user"), c.req.query("branchId") || undefined);
+  const [skus, types, weights, rules, branchSkus] = await Promise.all([
+    store.skus(),
+    store.skuTypes(),
+    store.skuWeights(),
+    branchId ? store.rules() : Promise.resolve([]),
+    branchId ? store.branchSkus({ branchId }) : Promise.resolve([]),
+  ]);
   const typeById = new Map(types.map((t) => [t.type_id, t]));
   const weightById = new Map(weights.map((w) => [w.weight_id, w]));
+  const carried = new Set(branchSkus.filter((b) => b.carried).map((b) => b.sku_id));
+  const ruleBySku = new Map(rules.filter((x) => x.scope === "sku" && x.branch_id === branchId).map((x) => [x.scope_key, x]));
   return c.json({
+    branchId: branchId ?? null,
     skus: skus
       .filter((s) => includeInactive || s.active)
-      .map((s) => ({
-        ...s,
-        type_name: s.type_id ? typeById.get(s.type_id)?.name_en ?? null : null,
-        weight_name: s.weight_id ? weightById.get(s.weight_id)?.name_en ?? null : null,
-      })),
+      .map((s) => {
+        const rule = ruleBySku.get(s.sku_id);
+        return {
+          ...s,
+          type_name: s.type_id ? typeById.get(s.type_id)?.name_en ?? null : null,
+          weight_name: s.weight_id ? weightById.get(s.weight_id)?.name_en ?? null : null,
+          carried: branchId ? carried.has(s.sku_id) : null,
+          plan: branchId ? { avg: rule?.avg_daily_sell ?? null, lead: rule?.lead_time_days ?? null } : null,
+        };
+      }),
   });
 });
 
@@ -127,16 +149,24 @@ function buildSku(input: Record<string, any>, types: SkuType[], weights: SkuWeig
   };
 }
 
-r.post("/skus", requireAdmin, async (c) => {
+// POST /skus: any role. A staff / manager's new SKU is carried in their branch
+// only; an admin's in every branch. Avg/day and lead time go to the branch
+// given (an admin names one, or sends allBranches).
+r.post("/skus", async (c) => {
   const store = storeFor(c);
+  const user = c.get("user");
   const body = await readBody(c);
-  const [types, weights] = await Promise.all([store.skuTypes(), store.skuWeights()]);
+  const [types, weights, branches] = await Promise.all([store.skuTypes(), store.skuWeights(), store.branches()]);
   if (!body.weight_id) throw new HttpError(400, "name, type_id and weight_id are required", "BAD_SKU");
   const built = buildSku(body, types, weights);
   if (typeof built === "string") throw new HttpError(400, built, "BAD_SKU");
+  const hasPlan = built.avg !== null || built.lead !== null;
+  const ruleBranches = hasPlan || user.role !== "admin" ? await targetBranches(store, user, body.branchId, body.allBranches) : [];
+  const carriedIn = user.role === "admin" ? branches.map((b) => b.branch_id) : ruleBranches;
   const [created] = await store.createSkus([built.sku]);
-  if (built.avg !== null || built.lead !== null) await writeSkuRule(store, created.sku_id, built.avg, built.lead);
-  await audit(store, c.get("user"), "sku.create", created.sku_id, { name_en: created.name_en });
+  await store.setCarried(carriedIn.map((branch_id) => ({ branch_id, sku_id: created.sku_id, carried: true })));
+  if (hasPlan) await writeSkuRule(store, created.sku_id, ruleBranches, built.avg, built.lead);
+  await audit(store, user, "sku.create", created.sku_id, { name_en: created.name_en, carried_in: carriedIn });
   return c.json(created);
 });
 
@@ -165,14 +195,22 @@ r.post("/skus/import", requireAdmin, async (c) => {
   if (errors.length > 0) throw new HttpError(422, "Nothing was imported — fix these rows and try again", "IMPORT_INVALID", { errors });
 
   const created = await store.createSkus(built.map((b) => b.sku));
-  for (const b of built) if (b.avg !== null || b.lead !== null) await writeSkuRule(store, b.sku.sku_id, b.avg, b.lead);
+  const allIds = (await store.branches()).map((b) => b.branch_id);
+  await store.setCarried(created.flatMap((s) => allIds.map((branch_id) => ({ branch_id, sku_id: s.sku_id, carried: true }))));
+  for (const b of built) if (b.avg !== null || b.lead !== null) await writeSkuRule(store, b.sku.sku_id, allIds, b.avg, b.lead);
   await audit(store, c.get("user"), "sku.import", `${created.length} SKUs`, { sku_ids: created.map((s) => s.sku_id).slice(0, 50) });
   return c.json({ imported: created.length });
 });
 
-r.patch("/skus/:id", requireAdmin, async (c) => {
+// PATCH /skus/:id: name, type, size and active are admin only; avg/day and
+// lead time are any role's, for their own branch (an admin names one or sends
+// allBranches).
+r.patch("/skus/:id", async (c) => {
   const store = storeFor(c);
+  const user = c.get("user");
   const body = await readBody(c);
+  const catalogue = ["name", "name_lo", "name_en", "type_id", "weight_id", "active"].some((k) => body[k] !== undefined);
+  if (catalogue && user.role !== "admin") throw new HttpError(403, "Only an admin can rename an SKU or change its type, size or status", "ROLE_DENIED");
   const patch: Partial<MasterSku> = {};
   const nameInput = body.name ?? body.name_lo ?? body.name_en;
   if (nameInput !== undefined) {
@@ -186,6 +224,7 @@ r.patch("/skus/:id", requireAdmin, async (c) => {
   const planSent = body.avg_daily_sell !== undefined || body.lead_time_days !== undefined;
   const plan = planSent ? planNumbers(body) : null;
   if (typeof plan === "string") throw new HttpError(400, plan, "BAD_SKU");
+  const planBranches = plan ? await targetBranches(store, user, body.branchId, body.allBranches) : [];
   if (body.type_id || body.weight_id) {
     const [types, weights] = await Promise.all([store.skuTypes(), store.skuWeights()]);
     if (body.type_id) {
@@ -202,12 +241,34 @@ r.patch("/skus/:id", requireAdmin, async (c) => {
       patch.baht_weight = bahtOfGrams(weight.gram_value);
     }
   }
-  const sku = await store.updateSku((c.req.param("id") ?? ""), patch);
+  const id = c.req.param("id") ?? "";
+  const sku = Object.keys(patch).length > 0 ? await store.updateSku(id, patch) : (await store.skus()).find((s) => s.sku_id === id) ?? null;
   if (!sku) throw new HttpError(404, "SKU not found", "NOT_FOUND");
-  if (plan) await writeSkuRule(store, sku.sku_id, plan.avg, plan.lead);
-  const changes = plan ? { ...patch, avg_daily_sell: plan.avg, lead_time_days: plan.lead } : patch;
-  await audit(store, c.get("user"), "sku.update", sku.sku_id, changes as Record<string, unknown>);
+  if (plan) await writeSkuRule(store, sku.sku_id, planBranches, plan.avg, plan.lead);
+  const changes = plan ? { ...patch, avg_daily_sell: plan.avg, lead_time_days: plan.lead, branch_ids: planBranches } : patch;
+  await audit(store, user, "sku.update", sku.sku_id, changes as Record<string, unknown>);
   return c.json(sku);
+});
+
+// PUT /skus/:id/carried { branchId, carried }: whether a branch carries a SKU.
+// Off is refused while the branch still holds it or has it on the way.
+r.put("/skus/:id/carried", async (c) => {
+  const store = storeFor(c);
+  const user = c.get("user");
+  const body = await readBody(c);
+  const [branchId] = await targetBranches(store, user, body.branchId);
+  if (typeof body.carried !== "boolean") throw new HttpError(400, "carried must be true or false", "BAD_SKU");
+  const id = c.req.param("id") ?? "";
+  if (!(await store.skus()).some((s) => s.sku_id === id)) throw new HttpError(404, "SKU not found", "NOT_FOUND");
+  if (!body.carried) {
+    const held = (await loadHeld(store, branchId)).get(id);
+    if (held && held.onHand + held.inbound > 0) {
+      throw new HttpError(409, "The branch still holds this SKU or has it on the way", "STOCK_HELD", { onHand: held.onHand, inbound: held.inbound });
+    }
+  }
+  await store.setCarried([{ branch_id: branchId, sku_id: id, carried: body.carried }]);
+  await audit(store, user, "sku.carried", id + "@" + branchId, { branch_id: branchId, carried: body.carried });
+  return c.json({ sku_id: id, branchId, carried: body.carried });
 });
 
 // ---------------------------------------------------------------------------

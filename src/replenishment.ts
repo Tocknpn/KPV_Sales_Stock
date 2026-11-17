@@ -267,6 +267,18 @@ export async function loadBranchRows(store: Store, branchId: string, today: stri
   return buildBranchRows({ branchId, skus, rules, config, desks, latestDays, latestRows, inTransit, velocity, carried });
 }
 
+// heldBySku for one branch, loaded from the Store (the carries switch refuses
+// "off" while a SKU is still held).
+export async function loadHeld(store: Store, branchId: string) {
+  const [desks, latestDays, latestRows, inTransit] = await Promise.all([
+    store.desks(),
+    store.latestDeskDays({ branchId }),
+    store.ledgerLatest({ branchId }),
+    store.transfers({ branchId, status: "in_transit" }),
+  ]);
+  return heldBySku(latestRows, latestDays, desks, inTransit, branchId);
+}
+
 // Status of every (branch, SKU) pair, for the desk cards and the dashboard.
 export async function loadBranchStatuses(store: Store, branchIds: string[], today: string): Promise<Map<string, ReplenishmentRow>> {
   const [skus, rules, config, desks] = await Promise.all([store.skus(), store.rules(), store.config(), store.desks()]);
