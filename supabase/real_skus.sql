@@ -231,4 +231,10 @@ on conflict (sku_id) do update set
   std_gram_weight = excluded.std_gram_weight, baht_weight = excluded.baht_weight,
   reorder_level = excluded.reorder_level, group_name = excluded.group_name, icon = excluded.icon;
 
+-- Every branch carries every SKU to start with (migration 15); an existing
+-- choice is kept.
+insert into branch_sku (branch_id, sku_id, carried)
+select b.branch_id, m.sku_id, true from branches b cross join master_sku m
+on conflict (branch_id, sku_id) do nothing;
+
 select count(*) as real_skus from master_sku where not is_seed;

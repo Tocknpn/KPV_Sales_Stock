@@ -260,6 +260,11 @@ begin
   values (v_admin, 'Test Admin', 'desk_day.reopen', 'T1-2/' || (v_today - 3)::text,
           '{"reason":"Seed example: recount"}'::jsonb, 'B-TST1', 'T1-2', true);
 
+  -- Every branch carries every SKU to start with (migration 15).
+  insert into branch_sku (branch_id, sku_id, carried)
+  select b.branch_id, m.sku_id, true from branches b cross join master_sku m
+  on conflict (branch_id, sku_id) do nothing;
+
   raise notice 'Seed loaded for % (see kpv_seed_counts()). Seed logins: test.admin / test.manager / test.staff1-3, password 1234', v_today;
 end $$;
 

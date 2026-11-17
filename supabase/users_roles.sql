@@ -68,10 +68,16 @@ end $$;
 -- 3. Guard triggers (BEFORE, so a refusal changes nothing).
 -- ---------------------------------------------------------------------------
 
--- Master data and system config: admin only.
+-- Master data and system config: admin only. One exception (decided
+-- 2026-11-17): any staff, manager or admin may ADD a SKU; changing or
+-- deleting one stays admin only.
 create or replace function guard_master_data() returns trigger
 language plpgsql as $$
 begin
+  if tg_op = 'INSERT' and tg_table_name = 'master_sku' then
+    perform kpv_require('{admin,manager,staff}');
+    return new;
+  end if;
   perform kpv_require('{admin}');
   if tg_op = 'DELETE' then return old; end if;
   return new;
@@ -239,23 +245,40 @@ create trigger trg_guard_branch_closed_day before insert or update or delete on 
   for each row execute function guard_branch_closed_day();
 
 -- Replenishment rules: a company-wide rule (no branch) is admin only; a branch
--- rule needs an admin or that branch's manager.
+-- rule needs an admin or a staff / manager of that branch (decided 2026-11-17).
 create or replace function guard_replenishment_rule() returns trigger
 language plpgsql as $$
 begin
   -- UPDATE and DELETE check the existing row too, so a rule cannot be moved
   -- out of a scope the actor does not control.
   if tg_op in ('UPDATE', 'DELETE') then
-    perform kpv_require(case when old.branch_id is null then '{admin}'::text[] else '{admin,manager}'::text[] end, old.branch_id);
+    perform kpv_require(case when old.branch_id is null then '{admin}'::text[] else '{admin,manager,staff}'::text[] end, old.branch_id);
     if tg_op = 'DELETE' then return old; end if;
   end if;
-  perform kpv_require(case when new.branch_id is null then '{admin}'::text[] else '{admin,manager}'::text[] end, new.branch_id);
+  perform kpv_require(case when new.branch_id is null then '{admin}'::text[] else '{admin,manager,staff}'::text[] end, new.branch_id);
   return new;
 end $$;
 
 drop trigger if exists trg_guard_replenishment_rule on replenishment_rule;
 create trigger trg_guard_replenishment_rule before insert or update or delete on replenishment_rule
   for each row execute function guard_replenishment_rule();
+
+-- Which SKUs a branch carries (migration 15): an admin, or a staff / manager
+-- of that branch.
+create or replace function guard_branch_sku() returns trigger
+language plpgsql as $$
+begin
+  if tg_op in ('UPDATE', 'DELETE') then
+    perform kpv_require('{admin,manager,staff}', old.branch_id);
+    if tg_op = 'DELETE' then return old; end if;
+  end if;
+  perform kpv_require('{admin,manager,staff}', new.branch_id);
+  return new;
+end $$;
+
+drop trigger if exists trg_guard_branch_sku on branch_sku;
+create trigger trg_guard_branch_sku before insert or update or delete on branch_sku
+  for each row execute function guard_branch_sku();
 
 drop trigger if exists trg_guard_desk_assignment on desk_assignment;
 create trigger trg_guard_desk_assignment before insert or update or delete on desk_assignment

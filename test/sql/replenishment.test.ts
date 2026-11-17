@@ -243,9 +243,12 @@ describe('replenishment_rule guard', () => {
     await db.query(`delete from replenishment_rule where branch_id is null`);
   });
 
-  it('staff cannot write rules', async () => {
+  // Since 2026-11-17 staff run their own branch's values, like a manager.
+  it('staff write their own branch rules only', async () => {
     const staff = await account('B-MM', 'Noy', 'staff');
     await asActor(db, staff);
-    await expectPgError(rule('B-MM'), 'ROLE_DENIED');
+    await rule('B-MM');
+    await expectPgError(rule('B-TS', 'S2'), 'ROLE_DENIED');
+    await expectPgError(rule(null, 'S2'), 'ROLE_DENIED');
   });
 });

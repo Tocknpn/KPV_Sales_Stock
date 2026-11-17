@@ -121,6 +121,34 @@ describe('master data guard', () => {
   });
 });
 
+describe('branch values guard', () => {
+  it('staff write their own branch values and may add a SKU', async () => {
+    await asActor(db, staffMM);
+    await db.query(`insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell) values ('sku','S1','B-MM',2)`);
+    await db.query(`update replenishment_rule set avg_daily_sell = 3 where scope_key = 'S1' and branch_id = 'B-MM'`);
+    await db.query(`insert into branch_sku (branch_id, sku_id, carried) values ('B-MM','S1',true)`);
+    await db.query(`update branch_sku set carried = false where branch_id = 'B-MM' and sku_id = 'S1'`);
+    await db.query(`insert into master_sku (sku_id, name_en, category) values ('S2','New','Rings')`);
+  });
+
+  it('staff cannot touch another branch, company rules or the catalogue', async () => {
+    await asActor(db, staffMM);
+    await expectPgError(db.query(`insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell) values ('sku','S1','B-TS',2)`), 'ROLE_DENIED');
+    await expectPgError(db.query(`insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell) values ('sku','S1',null,2)`), 'ROLE_DENIED');
+    await expectPgError(db.query(`insert into branch_sku (branch_id, sku_id) values ('B-TS','S1')`), 'ROLE_DENIED');
+    await expectPgError(db.query(`update master_sku set name_lo = 'x' where sku_id = 'S1'`), 'ROLE_DENIED');
+    await expectPgError(db.query(`delete from master_sku where sku_id = 'S1'`), 'ROLE_DENIED');
+    await expectPgError(db.query(`insert into sku_type (type_id, name_en) values ('X','X')`), 'ROLE_DENIED');
+  });
+
+  it('an admin may write any branch and company rules', async () => {
+    await asActor(db, admin);
+    await db.query(`insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell) values ('sku','S1','B-TS',2), ('sku','S1',null,1)`);
+    await db.query(`insert into branch_sku (branch_id, sku_id) values ('B-TS','S1')`);
+    await db.query(`update master_sku set name_lo = 'ok' where sku_id = 'S1'`);
+  });
+});
+
 describe('staff account guard', () => {
   it('manager can unlock own-branch staff but not change their role', async () => {
     await db.query(`update staff_accounts set failed_attempts = 5, locked_until = now() + interval '15 minutes' where id = $1`, [staffMM]);
