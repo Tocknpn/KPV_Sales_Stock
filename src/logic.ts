@@ -187,7 +187,10 @@ export function buildDeskCards(
   // Branch-wide status per "branchId|skuId" (see loadBranchStatuses).
   statuses: BranchStatuses = new Map(),
   // Today's resolved gold price, for each card's value in LAK.
-  lakPerBaht = 0
+  lakPerBaht = 0,
+  // Each desk's most recent EARLIER day (rows + that day's status). A case not
+  // checked in yet shows what it last held instead of 0.
+  carried: Map<string, { rows: LedgerRow[]; status: CardStatus | undefined }> = new Map()
 ) {
   const branchById = new Map(branches.map((b) => [b.branch_id, b]));
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
@@ -198,7 +201,10 @@ export function buildDeskCards(
     .map((desk) => {
       const day = dayByDesk.get(desk.desk_id);
       const status: CardStatus = day?.status ?? "not_started";
-      const rows = ledgerRows.filter((r) => r.desk_id === desk.desk_id && !r.excluded);
+      const own = ledgerRows.filter((r) => r.desk_id === desk.desk_id && !r.excluded);
+      const prior = own.length === 0 && status === "not_started" ? carried.get(desk.desk_id) : undefined;
+      const rows = prior ? prior.rows.filter((r) => !r.excluded) : own;
+      const qtyStatus = prior ? prior.status : status;
       let totalPcs = 0;
       let totalBaht = 0;
       let totalLak = 0;
@@ -206,14 +212,14 @@ export function buildDeskCards(
       let criticalCount = 0;
       for (const r of rows) {
         const sku = skuById.get(r.sku_id);
-        const qty = currentQty(r, status);
+        const qty = currentQty(r, qtyStatus);
         totalPcs += qty;
         totalBaht += bahtOf(sku, qty);
         totalLak += valueLak(sku, qty, lakPerBaht);
         if (statuses.get(`${desk.branch_id}|${r.sku_id}`)?.status === "critical") criticalCount++;
       }
       const branch = branchById.get(desk.branch_id);
-      const actor = lastActor(rows, day, staffById);
+      const actor = lastActor(own, day, staffById);
       return {
         desk_id: desk.desk_id,
         branch_id: desk.branch_id,

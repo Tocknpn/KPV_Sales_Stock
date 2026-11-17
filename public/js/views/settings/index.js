@@ -8,6 +8,7 @@ import { renderExchangeRate } from "./exchange-rate.js";
 import { go, pathFor, backTo } from "../../router.js";
 import { renderUsers } from "./users.js";
 import { renderAudit } from "./audit.js";
+import { profileCardHtml } from "./profile.js";
 
 const MENU = [
   { id: "sku", labelKey: "settings.menuSku", render: renderSku, icon: `<path stroke-linecap="round" stroke-linejoin="round" d="M3 8l9-4 9 4-9 4-9-4z"/><path stroke-linecap="round" stroke-linejoin="round" d="M3 8v9l9 4 9-4V8M12 12v9"/>` },
@@ -35,20 +36,7 @@ function setTopbar(title, subtitle, onBack) {
   if (onBack) document.getElementById("settings-back").addEventListener("click", onBack);
 }
 
-function profileCard() {
-  const user = state.user;
-  const branch = user?.branchId ? state.meta?.branches.find((b) => b.branch_id === user.branchId) : null;
-  const initials = (user?.displayName || "?").slice(0, 2).toUpperCase();
-  return `
-    <div class="card p-5 text-center">
-      <span class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-brand-50 text-xl font-extrabold text-brand-700">${initials}</span>
-      <div class="mt-3 text-base font-extrabold text-gray-900">${user?.displayName ?? ""}</div>
-      <div class="mt-1 text-xs font-semibold text-gray-600">
-        ${t("topbar.loggedInAs")} · ${branch ? branch.name_en : isAdmin(user) ? t("topbar.allBranches") : ""}
-      </div>
-      <span class="mt-2 inline-flex status-pill bg-gray-100 text-gray-600">${user?.role ?? ""}</span>
-    </div>`;
-}
+const profileCard = () => profileCardHtml(state.user);
 
 function goldStrip() {
   const g = state.meta?.gold;

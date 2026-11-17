@@ -11,6 +11,7 @@ import { toast } from "../../ui.js";
 import { deskById } from "../../state.js";
 import { escapeHtml, fmtBaht, fmtClock, fmtDate } from "../../util.js";
 import { skeletonList } from "../../skeleton.js";
+import { auditValue, changedKeys } from "../../audit-value.js";
 
 // Columns that are bookkeeping for the row, not something a person changed.
 const HIDDEN_FIELDS = new Set(["id", "desk_id", "sku_id", "ledger_date", "is_seed", "created_at", "updated_at", "performed_by", "closing_qty", "stock_out", "branch_id"]);
@@ -52,7 +53,9 @@ function scrubIds(text) {
   return String(text).replace(UUID_RE, (id) => staffNames.get(id.toLowerCase()) ?? staffNames.get(id) ?? "—");
 }
 
-function fmtValue(v) {
+function fmtValue(v, key) {
+  const readable = key ? auditValue(key, v) : null;
+  if (readable !== null) return readable;
   if (v === null || v === undefined || v === "") return "—";
   if (typeof v === "boolean") return v ? "✓" : "✗";
   // Never show a raw id: people become names, any other id becomes a dash.
@@ -94,7 +97,7 @@ function buildSentence(e) {
       const kind = ctx.kind ?? nv.kind ?? "transfer";
       return [...head, `${t(`audit.kind.${kind}`) === `audit.kind.${kind}` ? kind : t(`audit.kind.${kind}`)} ${fmtValue(nv.qty)} → ${caseName(e.to_desk_id) || e.to_desk_id || "—"}`].join(" · ");
     }
-    const parts = Object.keys(e.op === "DELETE" ? ov : nv).filter((k) => !HIDDEN_FIELDS.has(k)).map((k) => `${fieldLabel(k)} ${fmtValue(ov[k])} → ${fmtValue(nv[k])}`);
+    const parts = Object.keys(e.op === "DELETE" ? ov : nv).filter((k) => !HIDDEN_FIELDS.has(k)).map((k) => `${fieldLabel(k)} ${fmtValue(ov[k], k)} → ${fmtValue(nv[k], k)}`);
     return [...head, parts.join("; ") || t("audit.op.UPDATE")].join(" · ");
   }
 
@@ -104,13 +107,15 @@ function buildSentence(e) {
   let parts;
   // Mention the origin only when this entry is the one that set it.
   const originPcs = e.table_name === "desks" && (e.op === "INSERT" || ov.initial_stock == null) ? nv.initial_stock?.total_pcs : undefined;
-  if (e.op === "UPDATE") parts = keys.map((k) => `${fieldLabel(k)} ${fmtValue(ov[k])} → ${fmtValue(nv[k])}`);
-  else {
+  if (e.op === "UPDATE") {
+    parts = changedKeys(keys, ov, nv).map((k) => `${fieldLabel(k)} ${fmtValue(ov[k], k)} → ${fmtValue(nv[k], k)}`);
+    if (parts.length === 0 && originPcs == null) parts = [t("audit.op.UPDATE")];
+  } else {
     // A new or removed row lists only the values that carry something.
     const src = e.op === "INSERT" ? nv : ov;
     parts = keys
       .filter((k) => src[k] !== 0 && src[k] !== null && src[k] !== "" && src[k] !== false && src[k] !== undefined)
-      .map((k) => (e.op === "INSERT" ? `${fieldLabel(k)} → ${fmtValue(nv[k])}` : `${fieldLabel(k)} ${fmtValue(ov[k])} → —`));
+      .map((k) => (e.op === "INSERT" ? `${fieldLabel(k)} → ${fmtValue(nv[k], k)}` : `${fieldLabel(k)} ${fmtValue(ov[k], k)} → —`));
     if (parts.length === 0) parts = [t(`audit.op.${e.op}`)];
   }
   // The frozen origin is one short line, not a JSON dump.

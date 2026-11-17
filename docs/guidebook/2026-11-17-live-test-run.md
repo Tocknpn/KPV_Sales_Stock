@@ -37,12 +37,15 @@ move −2, closing 7, counted 6 ("TEST ນັບຂາດ 1"), done. B opening 4
 
 ## Bugs and surprises
 
-1. **Reopen sheet wording is out of date.** It says to press "ຢືນຢັນວ່າແລ້ວ" again; the button is now "✓ ປິດມື້" (shot 22). Copy fix in `public/js/i18n.js`.
-2. **Audit list shows raw values.** Entries read "ສະຖານະ check_in → done; … 2026-11-17T09:27:35.432Z" — status names and timestamps are not translated/formatted (shot 28).
-3. **A case not yet checked in shows 0.0 Baht · 0 pcs** on its card, although it closed yesterday with 20 pcs (shot 14). Possibly by design (the card shows today's rows); confusing for staff.
+Items 1, 2, 3 and 6 were fixed on 2026-11-17 (test/guideFindings.test.ts); screenshots retaken after the fix.
+
+
+1. **FIXED — Reopen sheet wording was out of date.** It says to press "ຢືນຢັນວ່າແລ້ວ" again; the button is now "✓ ປິດມື້" (shot 22). Copy fix in `public/js/i18n.js`.
+2. **FIXED — Audit list showed raw values** (now status words, DD/MM HH:mm, only changed fields, names for people). Entries read "ສະຖານະ check_in → done; … 2026-11-17T09:27:35.432Z" — status names and timestamps are not translated/formatted (shot 28).
+3. **FIXED — A case not yet checked in showed 0.0 Baht · 0 pcs** (now shows its last day) on its card, although it closed yesterday with 20 pcs (shot 14). Possibly by design (the card shows today's rows); confusing for staff.
 4. Simulation only: audit entries are grouped under the real date (17 Nov) because the audit uses the real clock.
 5. The movement report counts a move out as **ສິນຄ້າອອກ** (−6 pcs includes the 2 moved to case B). Worth knowing when reading a single case; branch totals net out.
-6. **Profile card is half English** on the Lao screen: branch "Vangthong" and role "staff" (shot 30).
+6. **FIXED — Profile card was half English** on the Lao screen: branch "Vangthong" and role "staff" (shot 30).
 
 ## Cleanup
 

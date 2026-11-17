@@ -6,7 +6,7 @@ import { t } from "../../i18n.js";
 import { escapeHtml, fmtDate, laosDateOf } from "../../util.js";
 import { state, branchName } from "../../state.js";
 import { isAdmin } from "../../session.js";
-import { auditSentence } from "../day/history.js";
+import { auditSentence, learnStaffNames } from "../day/history.js";
 
 export async function renderAudit(root) {
   const admin = isAdmin(state.user);
@@ -68,6 +68,8 @@ export async function renderAudit(root) {
 
   function append(entries) {
     const host = $("#audit-days");
+    // "closed by" and other people fields print as names, not dashes.
+    learnStaffNames(entries.map((e) => [e.actor_id, e.actor_name]));
     for (const e of entries) {
       const day = laosDateOf(e.created_at);
       if (day !== lastDay) {

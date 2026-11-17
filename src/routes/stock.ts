@@ -154,7 +154,22 @@ r.get("/stock/desks", async (c) => {
   const deskById = new Map(desks.map((d) => [d.desk_id, d]));
   const none = new Set<string>();
 
-  const cards = buildDeskCards(scopedDesks, branches, skus, days, ledgerRows, staffAccounts, config, statuses, lakPerBaht).map((card) => {
+  // Cases with no day on this date show what they last held (their latest earlier day).
+  const carried = new Map<string, { rows: LedgerRow[]; status: DeskDay["status"] | undefined }>();
+  const withDay = new Set(days.map((d) => d.desk_id));
+  if (scopedDesks.some((d) => !withDay.has(d.desk_id))) {
+    for (const r of await store.ledgerLatest({ branchId })) {
+      if (withDay.has(r.desk_id) || r.ledger_date >= date) continue;
+      const entry = carried.get(r.desk_id) ?? {
+        rows: [],
+        status: (historyByDesk.get(r.desk_id) ?? []).find((d) => d.ledger_date === r.ledger_date)?.status,
+      };
+      entry.rows.push(r);
+      carried.set(r.desk_id, entry);
+    }
+  }
+
+  const cards = buildDeskCards(scopedDesks, branches, skus, days, ledgerRows, staffAccounts, config, statuses, lakPerBaht, carried).map((card) => {
     const desk = deskById.get(card.desk_id)!;
     const status = buildDayStatus({
       deskCreatedDate: laosDate(new Date(desk.created_at)),
