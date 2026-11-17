@@ -580,10 +580,10 @@ describe("numbers agree across screens", () => {
 describe("SKU master data", () => {
   it("a SKU is one Lao name + type + size; editing sets the name and the planning numbers", async () => {
     const admin = await asAdmin();
-    const made = await call(admin, "POST", "/skus", { sku_id: "LAO-1", name: "ແຫວນ 1 ສະຫຼຶງ", type_id: "RINGS_ACCESSORIES", weight_id: "BAHT_025", purity: "96.5%", unit_price_lak: 5, reorder_level: 9 });
+    const made = await call(admin, "POST", "/skus", { sku_id: "LAO-1", name: "ແຫວນ 1 ສະຫຼຶງ", type_id: "RINGS_ACCESSORIES", weight_id: "BAHT_025", purity: "96.5%", unit_price_lak: 5, reorder_level: 9, branchId: "B-MM" });
     expect(made.status).toBe(200);
     expect(made.json).toMatchObject({ name_lo: "ແຫວນ 1 ສະຫຼຶງ", name_en: "ແຫວນ 1 ສະຫຼຶງ", baht_weight: 0.25, purity: null, unit_price_lak: 0, group_name: null });
-    expect((await call(admin, "POST", "/skus", { name: " ", type_id: "RINGS_ACCESSORIES", weight_id: "BAHT_025" })).status).toBe(400);
+    expect((await call(admin, "POST", "/skus", { name: " ", type_id: "RINGS_ACCESSORIES", weight_id: "BAHT_025", branchId: "B-MM" })).status).toBe(400);
 
     const rules = async () => (await getStore({} as any).rules()).filter((x) => x.scope === "sku" && x.scope_key === "LAO-1");
     const edited = await call(admin, "PATCH", "/skus/LAO-1", { name: "ແຫວນໃໝ່", weight_id: "BAHT_1", avg_daily_sell: 2, lead_time_days: 5, branchId: "B-MM" });
@@ -690,10 +690,14 @@ describe("SKU per branch", () => {
     expect((await call(staff, "POST", "/skus", { ...newSku, sku_id: "ST-2", branchId: "B-VT" })).json.code).toBe("BRANCH_DENIED");
   });
 
-  it("admin creates SKU carried everywhere", async () => {
+  // Decided 2026-11-17: an admin's new SKU follows the "apply to every branch" tick.
+  it("admin SKU follows the tick", async () => {
     const admin = await asAdmin();
-    expect((await call(admin, "POST", "/skus", { ...newSku, sku_id: "AD-1" })).status).toBe(200);
-    expect(await carriedIn("AD-1")).toEqual(["B-IT", "B-MM", "B-TS", "B-VT"]);
+    expect((await call(admin, "POST", "/skus", { ...newSku, sku_id: "AD-1", branchId: "B-VT" })).status).toBe(200);
+    expect(await carriedIn("AD-1")).toEqual(["B-VT"]);
+    expect((await call(admin, "POST", "/skus", { ...newSku, sku_id: "AD-2", allBranches: true })).status).toBe(200);
+    expect(await carriedIn("AD-2")).toEqual(["B-IT", "B-MM", "B-TS", "B-VT"]);
+    expect((await call(admin, "POST", "/skus", { ...newSku, sku_id: "AD-3" })).json.code).toBe("BRANCH_REQUIRED");
   });
 
   it("staff rename is refused", async () => {

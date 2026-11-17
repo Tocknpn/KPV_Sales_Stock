@@ -149,20 +149,20 @@ function buildSku(input: Record<string, any>, types: SkuType[], weights: SkuWeig
   };
 }
 
-// POST /skus: any role. A staff / manager's new SKU is carried in their branch
-// only; an admin's in every branch. Avg/day and lead time go to the branch
-// given (an admin names one, or sends allBranches).
+// POST /skus: any role. The new SKU is carried, with its avg/day and lead
+// time, in the branch given: a staff / manager's own; an admin names one or
+// sends allBranches (decided 2026-11-17: the admin's tick decides).
 r.post("/skus", async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
-  const [types, weights, branches] = await Promise.all([store.skuTypes(), store.skuWeights(), store.branches()]);
+  const [types, weights] = await Promise.all([store.skuTypes(), store.skuWeights()]);
   if (!body.weight_id) throw new HttpError(400, "name, type_id and weight_id are required", "BAD_SKU");
   const built = buildSku(body, types, weights);
   if (typeof built === "string") throw new HttpError(400, built, "BAD_SKU");
   const hasPlan = built.avg !== null || built.lead !== null;
-  const ruleBranches = hasPlan || user.role !== "admin" ? await targetBranches(store, user, body.branchId, body.allBranches) : [];
-  const carriedIn = user.role === "admin" ? branches.map((b) => b.branch_id) : ruleBranches;
+  const carriedIn = await targetBranches(store, user, body.branchId, body.allBranches);
+  const ruleBranches = carriedIn;
   const [created] = await store.createSkus([built.sku]);
   await store.setCarried(carriedIn.map((branch_id) => ({ branch_id, sku_id: created.sku_id, carried: true })));
   if (hasPlan) await writeSkuRule(store, created.sku_id, ruleBranches, built.avg, built.lead);
