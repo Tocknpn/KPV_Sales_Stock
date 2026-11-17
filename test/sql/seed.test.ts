@@ -95,10 +95,12 @@ describe('seed_mock_data.sql', () => {
       'SEED-RNG-1', 'SEED-RNG-2', 'SEED-SNK-025', 'SEED-SNK-05', 'SEED-SNK-1', 'SEED-SNK-2']);
     expect((await one<{ n: number }>(db,
       `select count(*)::int n from master_sku where group_name = 'Snake Necklace' and is_seed`)).n).toBe(4);
-    const group = await one<{ lead_time_days: string; avg_daily_sell: string; branch_id: string | null; is_seed: boolean }>(db,
+    // Rules are per branch (migration 15): a Type rule for the test branch, no group rules.
+    const typeRule = await one<{ lead_time_days: string; avg_daily_sell: string; branch_id: string | null; is_seed: boolean }>(db,
       `select lead_time_days::text, avg_daily_sell::text, branch_id, is_seed from replenishment_rule
-        where scope = 'group' and scope_key = 'Snake Necklace'`);
-    expect(group).toEqual({ lead_time_days: '7.0', avg_daily_sell: '100.000', branch_id: null, is_seed: true });
+        where scope = 'type' and scope_key = 'NECKLACES'`);
+    expect(typeRule).toEqual({ lead_time_days: '7.0', avg_daily_sell: '100.000', branch_id: 'B-TST1', is_seed: true });
+    expect((await db.query(`select 1 from replenishment_rule where scope = 'group' or branch_id is null`)).rows).toEqual([]);
     const rules = await db.query(`select scope, scope_key, branch_id from replenishment_rule where is_seed order by 1, 2`);
     expect(rules.rows).toHaveLength(2);
     // one SKU+branch override, and ring SKU left on auto (no rule at all)

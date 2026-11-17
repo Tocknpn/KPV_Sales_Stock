@@ -44,9 +44,9 @@ begin
     raise exception 'VERIFY_V2: seed staff are wrong';
   end if;
   if not exists (select 1 from replenishment_rule
-                  where is_seed and scope = 'group' and scope_key = 'Snake Necklace' and branch_id is null
+                  where is_seed and scope = 'type' and scope_key = 'NECKLACES' and branch_id = 'B-TST1'
                     and lead_time_days = 7 and avg_daily_sell = 100) then
-    raise exception 'VERIFY_V2: group rule (lead 7, avg 100) missing';
+    raise exception 'VERIFY_V2: B-TST1 necklace type rule (lead 7, avg 100) missing';
   end if;
 end $$;
 

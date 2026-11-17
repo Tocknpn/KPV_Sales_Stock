@@ -103,11 +103,12 @@ begin
     ('SEED-RNG-2',   'Seed Ring 3.75 g',         'Rings & Accessories', 'RINGS_ACCESSORIES', 'G_3_75', '96.5%', 3.75, null, 9400000, 9900000, 'Seed Ring', true);
 
   -- -------------------------------------------------------------------------
-  -- 4. Replenishment rules: the group rule is company-wide (lead 7, avg 100),
-  --    one SKU+branch override, and the rings are left on auto (no rule).
+  -- 4. Replenishment rules (per branch since migration 15): a Type rule for
+  --    the necklaces at the test branch (lead 7, avg 100), one SKU override,
+  --    and the rings are left on auto (no rule).
   -- -------------------------------------------------------------------------
   insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell, lead_time_days, is_seed) values
-    ('group', 'Snake Necklace', null,      100, 7, true),
+    ('type',  'NECKLACES',      'B-TST1',  100, 7, true),
     ('sku',   'SEED-SNK-1',     'B-TST1',    8, 5, true);
 
   -- -------------------------------------------------------------------------

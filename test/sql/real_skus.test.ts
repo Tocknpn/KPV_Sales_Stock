@@ -22,6 +22,24 @@ describe('real_skus.sql', () => {
     expect(bad.rows).toEqual([]);
   });
 
+  it('a re-run leaves each branch\'s carries choices alone', async () => {
+    const db = await freshDb({ withRoles: true, withBase: true });
+    await db.exec(sqlFile('real_skus.sql'));
+    const first = await db.query<{ n: number }>(`select count(*)::int n from branch_sku where carried`);
+    expect(first.rows[0].n).toBe(expected * 4);
+    // A branch-only SKU (added by staff) and a SKU one branch stopped selling.
+    await db.exec(`
+      insert into master_sku (sku_id, name_en, category, type_id) values ('ST-1', 'Staff ring', 'Rings & Accessories', 'RINGS_ACCESSORIES');
+      insert into branch_sku (branch_id, sku_id, carried) values ('B-MM', 'ST-1', true);
+      update branch_sku set carried = false where branch_id = 'B-VT' and sku_id = 'BAR-1G';
+    `);
+    await db.exec(sqlFile('real_skus.sql'));
+    const st = await db.query(`select branch_id from branch_sku where sku_id = 'ST-1' order by 1`);
+    expect(st.rows).toEqual([{ branch_id: 'B-MM' }]);
+    const off = await db.query(`select carried from branch_sku where branch_id = 'B-VT' and sku_id = 'BAR-1G'`);
+    expect(off.rows).toEqual([{ carried: false }]);
+  });
+
   it('works after the mock data, passes verify_v2, and survives the purge', async () => {
     const db = await freshDb({ withRoles: true, withBase: true });
     await db.exec(sqlFile('seed_mock_data.sql'));
