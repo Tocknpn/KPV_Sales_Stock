@@ -54,6 +54,18 @@ describe("sku xlsx", () => {
     ]);
   });
 
+  it("line numbers start from the sheet's first used row", () => {
+    // The used range starts on row 3: header on row 3, first data row is line 4.
+    const aoa = [SKU_HEADERS, ["", "A", "ແຫວນ", 1], [], ["", "B", "ແຫວນ", 1]];
+    expect(sheetRowsToImport(aoa, 3).rows.map((r: any) => [r.line, r.name])).toEqual([
+      [4, "A"],
+      [6, "B"],
+    ]);
+    // Blank rows above the header (as SheetJS returns them with blankrows: true).
+    const padded = [[], [null, null], SKU_HEADERS, ["", "A", "ແຫວນ", 1], [], ["", "B", "ແຫວນ", 1]];
+    expect(sheetRowsToImport(padded).rows.map((r: any) => r.line)).toEqual([4, 6]);
+  });
+
   it("missing grams column is an error", () => {
     expect(sheetRowsToImport([["ຊື່ສິນຄ້າ* / name", "ປະເພດ* / type"], ["A", "ແຫວນ"]]).error).toBe("missing column grams");
     expect(sheetRowsToImport([]).error).toBe("missing column name");

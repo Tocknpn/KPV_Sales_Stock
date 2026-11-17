@@ -765,13 +765,17 @@ function openImportSheet(body) {
           fileName = file.name;
           const XLSX = await loadXlsx();
           let aoa;
+          let firstRow = 1;
           try {
             const wb = XLSX.read(await file.arrayBuffer());
-            aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            // Keep blank rows and note where the used range starts, so error lines match Excel's row numbers.
+            firstRow = ws["!ref"] ? XLSX.utils.decode_range(ws["!ref"]).s.r + 1 : 1;
+            aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: true });
           } catch {
             return showErrors([{ line: 1, error: t("settings.importUnreadable") }]);
           }
-          const parsed = sheetRowsToImport(aoa);
+          const parsed = sheetRowsToImport(aoa, firstRow);
           if (parsed.error) return showErrors([{ line: 1, error: parsed.error }]);
           if (parsed.rows.length === 0) return showErrors([{ line: 1, error: t("err.EMPTY_IMPORT") }]);
           try {

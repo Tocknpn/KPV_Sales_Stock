@@ -46,18 +46,24 @@ function headerKey(h) {
   return (i >= 0 ? text.slice(i + 1) : text).trim();
 }
 
-// Array of arrays (first row = header) -> import rows with their sheet line.
-export function sheetRowsToImport(aoa) {
-  const header = (aoa[0] ?? []).map(headerKey);
+// Array of arrays -> import rows with their sheet line. The header is the first
+// row (of the first 20) that has the required columns; blank rows above it are
+// fine. firstRow = the sheet row of aoa[0] (1 unless the used range starts lower).
+export function sheetRowsToImport(aoa, firstRow = 1) {
+  const keysOf = (r) => (r ?? []).map(headerKey);
+  let h = aoa.slice(0, 20).findIndex((r) => REQUIRED.every((k) => keysOf(r).includes(k)));
+  if (h < 0) h = aoa.findIndex((r) => (r ?? []).some((c) => !isBlank(cell(c))));
+  if (h < 0) h = 0;
+  const header = keysOf(aoa[h]);
   const colOf = new Map();
   header.forEach((k, i) => {
     if (k && !colOf.has(k)) colOf.set(k, i);
   });
   for (const k of REQUIRED) if (!colOf.has(k)) return { rows: [], error: `missing column ${k}` };
   const rows = [];
-  for (let i = 1; i < aoa.length; i++) {
+  for (let i = h + 1; i < aoa.length; i++) {
     const src = aoa[i] ?? [];
-    const row = { line: i + 1 };
+    const row = { line: firstRow + i };
     for (const k of IMPORT_KEYS) row[k] = colOf.has(k) ? cell(src[colOf.get(k)]) : null;
     if (IMPORT_KEYS.every((k) => isBlank(row[k]))) continue;
     rows.push(row);
