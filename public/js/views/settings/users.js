@@ -10,9 +10,10 @@ import { escapeHtml } from "../../util.js";
 import { state, branchName } from "../../state.js";
 import { isAdmin, isBranchManager, roleLabelKey } from "../../session.js";
 import { toast, openSheet, closeSheet } from "../../ui.js";
+import { skeletonList } from "../../skeleton.js";
 
 export async function renderUsers(root) {
-  root.innerHTML = `<div class="py-16 text-center text-sm text-gray-600">${t("settings.loading")}</div>`;
+  root.innerHTML = skeletonList();
   const { staff } = await api.settingsSummary();
   const admin = isAdmin(state.user);
   const manager = isBranchManager(state.user);

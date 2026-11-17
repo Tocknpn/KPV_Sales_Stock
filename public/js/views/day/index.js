@@ -29,6 +29,7 @@ import {
 } from "./sheets.js";
 import { renderHistory } from "./history.js";
 import { replaceQuery } from "../../router.js";
+import { skeletonTable } from "../../skeleton.js";
 
 // After Undo on the History tab the day reloads; this brings the tab back.
 let resumeTab = null;
@@ -87,6 +88,9 @@ let S = null;
 export async function mountDay(deskCard, date, hooks = {}, opts = {}) {
   await unmountDay();
   if (opts.tab) resumeTab = opts.tab;
+  // First open of a case: show its shape while loading. A reload keeps the
+  // current screen instead, so numbers do not flash away after a save.
+  if (!document.getElementById("day-screen")) document.getElementById("view-root").innerHTML = skeletonTable(8, 4);
   const detail = await api.deskDetail(deskCard.desk_id, date);
   const rows = detail.rows.map((r) => ({ ...r }));
   const screen = {

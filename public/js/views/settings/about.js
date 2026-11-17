@@ -1,9 +1,10 @@
 import { api } from "../../api.js";
 import { t } from "../../i18n.js";
 import { fmtDateTime } from "../../util.js";
+import { skeletonList } from "../../skeleton.js";
 
 export async function renderAbout(root) {
-  root.innerHTML = `<div class="py-16 text-center text-sm text-gray-600">Loading…</div>`;
+  root.innerHTML = skeletonList(4);
   const [{ sync }, about] = await Promise.all([api.settingsSummary(), api.about()]);
 
   root.innerHTML = `

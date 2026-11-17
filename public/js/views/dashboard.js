@@ -5,6 +5,7 @@ import { openActionSheet } from "../ui.js";
 import { fmtBaht, fmtInt, fmtLak, fmtLakSigned, fmtUsd, escapeHtml, fmtRunway, fmtDate } from "../util.js";
 import { t, tf, productName } from "../i18n.js";
 import { isAdmin } from "../session.js";
+import { skeletonDashboard } from "../skeleton.js";
 
 // The category filter lists the SKU types the admin maintains in Settings.
 let categoryOptions = [];
@@ -138,7 +139,7 @@ function renderTopbar() {
 
 async function refreshDashboard() {
   const root = document.getElementById("view-root");
-  root.innerHTML = `<div class="py-16 text-center text-sm text-gray-600">${t("dashboard.loading")}</div>`;
+  root.innerHTML = skeletonDashboard();
   const data = await api.dashboard({
     period: state.dashboard.period,
     branchId: state.dashboard.branch ?? undefined,

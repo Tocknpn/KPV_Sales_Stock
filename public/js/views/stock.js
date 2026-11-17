@@ -8,6 +8,7 @@ import { isAdmin } from "../session.js";
 import { mountDay, unmountDay } from "./day/index.js";
 import { go, pathFor, backTo } from "../router.js";
 import { renderSkuPickerInto, openingRowsHtml, bindOpeningInputs } from "./sku-picker.js";
+import { skeletonCards, skeletonCalendar } from "../skeleton.js";
 
 function setStockDate(date) {
   state.stock.date = date;
@@ -123,7 +124,7 @@ function openCalendarSheet(anchorEl) {
     onMount: (body) => {
       const calRoot = body.querySelector("#cal-root");
       const load = async () => {
-        calRoot.innerHTML = `<div class="py-10 text-center text-sm text-gray-600">${t("stock.loadingDesks")}</div>`;
+        calRoot.innerHTML = skeletonCalendar();
         const { days } = await api.calendar(state.stock.branch, month);
         const completionByDate = Object.fromEntries(days.map((d) => [d.date, d]));
         renderCalendar(calRoot, {
@@ -153,7 +154,7 @@ let currentToday = null;
 // showLoading=false re-renders in place without the spinner flash.
 async function refreshCards(showLoading = true) {
   const root = document.getElementById("view-root");
-  if (showLoading) root.innerHTML = `<div class="py-16 text-center text-sm text-gray-600">${t("stock.loadingDesks")}</div>`;
+  if (showLoading) root.innerHTML = skeletonCards();
   const { desks, branchSummary, today } = await api.deskCards(state.stock.date, state.stock.branch);
   currentCards = desks;
   currentToday = today;

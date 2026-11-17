@@ -7,13 +7,14 @@ import { escapeHtml, fmtDate } from "../../util.js";
 import { state, branchName } from "../../state.js";
 import { isAdmin } from "../../session.js";
 import { toast } from "../../ui.js";
+import { skeletonList } from "../../skeleton.js";
 
 function monthLabel(ym) {
   return new Date(`${ym}-01T00:00:00`).toLocaleDateString(getLang() === "lo" ? "lo-LA" : "en-US", { month: "long", year: "numeric" });
 }
 
 export async function renderClosedDays(root) {
-  root.innerHTML = `<div class="py-16 text-center text-sm text-gray-600">${t("settings.loading")}</div>`;
+  root.innerHTML = skeletonList(5);
   const admin = isAdmin(state.user);
   // Show this year and next; the list is short (a handful of holidays a year).
   const year = Number(state.meta.today.slice(0, 4));

@@ -7,6 +7,7 @@ import { escapeHtml, fmtRunway, debounce } from "../../util.js";
 import { t, tf, productName } from "../../i18n.js";
 import { state, branchName } from "../../state.js";
 import { isAdmin } from "../../session.js";
+import { skeletonTable } from "../../skeleton.js";
 
 const STATUS_CLS = {
   critical: "bg-danger-bg text-danger",
@@ -37,7 +38,7 @@ export async function renderReplenishment(root) {
 }
 
 async function load(root) {
-  if (!data) root.innerHTML = `<div class="py-16 text-center text-sm text-gray-600">…</div>`;
+  if (!data) root.innerHTML = skeletonTable(6, 4);
   const [rep, { skus }] = await Promise.all([api.replenishment(branchId), api.skus(true)]);
   data = { rows: rep.rows, config: rep.config, skus: new Map(skus.map((s) => [s.sku_id, s])) };
   paint(root);

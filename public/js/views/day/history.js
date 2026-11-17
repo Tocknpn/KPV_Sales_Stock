@@ -9,6 +9,7 @@ import { t, tf, productName } from "../../i18n.js";
 import { toast } from "../../ui.js";
 import { deskById } from "../../state.js";
 import { escapeHtml, fmtBaht, fmtClock, fmtDate } from "../../util.js";
+import { skeletonList } from "../../skeleton.js";
 
 // Columns that are bookkeeping for the row, not something a person changed.
 const HIDDEN_FIELDS = new Set(["id", "desk_id", "sku_id", "ledger_date", "is_seed", "created_at", "updated_at", "performed_by", "closing_qty", "stock_out", "branch_id"]);
@@ -196,7 +197,7 @@ function skuTable(rows) {
 
 // Fills one expanded day: SKU table, that day's moves and its changes.
 async function fillDayDetail(box, { deskId, date, onUndone }) {
-  box.innerHTML = `<p class="py-3 text-center text-sm text-gray-600" role="status">${t("settings.loading")}</p>`;
+  box.innerHTML = skeletonList(4);
   const [detailRes, entriesRes] = await Promise.allSettled([api.deskDetail(deskId, date), api.audit({ deskId, from: date, to: date })]);
   if (detailRes.status === "rejected") {
     box.innerHTML = `<p class="py-3 text-center text-sm text-danger">${escapeHtml(detailRes.reason?.message || t("err.SERVER_ERROR"))}</p>`;
@@ -266,7 +267,7 @@ export async function renderHistory(host, { deskId, date, onUndone }) {
           <tbody id="hist-body" class="divide-y divide-hairline"></tbody>
         </table>
       </div>
-      <p id="hist-status" class="py-4 text-center text-sm text-gray-600" role="status">${t("settings.loading")}</p>
+      <div id="hist-status" class="py-4 text-center text-sm text-gray-600" aria-live="polite">${skeletonList(4)}</div>
       <button type="button" id="hist-more" class="btn-secondary mt-2 hidden w-full">${t("history.more")}</button>
     </section>`;
 

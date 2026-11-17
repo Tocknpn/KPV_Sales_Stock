@@ -5,6 +5,7 @@ import { fmtInt, fmtLak, fmtLakSigned, fmtBaht, icon, escapeHtml, debounce } fro
 import { renderFillBar } from "../charts.js";
 import { t, productName } from "../i18n.js";
 import { openDeskDay } from "./stock.js";
+import { skeletonTable } from "../skeleton.js";
 
 function deskLabel(deskId) {
   const d = deskById(deskId);
@@ -104,7 +105,7 @@ function renderTopbar() {
 
 async function refreshReport() {
   const root = document.getElementById("view-root");
-  root.innerHTML = `<div class="py-16 text-center text-sm text-gray-600">${t("report.loading")}</div>`;
+  root.innerHTML = skeletonTable(8, 5);
   const data = await api.report({
     period: state.report.period,
     branchId: state.report.branch ?? undefined,
@@ -160,7 +161,7 @@ async function renderGrid(root) {
   section.className = "mt-4";
   section.innerHTML = `<h2 class="text-sm font-extrabold text-gray-900">${t("report.grid")}</h2>
     <p class="mt-0.5 text-[11px] text-gray-600">${t("report.gridLegend")}</p>
-    <div id="grid-body" class="mt-2 min-w-0"><p class="py-6 text-center text-sm text-gray-600">${t("report.loading")}</p></div>`;
+    <div id="grid-body" class="mt-2 min-w-0">${skeletonTable(8, 5)}</div>`;
   // Right under the month picker: first thing in the view.
   root.prepend(section);
   const host = section.querySelector("#grid-body");

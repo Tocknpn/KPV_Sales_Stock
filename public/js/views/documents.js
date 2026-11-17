@@ -4,6 +4,7 @@ import { state, branchName, setStoredDocView } from "../state.js";
 import { toast, openSheet, closeSheet, openActionSheet } from "../ui.js";
 import { fmtDateTime, escapeHtml, icon } from "../util.js";
 import { t, productName } from "../i18n.js";
+import { skeletonCards, skeletonTable } from "../skeleton.js";
 
 const PAGE_SIZE = 10;
 
@@ -140,7 +141,7 @@ function deskLabelOf(doc) {
 
 async function refreshDocuments() {
   const root = document.getElementById("view-root");
-  root.innerHTML = `<div class="py-16 text-center text-sm text-gray-600">${t("documents.loading")}</div>`;
+  root.innerHTML = skeletonCards(4);
   const data = await api.documents({
     branchId: state.documents.branch,
     deskId: state.documents.desk,
@@ -888,7 +889,7 @@ async function openReorderProposalPage() {
 
     const tableHost = root.querySelector("#proposal-table");
     if (loading) {
-      tableHost.innerHTML = `<div class="py-10 text-center text-xs text-gray-500">${t("documents.proposalLoading")}</div>`;
+      tableHost.innerHTML = skeletonTable(5, 3);
     } else if (rows.length === 0) {
       tableHost.innerHTML = `<div class="py-10 text-center text-xs text-gray-500">${t("documents.proposalEmptyCase")}</div>`;
     } else {
