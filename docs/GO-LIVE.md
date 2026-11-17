@@ -16,7 +16,7 @@ skip to section 2.)
 
 1. In **SQL Editor**, run these files in this order:
    1. `supabase/schema.sql`
-   2. `supabase/migrations/20261112_01_foundation.sql` to `20261117_14_sku_simplify.sql`, in name order
+   2. `supabase/migrations/20261112_01_foundation.sql` to `20261117_15_branch_sku.sql`, in name order
    3. `supabase/users_roles.sql`
    4. `supabase/base.sql`
    5. `supabase/real_skus.sql` (the real product list; real rows, kept by the purge;
@@ -85,9 +85,9 @@ Do these in order, **before** the new code is deployed.
    ```
    Fix every row (correct the count or the entry in the old app). After v2 such
    a row can only be corrected, never pushed further down.
-3. Run `supabase/migrations/20261112_01_foundation.sql` to `20261117_14_sku_simplify.sql`
+3. Run `supabase/migrations/20261112_01_foundation.sql` to `20261117_15_branch_sku.sql`
    in name order, then `supabase/users_roles.sql`. All are safe to run twice, but
-   always re-run the **whole** sequence 01 to 13 and then `users_roles.sql`,
+   always re-run the **whole** sequence 01 to 15 and then `users_roles.sql`,
    never a single earlier file (migration 07 redefines a function that
    migration 01 also defines).
 
@@ -300,3 +300,21 @@ left join information_schema.columns c
 For any row with `present = false`: run the missing migrations in name order
 (read sections 6–9 first for their pre-checks), then `supabase/users_roles.sql`,
 then `notify pgrst, 'reload schema';`. Run the query again: every row `true`.
+
+## Per-branch SKU values (migration 15, 2026-11-17)
+
+Migration 15 moves avg/day and lead time from company-wide rules to one copy
+per branch, and adds `branch_sku` (which SKUs each branch sells). The old
+Worker reads only company-wide rules; the new Worker needs `branch_sku`. Do
+these three steps together, one right after the other, outside shop hours:
+
+1. In SQL Editor run `supabase/migrations/20261117_15_branch_sku.sql`.
+2. Run `supabase/users_roles.sql` again (it adds the `branch_sku` guard and
+   lets staff write their own branch's values; before this step staff get
+   ROLE_DENIED).
+3. Deploy the new Worker (`npm run deploy`).
+
+Between step 1 and step 3 the old Worker shows every SKU's avg/day as
+automatic. Between a new Worker and a missing step 1, SKU and reorder screens
+return errors. Re-running 01 to 15 later is safe: once migration 15 has run,
+06 and 14 no longer touch rules and 15 no longer re-seeds `branch_sku`.
