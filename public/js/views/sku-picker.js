@@ -1,12 +1,12 @@
 // SKU picker: SKUs grouped by type in a 3-column grid, several picked at once.
-// Used by "Create case" and a case's "Add SKU". Only an admin may create a
-// brand-new master SKU from here.
+// Used by "Create case" and a case's "Add SKU". Only SKUs the case's branch
+// carries are offered; anyone may create a brand-new SKU from here (it is then
+// carried by that branch).
 import { api } from "../api.js";
 import { state } from "../state.js";
 import { toast } from "../ui.js";
 import { icon, escapeHtml, fmtInt } from "../util.js";
 import { t, tf, productName } from "../i18n.js";
-import { isAdmin } from "../session.js";
 import { groupSkusByType, filterSkus, toggleSelection, skuSizeLabel, weightLabel } from "../sku-groups.js";
 import { skeletonGrid } from "../skeleton.js";
 
@@ -16,12 +16,13 @@ const CHECK = `<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="curr
 // onAdd(skus, { types, weights }) gets the picked SKUs (full objects, grid
 // order) and the type/weight lists it loaded; onCancel() is "Back".
 // SKUs already on the case (excludeSkuIds) show greyed out as "In case".
-export async function renderSkuPickerInto(container, { excludeSkuIds = [], onAdd, onCancel }) {
+export async function renderSkuPickerInto(container, { excludeSkuIds = [], onAdd, onCancel, branchId }) {
   container.innerHTML = skeletonGrid();
-  const [{ skus }, { types }, { weights }] = await Promise.all([api.skus(), api.skuTypes(), api.skuWeights()]);
+  const branch = branchId || state.user?.branchId || state.stock.branch || undefined;
+  const [{ skus }, { types }, { weights }] = await Promise.all([api.skus({ branchId: branch }), api.skuTypes(), api.skuWeights()]);
   const inCase = new Set(excludeSkuIds);
-  const canCreate = isAdmin(state.user);
-  let all = skus;
+  const canCreate = !!state.user;
+  let all = skus.filter((s) => s.carried !== false);
   let selected = new Set();
   let query = "";
   let observer = null;
@@ -264,6 +265,7 @@ async function renderCreateSkuFormInto(container, onCreated, onCancel) {
       name,
       type_id: container.querySelector("#sku-type").value,
       weight_id: container.querySelector("#sku-weight").value,
+      branchId: branch,
     });
     onCreated(sku);
   });

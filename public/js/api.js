@@ -65,10 +65,17 @@ export const api = {
   logout: () => post(`/auth/logout`),
 
   createDesk: (payload) => post(`/desks`, payload),
-  skus: (all = false) => request(`/skus${all ? "?all=1" : ""}`),
+  // skus(true) = with inactive ones; skus({ all, branchId }) adds carried + that branch's plan.
+  skus: (opts = false) => {
+    const o = typeof opts === "object" && opts ? opts : { all: !!opts };
+    return request(`/skus?${query({ all: o.all ? 1 : undefined, branchId: o.branchId })}`);
+  },
+  setCarried: (skuId, branchId, carried) => request(`/skus/${encodeURIComponent(skuId)}/carried`, { method: "PUT", body: JSON.stringify({ branchId, carried }) }),
+  exportSkus: (branchId) => request(`/skus/export?${query({ branchId })}`),
   createSku: (payload) => post(`/skus`, payload),
   updateSku: (skuId, payload) => patch(`/skus/${encodeURIComponent(skuId)}`, payload),
-  importSkus: (rows) => post(`/skus/import`, { rows }),
+  // payload = { branchId, fileName, rows, dryRun }
+  importSkus: (payload) => post(`/skus/import`, payload),
 
   skuTypes: () => request(`/sku-types`),
   createSkuType: (payload) => post(`/sku-types`, payload),
@@ -107,7 +114,7 @@ export const api = {
   settingsSummary: () => request("/settings/summary"),
   saveConfig: (payload) => post("/settings/config", payload),
   replenishment: (branchId) => request(`/replenishment?${query({ branchId })}`),
-  replenishmentRules: () => request("/replenishment/rules"),
+  replenishmentRules: (branchId) => request(`/replenishment/rules?${query({ branchId })}`),
   saveRule: (payload) => request("/replenishment/rules", { method: "PUT", body: JSON.stringify(payload) }),
   bulkRule: (payload) => post("/replenishment/rules/bulk", payload),
   about: () => request("/settings/about"),

@@ -389,7 +389,7 @@ function dayHooks(deskCard) {
   return {
     onBack: backToGrid,
     reload: () => reloadDeskDetail(deskCard),
-    openSkuPicker: openSkuPickerSheet,
+    openSkuPicker: (excludeSkuIds, onAdd) => openSkuPickerSheet(excludeSkuIds, onAdd, deskCard.branch_id),
     askOpeningQtys,
   };
 }
@@ -438,12 +438,13 @@ function askOpeningQtys(skus, { types, weights }) {
 
 // --- SKU picker sheet for a case's "Add SKU" ---
 
-function openSkuPickerSheet(excludeSkuIds, onAdd) {
+function openSkuPickerSheet(excludeSkuIds, onAdd, branchId) {
   openSheet(`<div id="sku-picker-root"></div>`, {
     title: t("stock.addSku"),
     onMount: (body) => {
       renderSkuPickerInto(body.querySelector("#sku-picker-root"), {
         excludeSkuIds,
+        branchId,
         onAdd: (skus, meta) => {
           closeSheet();
           onAdd(skus, meta);
@@ -467,6 +468,7 @@ async function openCreateCaseSheet() {
     if (mode === "picker") {
       renderSkuPickerInto(body, {
         excludeSkuIds: rows.map((r) => r.sku.sku_id),
+        branchId: state.stock.branch,
         onAdd: (skus, loaded) => {
           meta = loaded;
           const firstNew = skus[0]?.sku_id;

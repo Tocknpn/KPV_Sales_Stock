@@ -8,8 +8,12 @@ import { parseCsv, csvRowsToSkus, CSV_TEMPLATE } from "../../csv.js";
 import { groupSkusByType, skuSizeLabel, weightLabel, splitWeight, gramsOf, WEIGHT_UNITS } from "../../sku-groups.js";
 import { skeletonList } from "../../skeleton.js";
 
-// Staff can look at the master data; only an admin can change it.
-const canEdit = () => isAdmin(state.user);
+// The catalogue (name, type, size, active; Types and Sizes) is admin only.
+// Every logged-in user runs their own branch: which SKUs it carries, its
+// avg/day and lead time, and adding a SKU (decided 2026-11-17).
+const canEditCatalogue = () => isAdmin(state.user);
+const canEditBranch = () => !!state.user;
+const canEdit = canEditCatalogue;
 const typeLabel = (ty) => productName(ty.name_en, ty.name_lo);
 const num = (n) => String(Math.round(Number(n) * 1000) / 1000);
 
@@ -17,10 +21,21 @@ let activeTab = "sku";
 let skuGroupFilter = "all"; // "all" | type_id
 let skuSizeFilter = "all"; // "all" | weight_id
 let skuSearchQuery = "";
-// Company-wide avg/day + lead time rules and the defaults (Settings > SKU is
-// where they are set since 2026-11-17; the separate replenishment menu is gone).
+// The branch shown: an admin picks one (remembered while the app is open);
+// a staff / manager always sees their own.
+let adminBranch = null;
+const branchList = () => state.meta?.branches ?? [];
+function skuBranch() {
+  if (!isAdmin(state.user)) return state.user?.branchId ?? null;
+  if (!adminBranch || !branchList().some((b) => b.branch_id === adminBranch)) adminBranch = branchList()[0]?.branch_id ?? null;
+  return adminBranch;
+}
+// SKUs the branch does not carry are hidden until asked for.
+let showNotCarried = false;
+// The branch's avg/day + lead time rules and the defaults (Settings > SKU is
+// where they are set; per branch since 2026-11-17, migration 15).
 let plan = { rules: [], config: { defaultLeadTimeDays: 7, warningMarginDays: 3 } };
-// Worst runway status of each SKU over the branches this user sees (sku_id -> row).
+// Runway status of each SKU in the branch shown (sku_id -> row).
 let statusBySku = new Map();
 // Type groups the user opened in the SKU list (key = type_id, "none" = no type).
 // Starts empty: every group collapsed. Kept while the app is open.
@@ -238,14 +253,30 @@ function openWeightForm(existing, body) {
 // --- SKU tab ---
 
 async function renderSkuTab(body) {
-  const [{ skus }, { types }, { weights }, rules] = await Promise.all([api.skus(true), api.skuTypes(), api.skuWeights(), api.replenishmentRules()]);
+  const branchId = skuBranch();
+  const [{ skus: allSkus }, { types }, { weights }, rules] = await Promise.all([
+    api.skus({ all: canEditCatalogue(), branchId }),
+    api.skuTypes(),
+    api.skuWeights(),
+    api.replenishmentRules(branchId),
+  ]);
   const activeTypes = types.filter((ty) => ty.active);
   const activeWeights = weights.filter((w) => w.active);
   plan = rules;
+  const notCarried = allSkus.filter((s) => s.carried === false).length;
+  const skus = showNotCarried ? allSkus : allSkus.filter((s) => s.carried !== false);
 
   const searchOpen = skuSearchQuery.trim().length > 0;
 
   body.innerHTML = `
+    ${
+      isAdmin(state.user)
+        ? `<label for="sku-branch" class="mb-1 block text-[11px] font-bold text-gray-600">${t("settings.branchPick")}</label>
+      <select id="sku-branch" lang="lo" class="input-filled mb-3 text-xs">
+        ${branchList().map((b) => `<option value="${escapeHtml(b.branch_id)}" ${b.branch_id === branchId ? "selected" : ""}>${escapeHtml(productName(b.name_en, b.name_lo))}</option>`).join("")}
+      </select>`
+        : ""
+    }
     <div class="mb-2 flex items-center gap-1.5">
       <div class="shrink-0 whitespace-nowrap text-[11px] font-semibold text-gray-600">${fmtInt(skus.filter((s) => s.active).length)} ${t("settings.activeSkus")}</div>
       <select id="sku-group-filter" class="chip min-h-0 min-w-0 flex-1 truncate border-hairline bg-white text-[11px] text-gray-600">
@@ -260,7 +291,7 @@ async function renderSkuTab(body) {
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><circle cx="11" cy="11" r="6.5"/><path stroke-linecap="round" d="M20 20l-4.3-4.3"/></svg>
       </button>
       ${
-        canEdit()
+        canEditBranch()
           ? `<button id="import-csv" aria-label="${t("settings.importCsv")}" class="tap-target flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-hairline bg-white text-gray-500">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15V4M8 8l4-4 4 4"/><path stroke-linecap="round" d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
       </button>
@@ -276,7 +307,22 @@ async function renderSkuTab(body) {
     </div>
     <p class="mb-2 px-1 text-[11px] font-medium text-gray-600">${escapeHtml(tf("replen.defaults", { lead: num(plan.config.defaultLeadTimeDays), margin: num(plan.config.warningMarginDays) }))}</p>
     <div id="sku-list-wrap"></div>
+    ${
+      notCarried > 0
+        ? `<button id="sku-not-carried" class="tap-target mt-1 w-full text-center text-[11px] font-bold text-brand-700">${escapeHtml(tf(showNotCarried ? "settings.hideNotCarried" : "settings.showNotCarried", { n: fmtInt(notCarried) }))}</button>`
+        : ""
+    }
   `;
+
+  body.querySelector("#sku-branch")?.addEventListener("change", (e) => {
+    adminBranch = e.target.value;
+    body.innerHTML = skeletonList(8);
+    renderSkuTab(body);
+  });
+  body.querySelector("#sku-not-carried")?.addEventListener("click", () => {
+    showNotCarried = !showNotCarried;
+    renderSkuTab(body);
+  });
 
   body.querySelector("#import-csv")?.addEventListener("click", () => openImportSheet(body));
   body.querySelector("#add-sku")?.addEventListener("click", () => openSkuForm(null, activeTypes, activeWeights, types, weights, body));
@@ -316,8 +362,8 @@ async function renderSkuTab(body) {
 const STATUS_RANK = { critical: 0, warning: 1, ok: 2, no_data: 3 };
 
 async function loadStatuses() {
-  const u = state.user;
-  const branchIds = isAdmin(u) ? (state.meta?.branches ?? []).map((b) => b.branch_id) : u?.branchId ? [u.branchId] : [];
+  const branchId = skuBranch();
+  const branchIds = branchId ? [branchId] : [];
   const results = await Promise.all(branchIds.map((b) => api.replenishment(b).catch(() => null)));
   const next = new Map();
   for (const res of results) {
@@ -329,7 +375,7 @@ async function loadStatuses() {
   statusBySku = next;
 }
 
-// The company-wide rule of a SKU or a Type, if any.
+// The branch's rule of a SKU or a Type, if any (the API sends only that branch's).
 const ruleOf = (scope, key) => plan.rules.find((r) => r.scope === scope && r.scope_key === key) ?? null;
 
 // What applies to a SKU: its own value, else its Type's, else auto / the default.
@@ -382,7 +428,7 @@ function renderSkuList(body, skus, types, weights, activeTypes, activeWeights) {
           <span class="shrink-0 rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-bold text-gray-600">${g.items.length}</span>
         </button>
         ${
-          canEdit() && g.typeId
+          canEditBranch() && g.typeId
             ? `<div class="-mt-1 mb-1.5 flex items-center justify-end gap-2 px-2 text-[11px] text-gray-600">
                 <span class="min-w-0 truncate">${escapeHtml(typePlanText(g.typeId))}</span>
                 <button data-type-plan="${escapeHtml(g.typeId)}" class="tap-target shrink-0 rounded-full border border-brand-600 px-3 text-[11px] font-bold text-brand-700 active:bg-brand-50">${t("settings.typeSetAll")}</button>
@@ -418,13 +464,20 @@ function renderSkuList(body, skus, types, weights, activeTypes, activeWeights) {
     })
   );
   wrap.querySelectorAll("[data-edit-sku]").forEach((btn) =>
-    btn.addEventListener("click", () => canEdit() && openSkuForm(skus.find((s) => s.sku_id === btn.dataset.editSku), activeTypes, activeWeights, types, weights, body))
+    btn.addEventListener("click", () => canEditBranch() && openSkuForm(skus.find((s) => s.sku_id === btn.dataset.editSku), activeTypes, activeWeights, types, weights, body))
   );
-  wrap.querySelectorAll("[data-toggle-sku]").forEach((btn) =>
+  // The switch on a row = "this branch carries it". Off is refused while the
+  // branch still holds the SKU (err.STOCK_HELD).
+  wrap.querySelectorAll("[data-carried-sku]").forEach((btn) =>
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      const s = skus.find((x) => x.sku_id === btn.dataset.toggleSku);
-      await api.updateSku(s.sku_id, { active: !s.active });
+      const s = skus.find((x) => x.sku_id === btn.dataset.carriedSku);
+      btn.disabled = true;
+      try {
+        await api.setCarried(s.sku_id, skuBranch(), s.carried === false);
+      } finally {
+        btn.disabled = false;
+      }
       renderSkuTab(body);
     })
   );
@@ -453,12 +506,16 @@ function skuRow(s) {
       <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">${icon(s.icon, "h-4 w-4")}</span>
       <button data-edit-sku="${s.sku_id}" class="min-w-0 flex-1 text-left">
         <span lang="lo" class="lao block truncate text-xs font-bold text-gray-900">${escapeHtml(productName(s.name_en, s.name_lo))}</span>
-        <span class="block text-[10px] text-gray-500">${escapeHtml(subtitle)}${s.active ? "" : ` · ${t("settings.inactiveLabel")}`}</span>
+        <span class="block text-[10px] text-gray-500">${escapeHtml(subtitle)}${s.active ? "" : ` · ${t("settings.inactiveLabel")}`}${s.carried === false ? ` · ${t("settings.notCarried")}` : ""}</span>
         ${badge}
       </button>
-      ${canEdit() ? toggleSwitch(s.active, `data-toggle-sku="${s.sku_id}"`) : ""}
+      ${canEditBranch() && s.carried !== null && s.carried !== undefined ? toggleSwitch(s.carried, `data-carried-sku="${s.sku_id}" aria-label="${escapeHtml(t("settings.carried"))}"`) : ""}
     </div>`;
 }
+
+// A SKU's own numbers in the branch: from GET /skus (plan) or a rule row.
+const ownAvg = (o) => (o ? o.avg ?? o.avg_daily_sell ?? null : null);
+const ownLead = (o) => (o ? o.lead ?? o.lead_time_days ?? null : null);
 
 // Blank = null (inherit). undefined when the text is not a number >= 0.
 function readNumber(input) {
@@ -489,6 +546,7 @@ function openTypePlanSheet(group, skus, body) {
     `
     <p class="text-xs text-gray-600">${escapeHtml(tf("settings.typeSetAllHint", { n: count }))}</p>
     ${planInputs("tp", r?.avg_daily_sell != null ? num(r.avg_daily_sell) : "", r?.lead_time_days != null ? num(r.lead_time_days) : "", { avg: t("replen.src.auto"), lead: num(plan.config.defaultLeadTimeDays) })}
+    ${allBranchesBox("tp")}
     <button id="tp-save" class="btn-primary mt-4 w-full">${escapeHtml(tf("settings.typeApply", { n: count }))}</button>`,
     {
       title: `${t("settings.typeSetAll")} · ${escapeHtml(typeLabel(group.type))}`,
@@ -500,7 +558,7 @@ function openTypePlanSheet(group, skus, body) {
           if (avg === null && lead === null) return toast(t("replen.needValue"), "error");
           e.target.disabled = true;
           try {
-            await api.bulkRule({ scope: "type", key: group.typeId, avgDailySell: avg, leadTimeDays: lead });
+            await api.bulkRule({ scope: "type", key: group.typeId, avgDailySell: avg, leadTimeDays: lead, ...branchTarget(sheet, "tp") });
           } catch (err) {
             e.target.disabled = false;
             throw err;
@@ -514,8 +572,19 @@ function openTypePlanSheet(group, skus, body) {
   );
 }
 
+// Admin only: "apply to every branch" under the avg/day + lead time fields.
+const allBranchesBox = (prefix) =>
+  isAdmin(state.user)
+    ? `<label class="mt-2 flex items-center gap-2 text-xs font-semibold text-gray-700"><input id="${prefix}-all-branches" type="checkbox" class="h-4 w-4" /> ${t("settings.applyAllBranches")}</label>`
+    : "";
+// Where a planning write goes: the branch shown, or every branch (admin box ticked).
+const branchTarget = (sheet, prefix) => (sheet.querySelector(`#${prefix}-all-branches`)?.checked ? { allBranches: true } : { branchId: skuBranch() });
+
 function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights, body) {
   if (!activeTypes.length || !activeWeights.length) return toast(t("settings.needTypeAndWeight"), "error");
+  // A staff / manager editing an existing SKU changes only their branch's numbers.
+  const catalogueLocked = !!existing && !canEditCatalogue();
+  const lock = catalogueLocked ? "disabled" : "";
   // Editing a SKU whose current Type/Weight was since deactivated: keep it
   // selectable so saving the name doesn't silently reassign it.
   const typeOptions = existing && existing.type_id && !activeTypes.some((ty) => ty.type_id === existing.type_id)
@@ -524,7 +593,7 @@ function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights,
   const weightOptions = existing && existing.weight_id && !activeWeights.some((w) => w.weight_id === existing.weight_id)
     ? [...activeWeights, allWeights.find((w) => w.weight_id === existing.weight_id)].filter(Boolean)
     : activeWeights;
-  const own = existing ? ruleOf("sku", existing.sku_id) : null;
+  const own = existing ? existing.plan ?? ruleOf("sku", existing.sku_id) : null;
   // What a blank field falls back to, for the chosen Type.
   const placeholdersFor = (typeId) => {
     const tr = typeId ? ruleOf("type", typeId) : null;
@@ -537,23 +606,29 @@ function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights,
   openSheet(
     `
     <label for="new-sku-name" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuNameLabel")}</label>
-    <input id="new-sku-name" type="text" maxlength="120" lang="lo" value="${existing ? escapeHtml(productName(existing.name_en, existing.name_lo)) : ""}" class="input-filled lao" />
+    <input id="new-sku-name" type="text" maxlength="120" lang="lo" ${lock} value="${existing ? escapeHtml(productName(existing.name_en, existing.name_lo)) : ""}" class="input-filled lao" />
     <div class="mt-3 grid grid-cols-2 gap-2">
       <div class="min-w-0">
         <label for="new-sku-type" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuTypeLabel")}</label>
-        <select id="new-sku-type" lang="lo" class="input-filled">
+        <select id="new-sku-type" lang="lo" ${lock} class="input-filled">
           ${typeOptions.map((ty) => `<option value="${ty.type_id}" ${existing?.type_id === ty.type_id ? "selected" : ""}>${escapeHtml(typeLabel(ty))}</option>`).join("")}
         </select>
       </div>
       <div class="min-w-0">
         <label for="new-sku-weight" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuWeightLabel")}</label>
-        <select id="new-sku-weight" lang="lo" class="input-filled">
+        <select id="new-sku-weight" lang="lo" ${lock} class="input-filled">
           ${weightOptions.map((w) => `<option value="${w.weight_id}" ${existing?.weight_id === w.weight_id ? "selected" : ""}>${escapeHtml(weightLabel(w.gram_value) || w.name_en)}</option>`).join("")}
         </select>
       </div>
     </div>
-    ${planInputs("new-sku", own?.avg_daily_sell != null ? num(own.avg_daily_sell) : "", own?.lead_time_days != null ? num(own.lead_time_days) : "", placeholdersFor(existing?.type_id ?? typeOptions[0]?.type_id))}
+    ${planInputs("new-sku", ownAvg(own) != null ? num(ownAvg(own)) : "", ownLead(own) != null ? num(ownLead(own)) : "", placeholdersFor(existing?.type_id ?? typeOptions[0]?.type_id))}
     <p class="mt-1.5 text-[11px] text-gray-500">${t("settings.planHint")}</p>
+    ${allBranchesBox("new-sku")}
+    ${
+      existing && canEditCatalogue()
+        ? `<label class="mt-3 flex items-center gap-2 text-xs font-semibold text-gray-700"><input id="new-sku-active" type="checkbox" class="h-4 w-4" ${existing.active ? "checked" : ""} /> ${t("settings.activeLabel")}</label>`
+        : ""
+    }
     <button id="save-sku" class="btn-primary mt-4 w-full">${t("settings.saveSku")}</button>
   `,
     {
@@ -571,13 +646,16 @@ function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights,
           const avg = readNumber(sheetBody.querySelector("#new-sku-avg"));
           const lead = readNumber(sheetBody.querySelector("#new-sku-lead"));
           if (avg === undefined || lead === undefined) return toast(t("err.BAD_RULE"), "error");
-          const payload = {
-            name,
-            type_id: typeSel.value,
-            weight_id: sheetBody.querySelector("#new-sku-weight").value,
-            avg_daily_sell: avg,
-            lead_time_days: lead,
-          };
+          const planPart = { avg_daily_sell: avg, lead_time_days: lead, ...branchTarget(sheetBody, "new-sku") };
+          const payload = catalogueLocked
+            ? planPart
+            : {
+                name,
+                type_id: typeSel.value,
+                weight_id: sheetBody.querySelector("#new-sku-weight").value,
+                ...planPart,
+                ...(existing && sheetBody.querySelector("#new-sku-active") ? { active: sheetBody.querySelector("#new-sku-active").checked } : {}),
+              };
           e.target.disabled = true;
           try {
             if (existing) await api.updateSku(existing.sku_id, payload);
