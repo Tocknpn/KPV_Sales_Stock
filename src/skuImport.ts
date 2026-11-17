@@ -120,8 +120,10 @@ export function planImport(input: {
   const patchLine = new Map<string, number>(); // sku -> line of its first catalogue change
 
   input.rows.forEach((raw, i) => {
-    const line = i + 2; // line 1 is the header row
     const row = raw ?? {};
+    // The sheet line the browser sends (blank rows are skipped there), else the
+    // position in the list (line 1 is the header row).
+    const line = Number.isInteger(row.line) && (row.line as number) > 0 ? (row.line as number) : i + 2;
     const fail = (error: string) => plan.errors.push({ line, error });
 
     // Branch

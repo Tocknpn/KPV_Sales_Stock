@@ -50,6 +50,11 @@ describe("SKU import", () => {
     expect((await store().skus()).length).toBe(before);
   });
 
+  it("errors use the sheet line the browser sends", async () => {
+    const res = await imp(await asAdmin(), [{ ...NEW_ROW, line: 2 }, { ...NEW_ROW, name: "", line: 7 }]);
+    expect(res.json.errors).toEqual([{ line: 7, error: "name is required" }]);
+  });
+
   it("unknown type is an error", async () => {
     const res = await imp(await asAdmin(), [{ ...NEW_ROW, type: "ບໍ່ມີ" }]);
     expect(res.status).toBe(422);

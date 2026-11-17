@@ -4,7 +4,7 @@ import { icon, escapeHtml, fmtInt, ICONS, toggleSwitch, debounce } from "../../u
 import { t, tf, productName } from "../../i18n.js";
 import { state } from "../../state.js";
 import { isAdmin } from "../../session.js";
-import { parseCsv, csvRowsToSkus, CSV_TEMPLATE } from "../../csv.js";
+import { exportRowsToSheet, sheetRowsToImport, loadXlsx } from "../../sku-xlsx.js";
 import { groupSkusByType, skuSizeLabel, weightLabel, splitWeight, gramsOf, WEIGHT_UNITS } from "../../sku-groups.js";
 import { skeletonList } from "../../skeleton.js";
 
@@ -292,7 +292,7 @@ async function renderSkuTab(body) {
       </button>
       ${
         canEditBranch()
-          ? `<button id="import-csv" aria-label="${t("settings.importCsv")}" class="tap-target flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-hairline bg-white text-gray-500">
+          ? `<button id="import-xlsx" aria-label="${t("settings.importExport")}" class="tap-target flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-hairline bg-white text-gray-500">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15V4M8 8l4-4 4 4"/><path stroke-linecap="round" d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
       </button>
       <button id="add-sku" aria-label="${t("settings.addSku")}" class="tap-target flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white shadow-pop active:scale-95">
@@ -324,7 +324,7 @@ async function renderSkuTab(body) {
     renderSkuTab(body);
   });
 
-  body.querySelector("#import-csv")?.addEventListener("click", () => openImportSheet(body));
+  body.querySelector("#import-xlsx")?.addEventListener("click", () => openImportSheet(body));
   body.querySelector("#add-sku")?.addEventListener("click", () => openSkuForm(null, activeTypes, activeWeights, types, weights, body));
   body.querySelector("#sku-group-filter").addEventListener("change", (e) => {
     skuGroupFilter = e.target.value;
@@ -673,24 +673,41 @@ function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights,
   );
 }
 
-// --- CSV import: every row is checked first; one bad row imports nothing ---
+// --- Excel import / export: every row is checked first (a preview), one bad
+// row imports nothing; nothing is ever deleted. ---
 
 function openImportSheet(body) {
+  const admin = isAdmin(state.user);
+  const startBranch = skuBranch();
   openSheet(
     `
     <p class="text-xs text-gray-600">${t("settings.importIntro")}</p>
-    <button id="csv-template" class="mt-2 text-xs font-bold text-brand-600 underline">${t("settings.importTemplate")}</button>
-    <label for="csv-file" class="mb-1.5 mt-4 block text-xs font-bold text-gray-600">${t("settings.importChoose")}</label>
-    <input id="csv-file" type="file" accept=".csv,text/csv" class="input-filled text-xs" />
-    <div id="csv-result" class="mt-3"></div>
-    <button id="csv-submit" class="btn-primary mt-4 w-full" disabled>${t("settings.importCsv")}</button>
+    ${
+      admin
+        ? `<label for="xl-branch" class="mb-1.5 mt-3 block text-xs font-bold text-gray-600">${t("settings.branchPick")}</label>
+      <select id="xl-branch" lang="lo" class="input-filled text-xs">
+        ${branchList().map((b) => `<option value="${escapeHtml(b.branch_id)}" ${b.branch_id === startBranch ? "selected" : ""}>${escapeHtml(productName(b.name_en, b.name_lo))}</option>`).join("")}
+        <option value="all">${t("settings.importBranchAll")}</option>
+      </select>`
+        : ""
+    }
+    <div class="mt-3 grid grid-cols-2 gap-2">
+      <button id="xl-export" class="btn-secondary py-2 text-xs">${t("settings.exportXlsx")}</button>
+      <button id="xl-template" class="btn-secondary py-2 text-xs">${t("settings.importTemplate")}</button>
+    </div>
+    <label for="xl-file" class="mb-1.5 mt-4 block text-xs font-bold text-gray-600">${t("settings.importChoose")}</label>
+    <input id="xl-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="input-filled text-xs" />
+    <div id="xl-result" class="mt-3" role="status"></div>
+    <button id="xl-submit" class="btn-primary mt-4 w-full" disabled>${t("settings.importConfirm")}</button>
   `,
     {
-      title: t("settings.importCsv"),
+      title: t("settings.importExport"),
       onMount: (sheetBody) => {
         let rows = [];
-        const result = sheetBody.querySelector("#csv-result");
-        const submit = sheetBody.querySelector("#csv-submit");
+        let fileName = "";
+        const result = sheetBody.querySelector("#xl-result");
+        const submit = sheetBody.querySelector("#xl-submit");
+        const branchOf = () => (admin ? sheetBody.querySelector("#xl-branch").value : skuBranch());
         const showErrors = (errors) => {
           result.innerHTML = `
             <div class="rounded-xl bg-danger-bg px-3.5 py-3 text-xs font-semibold text-danger" role="alert">
@@ -701,34 +718,77 @@ function openImportSheet(body) {
                 .join("")}</ul>
             </div>`;
         };
-
-        sheetBody.querySelector("#csv-template").addEventListener("click", () => {
-          const url = URL.createObjectURL(new Blob(["\ufeff" + CSV_TEMPLATE], { type: "text/csv;charset=utf-8" }));
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = "kpv-sku-template.csv";
-          a.click();
-          URL.revokeObjectURL(url);
-        });
-
-        sheetBody.querySelector("#csv-file").addEventListener("change", async (e) => {
+        const showPreview = (p) => {
+          const lines = [...new Set(p.ignored.map((x) => x.line))];
+          result.innerHTML = `
+            <div class="rounded-xl bg-gray-50 px-3.5 py-2.5 text-xs font-semibold text-gray-700">
+              ${escapeHtml(tf("settings.importPreview", { created: fmtInt(p.created), updated: fmtInt(p.updated), unchanged: fmtInt(p.unchanged) }))}
+              ${lines.length ? `<div class="mt-1 text-warning">${escapeHtml(tf("settings.importIgnored", { lines: lines.slice(0, 30).join(", ") }))}</div>` : ""}
+            </div>`;
+        };
+        const reset = () => {
           rows = [];
           submit.disabled = true;
+          result.innerHTML = "";
+        };
+        sheetBody.querySelector("#xl-branch")?.addEventListener("change", () => {
+          reset();
+          sheetBody.querySelector("#xl-file").value = "";
+        });
+
+        // Export = the branch's SKUs as they are now; template = the header row only.
+        const download = async (withData, btn) => {
+          btn.disabled = true;
+          try {
+            const branch = branchOf();
+            const [XLSX, data] = await Promise.all([loadXlsx(), withData ? api.exportSkus(branch) : Promise.resolve({ rows: [] })]);
+            const ws = XLSX.utils.aoa_to_sheet(exportRowsToSheet(data.rows, weightLabel));
+            ws["!cols"] = [12, 30, 16, 14, 14, 14, 10, 14].map((wch) => ({ wch }));
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "SKU");
+            const stamp = state.meta?.today ?? new Date().toISOString().slice(0, 10);
+            XLSX.writeFile(wb, withData ? `kpv-sku-${branch}-${stamp}.xlsx` : "kpv-sku-template.xlsx");
+          } finally {
+            btn.disabled = false;
+          }
+        };
+        sheetBody.querySelector("#xl-export").addEventListener("click", (e) => download(true, e.currentTarget));
+        sheetBody.querySelector("#xl-template").addEventListener("click", (e) => download(false, e.currentTarget));
+
+        // Reading a file previews it at once (dryRun); Confirm writes it.
+        sheetBody.querySelector("#xl-file").addEventListener("change", async (e) => {
+          reset();
           const file = e.target.files[0];
-          if (!file) return (result.innerHTML = "");
-          const parsed = csvRowsToSkus(parseCsv(await file.text()));
+          if (!file) return;
+          fileName = file.name;
+          const XLSX = await loadXlsx();
+          let aoa;
+          try {
+            const wb = XLSX.read(await file.arrayBuffer());
+            aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null });
+          } catch {
+            return showErrors([{ line: 1, error: t("settings.importUnreadable") }]);
+          }
+          const parsed = sheetRowsToImport(aoa);
           if (parsed.error) return showErrors([{ line: 1, error: parsed.error }]);
-          rows = parsed.rows;
-          result.innerHTML = `<p class="rounded-xl bg-gray-50 px-3.5 py-2.5 text-xs font-semibold text-gray-700">${rows.length} ${t("settings.importRowsFound")}</p>`;
-          submit.disabled = rows.length === 0;
+          if (parsed.rows.length === 0) return showErrors([{ line: 1, error: t("err.EMPTY_IMPORT") }]);
+          try {
+            const preview = await api.importSkus({ branchId: branchOf(), fileName, rows: parsed.rows, dryRun: true });
+            rows = parsed.rows;
+            showPreview(preview);
+            submit.disabled = false;
+          } catch (err) {
+            if (err.code === "IMPORT_INVALID") return showErrors(err.data.errors);
+            throw err;
+          }
         });
 
         submit.addEventListener("click", async () => {
           submit.disabled = true;
           try {
-            const { imported } = await api.importSkus(rows);
+            const done = await api.importSkus({ branchId: branchOf(), fileName, rows, dryRun: false });
             closeSheet();
-            toast(`${imported} ${t("settings.importDone")}`, "success");
+            toast(`${fmtInt(done.created + done.updated)} ${t("settings.importDone")}`, "success");
             renderSkuTab(body);
           } catch (err) {
             if (err.code === "IMPORT_INVALID") return showErrors(err.data.errors);
