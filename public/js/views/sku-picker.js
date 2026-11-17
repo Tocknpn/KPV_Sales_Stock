@@ -167,7 +167,8 @@ export async function renderSkuPickerInto(container, { excludeSkuIds = [], onAdd
           query = "";
           mount();
         },
-        mount
+        mount,
+        branch
       );
     });
     renderGroups();
@@ -231,7 +232,8 @@ export function bindOpeningInputs(root, onChange) {
   });
 }
 
-async function renderCreateSkuFormInto(container, onCreated, onCancel) {
+// branch: the case's branch; the new SKU is carried there.
+async function renderCreateSkuFormInto(container, onCreated, onCancel, branch) {
   container.innerHTML = skeletonGrid(3);
   const [{ types }, { weights }] = await Promise.all([api.skuTypes(), api.skuWeights()]);
   const activeTypes = types.filter((ty) => ty.active);
