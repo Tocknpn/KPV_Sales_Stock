@@ -22,7 +22,7 @@ describe("SKU import", () => {
     const before = (await store().skus()).length;
     const res = await imp(admin, [NEW_ROW, { sku_id: "GB-001", name: "ທອງຄຳແທ່ງ 1 ບາດ", type: "ທອງຄຳແທ່ງ", grams: 15.244, avg_daily_sell: 2.5, lead_time_days: 3 }], { dryRun: true });
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ created: 1, updated: 0, unchanged: 1, ignored: [], errors: [] });
+    expect(res.json).toEqual({ created: 1, updated: 0, unchanged: 1, ignored: [], cleared: [], errors: [] });
     expect((await store().skus()).length).toBe(before);
   });
 
@@ -36,8 +36,33 @@ describe("SKU import", () => {
     expect(await ruleOf(made.sku_id, "B-MM")).toMatchObject({ avg_daily_sell: 1, lead_time_days: 4 });
     expect((await store().branchSkus()).filter((b) => b.sku_id === made.sku_id && b.carried).map((b) => b.branch_id)).toEqual(["B-MM"]);
     expect(await skuOf("GB-001")).toMatchObject({ name_lo: "ຄຳແທ່ງ 1 ບາດ" });
-    expect(await ruleOf("GB-001", "B-MM")).toMatchObject({ avg_daily_sell: 6, lead_time_days: null });
+    // An empty cell leaves the value as it is (decided 2026-11-17).
+    expect(await ruleOf("GB-001", "B-MM")).toMatchObject({ avg_daily_sell: 6, lead_time_days: 3 });
     expect(await ruleOf("GB-001", "B-VT")).toMatchObject({ avg_daily_sell: 2.5, lead_time_days: 3 });
+  });
+
+  it("an empty cell keeps the value", async () => {
+    const res = await imp(await asAdmin(), [{ sku_id: "GB-001", avg_daily_sell: "", lead_time_days: null }]);
+    expect(res.json).toMatchObject({ updated: 0, unchanged: 1, cleared: [] });
+    expect(await ruleOf("GB-001", "B-MM")).toMatchObject({ avg_daily_sell: 2.5, lead_time_days: 3 });
+  });
+
+  it("a dash clears the value and is listed in cleared", async () => {
+    const admin = await asAdmin();
+    const dry = await imp(admin, [{ sku_id: "GB-001", avg_daily_sell: "-", lead_time_days: " – " }], { dryRun: true });
+    expect(dry.json).toMatchObject({ updated: 1, cleared: [{ line: 2, field: "avg_daily_sell" }, { line: 2, field: "lead_time_days" }] });
+    await imp(admin, [{ sku_id: "GB-001", avg_daily_sell: "-", lead_time_days: 5 }]);
+    expect(await ruleOf("GB-001", "B-MM")).toMatchObject({ avg_daily_sell: null, lead_time_days: 5 });
+    // clearing what is already empty is no change
+    const again = await imp(admin, [{ sku_id: "GB-002", avg_daily_sell: "-" }], { dryRun: true });
+    expect(again.json).toMatchObject({ unchanged: 1, cleared: [] });
+  });
+
+  it("a dash on a new row means no value", async () => {
+    const res = await imp(await asAdmin(), [{ ...NEW_ROW, avg_daily_sell: "-", lead_time_days: "" }]);
+    expect(res.json).toMatchObject({ created: 1, cleared: [] });
+    const made = (await store().skus()).find((s) => s.name_lo === "ແຫວນໃໝ່")!;
+    expect(await ruleOf(made.sku_id, "B-MM")).toBeUndefined();
   });
 
   it("one bad row imports nothing", async () => {
@@ -198,6 +223,6 @@ describe("SKU export", () => {
     const staff = await asStaff("B-MM");
     const rows = (await call(staff, "GET", "/skus/export")).json.rows;
     const res = await imp(staff, rows, { branchId: undefined, dryRun: true });
-    expect(res.json).toMatchObject({ created: 0, updated: 0, unchanged: rows.length, ignored: [], errors: [] });
+    expect(res.json).toMatchObject({ created: 0, updated: 0, unchanged: rows.length, ignored: [], cleared: [], errors: [] });
   });
 });

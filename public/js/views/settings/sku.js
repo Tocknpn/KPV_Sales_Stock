@@ -720,10 +720,12 @@ function openImportSheet(body) {
         };
         const showPreview = (p) => {
           const lines = [...new Set(p.ignored.map((x) => x.line))];
+          const clearedLines = [...new Set((p.cleared ?? []).map((x) => x.line))];
           result.innerHTML = `
             <div class="rounded-xl bg-gray-50 px-3.5 py-2.5 text-xs font-semibold text-gray-700">
               ${escapeHtml(tf("settings.importPreview", { created: fmtInt(p.created), updated: fmtInt(p.updated), unchanged: fmtInt(p.unchanged) }))}
               ${lines.length ? `<div class="mt-1 text-warning">${escapeHtml(tf("settings.importIgnored", { lines: lines.slice(0, 30).join(", ") }))}</div>` : ""}
+              ${clearedLines.length ? `<div class="mt-1 text-danger">${escapeHtml(tf("settings.importCleared", { n: fmtInt(p.cleared.length), lines: clearedLines.slice(0, 30).join(", ") }))}</div>` : ""}
             </div>`;
         };
         const reset = () => {

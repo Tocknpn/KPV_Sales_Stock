@@ -211,7 +211,7 @@ r.post("/skus/import", async (c) => {
     store.branches(),
   ]);
   const plan = planImport({ rows, branchId, isAdmin: user.role === "admin", branchIds: branches.map((b) => b.branch_id), skus, types, weights, rules, branchSkus });
-  const summary = { created: plan.created, updated: plan.updated, unchanged: plan.unchanged, ignored: plan.ignored, errors: plan.errors };
+  const summary = { created: plan.created, updated: plan.updated, unchanged: plan.unchanged, ignored: plan.ignored, cleared: plan.cleared, errors: plan.errors };
   if (plan.errors.length > 0) throw new HttpError(422, "Nothing was imported — fix these rows and try again", "IMPORT_INVALID", summary);
   if (body.dryRun === true) return c.json(summary);
 

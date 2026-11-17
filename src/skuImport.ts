@@ -6,7 +6,8 @@
 // an update; nothing is ever deleted. Name, type and size are the shared
 // catalogue: a blank cell leaves them as they are, and for a staff / manager a
 // change is ignored (and listed). Avg/day and lead time are the branch's own
-// values: a blank cell means "none" (inherit), as in the export.
+// values: a blank cell leaves the value as it is, "-" clears it (decided
+// 2026-11-17); on a new row both mean "none".
 import type { BranchSku, MasterSku, ReplenishmentRule, SkuType, SkuWeight } from "./types";
 
 export const MAX_IMPORT_ROWS = 500;
@@ -31,6 +32,8 @@ export interface ImportPlan {
   updated: number;
   unchanged: number;
   ignored: { line: number; field: CatalogueField }[];
+  // Branch values a "-" cell removes (listed apart from other changes).
+  cleared: { line: number; field: "avg_daily_sell" | "lead_time_days" }[];
   errors: { line: number; error: string }[];
   // What to write when the plan has no errors.
   // One entry per new SKU (name + type + size); an all-branches file may list
@@ -58,6 +61,19 @@ function cellNumber(v: unknown): number | null {
 }
 
 const round = (n: number, d: number) => Math.round(n * 10 ** d) / 10 ** d;
+
+// A branch-value cell: blank = keep, a dash = clear, else a number in range.
+const DASHES = new Set(["-", "\u2013", "\u2014"]);
+type PlanCell = { kind: "keep" } | { kind: "clear" } | { kind: "set"; value: number };
+function planCell(v: unknown, field: string, max: number, decimals: number): PlanCell | string {
+  const t = cellText(v);
+  if (t === "") return { kind: "keep" };
+  if (DASHES.has(t)) return { kind: "clear" };
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 0 || n > max) return `${field} must be a number from 0 to ${max}, or - to clear`;
+  return { kind: "set", value: round(n, decimals) };
+}
+const valueOf = (c: PlanCell, current: number | null) => (c.kind === "keep" ? current : c.kind === "clear" ? null : c.value);
 export const typeLabel = (t: SkuType) => t.name_lo || t.name_en;
 
 export function findType(types: SkuType[], text: string): SkuType | undefined {
@@ -112,7 +128,7 @@ export function planImport(input: {
   rules: ReplenishmentRule[];
   branchSkus: BranchSku[];
 }): ImportPlan {
-  const plan: ImportPlan = { created: 0, updated: 0, unchanged: 0, ignored: [], errors: [], newSkus: [], skuPatches: new Map(), rules: [], carried: [], updatedRows: [] };
+  const plan: ImportPlan = { created: 0, updated: 0, unchanged: 0, ignored: [], cleared: [], errors: [], newSkus: [], skuPatches: new Map(), rules: [], carried: [], updatedRows: [] };
   const skuById = new Map(input.skus.map((s) => [s.sku_id, s]));
   const skuByLower = new Map(input.skus.map((s) => [s.sku_id.toLowerCase(), s]));
   const knownBranches = new Set(input.branchIds);
@@ -145,12 +161,13 @@ export function planImport(input: {
     }
 
     // Branch values
-    const avg = cellNumber(row.avg_daily_sell);
-    const lead = cellNumber(row.lead_time_days);
-    if (Number.isNaN(avg) || (avg !== null && (avg < 0 || avg > MAX_AVG))) return fail(`avg_daily_sell must be a number from 0 to ${MAX_AVG}`);
-    if (Number.isNaN(lead) || (lead !== null && (lead < 0 || lead > MAX_LEAD))) return fail(`lead_time_days must be a number from 0 to ${MAX_LEAD}`);
-    const avgR = avg === null ? null : round(avg, 3);
-    const leadR = lead === null ? null : round(lead, 1);
+    const avgCell = planCell(row.avg_daily_sell, "avg_daily_sell", MAX_AVG, 3);
+    if (typeof avgCell === "string") return fail(avgCell);
+    const leadCell = planCell(row.lead_time_days, "lead_time_days", MAX_LEAD, 1);
+    if (typeof leadCell === "string") return fail(leadCell);
+    // A new SKU has nothing to keep: blank and "-" both mean none.
+    const avgR = valueOf(avgCell, null);
+    const leadR = valueOf(leadCell, null);
 
     // Catalogue cells
     const name = cellText(row.name).slice(0, 120);
@@ -211,8 +228,12 @@ export function planImport(input: {
 
     const rule = ruleOf.get(key);
     const before = { avg: rule?.avg_daily_sell ?? null, lead: rule?.lead_time_days ?? null };
-    const ruleChanged = before.avg !== avgR || before.lead !== leadR;
-    if (ruleChanged) plan.rules.push({ sku_id: sku.sku_id, branch_id: branch, avg: avgR, lead: leadR, before });
+    const nextAvg = valueOf(avgCell, before.avg);
+    const nextLead = valueOf(leadCell, before.lead);
+    if (avgCell.kind === "clear" && before.avg !== null) plan.cleared.push({ line, field: "avg_daily_sell" });
+    if (leadCell.kind === "clear" && before.lead !== null) plan.cleared.push({ line, field: "lead_time_days" });
+    const ruleChanged = before.avg !== nextAvg || before.lead !== nextLead;
+    if (ruleChanged) plan.rules.push({ sku_id: sku.sku_id, branch_id: branch, avg: nextAvg, lead: nextLead, before });
     const carriedOff = !carried.has(key);
     if (carriedOff) plan.carried.push({ branch_id: branch, sku_id: sku.sku_id, carried: true });
     const catalogueChanged = changed.length > 0 && input.isAdmin;
