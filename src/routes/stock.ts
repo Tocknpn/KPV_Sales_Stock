@@ -670,8 +670,11 @@ r.post("/stock/desk/:deskId/sku", async (c) => {
   const existing = new Map((await store.ledger({ date, deskId: desk.desk_id })).map((row) => [row.sku_id, row]));
   const restore = [...wanted.keys()].filter((id) => existing.get(id)?.excluded);
   const fresh = [...wanted].filter(([id]) => !existing.has(id));
-  if (restore.length) await store.patchLedgerRows(restore.map((id) => ({ ...key(id), excluded: false, performed_by: user.accountId })));
+  // Insert first: it is the write most likely to be refused (another device
+  // added the same SKU), and then nothing has been restored yet.
   if (fresh.length) await store.insertLedgerRows(fresh.map(([id, opening_qty]) => ({ ...key(id), opening_qty, performed_by: user.accountId })));
+  // A removed row had no activity, so its opening was 0; it takes the one typed now.
+  if (restore.length) await store.patchLedgerRows(restore.map((id) => ({ ...key(id), excluded: false, opening_qty: wanted.get(id)!, performed_by: user.accountId })));
   return c.json({ ok: true, added: fresh.length, restored: restore.length });
 });
 

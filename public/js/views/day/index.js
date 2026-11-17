@@ -586,9 +586,13 @@ function openMenu() {
         // On a desk's very first day the starting stock can be typed in.
         const openings = detail.isFirstDay ? await hooks.askOpeningQtys(skus, meta) : new Map();
         if (openings === null) return;
-        await api.addDeskSkus(deskCard.desk_id, { date, items: skus.map((s) => ({ sku_id: s.sku_id, opening_qty: openings.get(s.sku_id) ?? 0 })) });
-        toast(tf("picker.addedN", { n: skus.length }), "success");
-        await hooks.reload?.();
+        try {
+          await api.addDeskSkus(deskCard.desk_id, { date, items: skus.map((s) => ({ sku_id: s.sku_id, opening_qty: openings.get(s.sku_id) ?? 0 })) });
+          toast(tf("picker.addedN", { n: skus.length }), "success");
+        } finally {
+          // Even after an error, show what was saved.
+          await hooks.reload?.();
+        }
       }
     );
   });

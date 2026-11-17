@@ -1,7 +1,8 @@
 // POST /stock/desk/:deskId/sku with `items`: several SKUs added to a case in
 // one request, all-or-nothing on validation.
 //   MM-D01  checked in today, has earlier days (GB-001, GB-002, NK-010, RG-030)
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getStore } from "../src/store";
 import { TODAY, freshApp, call, asStaff } from "./helpers";
 
 beforeEach(freshApp);
@@ -70,6 +71,30 @@ describe("add SKUs in a batch", () => {
     const detail = await detailOf(staff, "MM-D01");
     expect(rowOf(detail, "SP-904")).toBeDefined();
     expect(rowOf(detail, "SP-903")).toBeDefined();
+  });
+
+  it("a SKU re-added on the case's first day keeps the opening typed for it", async () => {
+    const staff = await asStaff("B-MM");
+    const deskId = await newCase(staff);
+    expect((await add(staff, deskId, [{ sku_id: "SP-904" }])).status).toBe(200);
+    expect((await call(staff, "DELETE", `/stock/desk/${deskId}/sku/SP-904?date=${TODAY}`)).status).toBe(200);
+    const res = await add(staff, deskId, [{ sku_id: "SP-904", opening_qty: 3 }]);
+    expect(res.json).toMatchObject({ restored: 1 });
+    expect(rowOf(await detailOf(staff, deskId), "SP-904").opening_qty).toBe(3);
+  });
+
+  it("when inserting the new rows fails, no removed SKU is restored", async () => {
+    const staff = await asStaff("B-MM");
+    expect((await add(staff, "MM-D01", [{ sku_id: "SP-904" }])).status).toBe(200);
+    expect((await call(staff, "DELETE", `/stock/desk/MM-D01/sku/SP-904?date=${TODAY}`)).status).toBe(200);
+    const proto = Object.getPrototypeOf(getStore({} as any));
+    const spy = vi.spyOn(proto, "insertLedgerRows").mockRejectedValueOnce(new Error("boom"));
+    try {
+      expect((await add(staff, "MM-D01", [{ sku_id: "SP-904" }, { sku_id: "SP-903" }])).status).toBe(500);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(rowOf(await detailOf(staff, "MM-D01"), "SP-904")).toBeUndefined();
   });
 
   it("refuses an empty batch and one over 200 items", async () => {
