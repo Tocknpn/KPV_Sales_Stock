@@ -5,7 +5,8 @@
 // Audit values are arbitrary user text: everything here is escaped on the way
 // into innerHTML, and auditSentence() returns plain text for the caller to escape.
 import { api } from "../../api.js";
-import { t, tf, productName } from "../../i18n.js";
+import { t, tf } from "../../i18n.js";
+import { skuLabel } from "../../sku-groups.js";
 import { toast } from "../../ui.js";
 import { deskById } from "../../state.js";
 import { escapeHtml, fmtBaht, fmtClock, fmtDate } from "../../util.js";
@@ -118,7 +119,7 @@ function buildSentence(e) {
 }
 
 function moveCard(m) {
-  const items = m.lines.map((l) => `${l.qty} × ${productName(l.name_en, l.name_lo)}`).join(", ");
+  const items = m.lines.map((l) => `${l.qty} × ${skuLabel(l)}`).join(", ");
   const status = m.reversal ? t("history.isUndo") : m.reversed ? t("history.undone") : "";
   return `
     <div class="card min-w-0 p-3" data-ticket="${escapeHtml(m.ticketId)}">
@@ -179,7 +180,7 @@ function skuTable(rows) {
       const outQ = (r.retail_sale ?? 0) + (r.wholesale ?? 0) + (r.stock_out_single ?? 0) + (r.transfer_out ?? 0) + (r.destock ?? 0) + (r.move ?? 0) + Math.max(-moveQ, 0);
       const off = r.counted_qty != null && r.counted_qty !== r.closing_qty;
       return `<tr>
-        <td class="px-2 py-1.5 text-left font-semibold text-gray-800">${escapeHtml(productName(r.name_en, r.name_lo))}</td>
+        <td class="px-2 py-1.5 text-left font-semibold text-gray-800">${escapeHtml(skuLabel(r))}</td>
         <td class="${TD}">${r.opening_qty ?? 0}</td><td class="${TD}">${inQ}</td><td class="${TD}">${outQ}</td>
         <td class="${TD} font-bold">${r.closing_qty ?? 0}</td>
         <td class="${TD} ${off ? "font-bold text-danger" : ""}">${r.counted_qty ?? "—"}</td></tr>`;

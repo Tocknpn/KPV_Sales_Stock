@@ -5,7 +5,7 @@ import { t, tf, productName } from "../../i18n.js";
 import { state } from "../../state.js";
 import { isAdmin } from "../../session.js";
 import { exportRowsToSheet, sheetRowsToImport, loadXlsx } from "../../sku-xlsx.js";
-import { groupSkusByType, skuSizeLabel, weightLabel, splitWeight, gramsOf, WEIGHT_UNITS } from "../../sku-groups.js";
+import { groupSkusByType, skuSizeLabel, skuLabel, weightLabel, splitWeight, gramsOf, WEIGHT_UNITS } from "../../sku-groups.js";
 import { skeletonList } from "../../skeleton.js";
 
 // The catalogue (name, type, size, active; Types and Sizes) is admin only.
@@ -394,7 +394,7 @@ function visibleSkus(skus) {
     (s) =>
       (skuGroupFilter === "all" || s.type_id === skuGroupFilter) &&
       (skuSizeFilter === "all" || s.weight_id === skuSizeFilter) &&
-      (!q || s.name_en.toLowerCase().includes(q) || (s.name_lo ?? "").toLowerCase().includes(q))
+      (!q || s.name_en.toLowerCase().includes(q) || (s.name_lo ?? "").toLowerCase().includes(q) || skuLabel(s).toLowerCase().includes(q))
   );
 }
 
@@ -612,6 +612,7 @@ function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights,
     `
     <label for="new-sku-name" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuNameLabel")}</label>
     <input id="new-sku-name" type="text" maxlength="120" lang="lo" ${lock} value="${existing ? escapeHtml(productName(existing.name_en, existing.name_lo)) : ""}" class="input-filled lao" />
+    <p class="mt-1 text-[11px] text-gray-500">${t("settings.skuNameHint")}</p>
     <div class="mt-3 grid grid-cols-2 gap-2">
       <div class="min-w-0">
         <label for="new-sku-type" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuTypeLabel")}</label>
@@ -637,7 +638,7 @@ function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights,
     <button id="save-sku" class="btn-primary mt-4 w-full">${t("settings.saveSku")}</button>
   `,
     {
-      title: existing ? escapeHtml(productName(existing.name_en, existing.name_lo)) : t("settings.addSku"),
+      title: existing ? escapeHtml(skuLabel(existing)) : t("settings.addSku"),
       onMount: (sheetBody) => {
         const typeSel = sheetBody.querySelector("#new-sku-type");
         typeSel.addEventListener("change", () => {

@@ -199,14 +199,14 @@ export function buildDemoData(today: string): DemoData {
   ];
 
   const skus: MasterSku[] = [
-    sku("GB-001", "Gold Bar 1 Baht", "ທອງຄຳແທ່ງ 1 ບາດ", T.bars, "BAHT_1", "99.99%", 15.244, 1, 32000000, 33000000, 5, 2.5, 3),
-    sku("GB-002", "Gold Bar 2 Baht", "ທອງຄຳແທ່ງ 2 ບາດ", T.bars, "BAHT_2", "99.99%", 30.488, 2, 64000000, 65500000, 5, null, null),
-    sku("NK-010", "Necklace Dragon 2 Baht", "ສາຍຄໍມັງກອນ 2 ບາດ", T.necklaces, "BAHT_2", "96.5%", 30.488, 2, 57000000, 60000000, 5, null, null),
-    sku("NK-011", "Necklace Chain 1 Baht", "ສາຍຄໍ 1 ບາດ", T.necklaces, "BAHT_1", "96.5%", 15.244, 1, 28500000, 30200000, 5, 1.8, 4),
-    sku("BR-020", "Bracelet Classic 1 Baht", "ສາຍແຂນ 1 ບາດ", T.bracelets, "BAHT_1", "96.5%", 15.244, 1, 28800000, 30500000, 5, 1.2, 3.5),
-    sku("BR-021", "Bracelet Beaded 0.5 Baht", "ສາຍແຂນແກ້ວ 0.5 ບາດ", T.bracelets, "BAHT_05", "96.5%", 7.622, 0.5, 14500000, 15400000, 5, null, null),
-    sku("RG-030", "Ring Solitaire 0.25 Baht", "ແຫວນເພັດ 0.25 ບາດ", T.rings, "BAHT_025", "96.5%", 3.811, 0.25, 7700000, 8200000, 5, 0.9, 2),
-    sku("RG-031", "Ring Wedding Band 0.5 Baht", "ແຫວນແຕ່ງງານ 0.5 ບາດ", T.rings, "BAHT_05", "96.5%", 7.622, 0.5, 14700000, 15600000, 5, null, null),
+    sku("GB-001", "Gold Bar", "ທອງຄຳແທ່ງ", T.bars, "BAHT_1", "99.99%", 15.244, 1, 32000000, 33000000, 5, 2.5, 3),
+    sku("GB-002", "Gold Bar", "ທອງຄຳແທ່ງ", T.bars, "BAHT_2", "99.99%", 30.488, 2, 64000000, 65500000, 5, null, null),
+    sku("NK-010", "Necklace Dragon", "ສາຍຄໍມັງກອນ", T.necklaces, "BAHT_2", "96.5%", 30.488, 2, 57000000, 60000000, 5, null, null),
+    sku("NK-011", "Necklace Chain", "ສາຍຄໍ", T.necklaces, "BAHT_1", "96.5%", 15.244, 1, 28500000, 30200000, 5, 1.8, 4),
+    sku("BR-020", "Bracelet Classic", "ສາຍແຂນ", T.bracelets, "BAHT_1", "96.5%", 15.244, 1, 28800000, 30500000, 5, 1.2, 3.5),
+    sku("BR-021", "Bracelet Beaded", "ສາຍແຂນແກ້ວ", T.bracelets, "BAHT_05", "96.5%", 7.622, 0.5, 14500000, 15400000, 5, null, null),
+    sku("RG-030", "Ring Solitaire", "ແຫວນເພັດ", T.rings, "BAHT_025", "96.5%", 3.811, 0.25, 7700000, 8200000, 5, 0.9, 2),
+    sku("RG-031", "Ring Wedding Band", "ແຫວນແຕ່ງງານ", T.rings, "BAHT_05", "96.5%", 7.622, 0.5, 14700000, 15600000, 5, null, null),
     sku("SP-901", "Premium Gift Box", "ກ່ອງຂອງຂວັນ", T.supplies, null, null, null, 0, 25000, 45000, 20, null, null),
     sku("SP-902", "Logo Paper Bag", "ຖົງເຈ້ຍໂລໂກ້", T.supplies, null, null, null, 0, 3500, 8000, 30, null, null, "bag"),
     sku("SP-903", "Branded Pen", "ປາກກາ", T.supplies, null, null, null, 0, 5000, 12000, 30, null, null, "pen"),

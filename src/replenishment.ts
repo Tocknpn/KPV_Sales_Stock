@@ -2,6 +2,7 @@
 // branch, how many days of stock the branch has, and the alert that follows.
 // Pure functions first (shared by the API, the desk cards and the dashboard),
 // then the loader that gathers a branch's data from the Store.
+import { skuLabel } from "./skuName";
 import type { Desk, DeskDay, LedgerRow, MasterSku, ReplenishmentRule, SystemConfig, Transfer } from "./types";
 import type { Store } from "./store";
 import { currentQty, soldOf } from "./logic";
@@ -231,7 +232,7 @@ export function buildBranchRows(input: {
     });
     rows.push({
       sku_id: skuId,
-      name: sku.name_lo || sku.name_en,
+      name: skuLabel(sku),
       name_lo: sku.name_lo,
       type: sku.category,
       onHand: hand,

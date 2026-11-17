@@ -9,6 +9,7 @@
 // values: a blank cell leaves the value as it is, "-" clears it (decided
 // 2026-11-17); on a new row both mean "none".
 import type { BranchSku, MasterSku, ReplenishmentRule, SkuType, SkuWeight } from "./types";
+import { stripWeight } from "./skuName";
 
 export const MAX_IMPORT_ROWS = 500;
 export const GRAMS_TOLERANCE = 0.001;
@@ -177,7 +178,7 @@ export function planImport(input: {
     const leadR = valueOf(leadCell, null);
 
     // Catalogue cells
-    const name = cellText(row.name).slice(0, 120);
+    const name = stripWeight(cellText(row.name)).slice(0, 120);
     const typeText = cellText(row.type);
     const gramsCell = cellNumber(row.grams);
     if (Number.isNaN(gramsCell)) return fail(`grams must be a number`);

@@ -10,7 +10,7 @@
 // becomes the Count input, with the expected closing above it (tap = matches).
 import { t, productName } from "../../i18n.js";
 import { escapeHtml, fmtRunway } from "../../util.js";
-import { skuSizeLabel } from "../../sku-groups.js";
+import { skuSizeLabel, skuLabel } from "../../sku-groups.js";
 
 // Same formula as the database's generated closing_qty (migration 11).
 export const stockOutOf = (r) => r.retail_sale + r.wholesale + r.destock + (r.stock_out_single ?? 0);
@@ -79,7 +79,7 @@ function toneOf(field, value) {
   return "text-gray-900";
 }
 
-const label = (r, field) => `${skuName(r)} · ${t(LABEL[field])}`;
+const label = (r, field) => `${skuLabel(r)} · ${t(LABEL[field])}`;
 
 // The direction strip under Move in/out: a label that follows the sign, and ±.
 export function moveStripHtml(v, pendingNeg = false) {
@@ -125,7 +125,7 @@ function closingCell(r, { readOnly, countMode }) {
         <button type="button" data-act="match" aria-label="${escapeHtml(`${t("day.matches")} ${closing}`)}"
           class="w-full text-[10px] font-bold leading-tight text-gray-600"><span data-expected class="tabular-nums">${closing}</span> ✓</button>
         <input data-count type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" enterkeyhint="next" autocomplete="off"
-          value="${r.counted_qty ?? ""}" placeholder="—" aria-label="${escapeHtml(`${skuName(r)} · ${t("day.count")}`)}"
+          value="${r.counted_qty ?? ""}" placeholder="—" aria-label="${escapeHtml(`${skuLabel(r)} · ${t("day.count")}`)}"
           class="${NUM} focus-ring text-brand-700" />
       </div>`;
   }

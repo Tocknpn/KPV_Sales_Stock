@@ -30,11 +30,11 @@ export function groupSkusByType(skus, types, weights) {
   return sorted;
 }
 
-// Case-insensitive match on the Lao name, English name or SKU id.
+// Case-insensitive match on the Lao name, English name, SKU id or name + size.
 export function filterSkus(skus, query) {
   const q = String(query ?? "").trim().toLowerCase();
   if (!q) return skus;
-  return skus.filter((s) => [s.name_lo, s.name_en, s.sku_id].some((v) => String(v ?? "").toLowerCase().includes(q)));
+  return skus.filter((s) => [s.name_lo, s.name_en, s.sku_id, skuLabel(s)].some((v) => String(v ?? "").toLowerCase().includes(q)));
 }
 
 // A new Set with skuId added or removed.
@@ -107,10 +107,15 @@ export function gramsOf(amount, unit) {
   return u && Number.isFinite(n) && n > 0 ? round3(n * u.grams) : 0;
 }
 
-// Grams of a SKU: its size's grams, else a gram size name ("1g", "1kg"), else
-// its Baht weight, else a Baht size name ("0.25 Baht").
+// Grams of a SKU: its Baht weight when that is a whole number of hun (the shop
+// sheet counts 15 g a baht, so "5 Baht" is stored as 75 g), else its size's
+// grams, else a gram size name ("1g", "1kg"), else its Baht weight, else a Baht
+// size name ("0.25 Baht").
 function skuGrams(sku) {
+  const bahtGrams = Number(sku.baht_weight) * GRAMS_PER_BAHT;
+  if (bahtGrams > 0 && wholeHun(bahtGrams) !== null) return bahtGrams;
   if (sku.std_gram_weight > 0) return Number(sku.std_gram_weight);
+  if (sku.gram_weight_each > 0) return Number(sku.gram_weight_each);
   const name = String(sku.weight_name ?? "").trim();
   const gram = /^([\d.]+)\s*(kg|g)$/i.exec(name);
   if (gram) return Number(gram[1]) * (gram[2].toLowerCase() === "kg" ? 1000 : 1);
@@ -121,4 +126,13 @@ function skuGrams(sku) {
 
 export function skuSizeLabel(sku) {
   return weightLabel(skuGrams(sku));
+}
+
+/** A SKU on one line: the product name and its size, "ຄຳແທ່ງ 1 ສະຫຼຶງ". A
+ *  name is the product only (2026-11-17); one that still ends in the size is
+ *  not given it twice. */
+export function skuLabel(sku) {
+  const name = nameOf(sku);
+  const size = skuSizeLabel(sku);
+  return size && !name.endsWith(size) ? `${name} ${size}`.trim() : name;
 }

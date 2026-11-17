@@ -4,6 +4,7 @@ import { renderDonut, renderCapacityBar, categoryColor } from "../charts.js";
 import { openActionSheet } from "../ui.js";
 import { fmtBaht, fmtInt, fmtLak, fmtLakSigned, fmtUsd, escapeHtml, fmtRunway, fmtDate } from "../util.js";
 import { t, tf, productName } from "../i18n.js";
+import { skuLabel } from "../sku-groups.js";
 import { isAdmin } from "../session.js";
 import { skeletonDashboard } from "../skeleton.js";
 
@@ -284,7 +285,7 @@ function watchlistRow(item, kind) {
   return `
     <div class="flex items-center justify-between gap-2 py-1.5">
       <div class="min-w-0">
-        <div class="truncate text-xs font-bold text-gray-900">${escapeHtml(productName(item.name_en, item.name_lo))}</div>
+        <div class="truncate text-xs font-bold text-gray-900">${escapeHtml(skuLabel(item))}</div>
         <div class="truncate text-[10px] text-gray-500">${escapeHtml(item.category)} · ${escapeHtml(deskLabel(item.desk_id))}</div>
       </div>
       <span class="status-pill shrink-0 ${kind === "over" ? "bg-danger-bg text-danger" : "bg-warning-bg text-warning"}" title="${t("dashboard.stockVsReorder")}">${fmtInt(item.closing)} / ${fmtInt(item.reorder_level)}</span>
@@ -295,7 +296,7 @@ function agingRow(item) {
   return `
     <div class="flex items-center justify-between gap-2 py-1.5">
       <div class="min-w-0">
-        <div class="truncate text-xs font-bold text-gray-900">${escapeHtml(productName(item.name_en, item.name_lo))}</div>
+        <div class="truncate text-xs font-bold text-gray-900">${escapeHtml(skuLabel(item))}</div>
         <div class="truncate text-[10px] text-gray-500">${escapeHtml(item.category)} · ${escapeHtml(deskLabel(item.desk_id))}</div>
       </div>
       <span class="status-pill shrink-0 bg-gray-100 text-gray-600">${fmtInt(item.estDays)} ${t("dashboard.days")}</span>
@@ -306,7 +307,7 @@ function transitRow(item) {
   return `
     <div class="flex items-center justify-between gap-2 py-1.5">
       <div class="min-w-0">
-        <div class="truncate text-xs font-bold text-gray-900">${fmtInt(item.qty)} × ${escapeHtml(productName(item.name_en, item.name_lo))}</div>
+        <div class="truncate text-xs font-bold text-gray-900">${fmtInt(item.qty)} × ${escapeHtml(skuLabel(item))}</div>
         <div class="truncate text-[10px] text-gray-500">${escapeHtml(item.from_desk_id)} → ${escapeHtml(item.to_desk_id)}</div>
       </div>
       <span class="status-pill shrink-0 bg-warning-bg text-warning">${item.sent_date.slice(5)}</span>

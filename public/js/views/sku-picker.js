@@ -7,7 +7,7 @@ import { state } from "../state.js";
 import { toast } from "../ui.js";
 import { icon, escapeHtml, fmtInt } from "../util.js";
 import { t, tf, productName } from "../i18n.js";
-import { groupSkusByType, filterSkus, toggleSelection, skuSizeLabel, weightLabel } from "../sku-groups.js";
+import { groupSkusByType, filterSkus, toggleSelection, skuSizeLabel, skuLabel, weightLabel } from "../sku-groups.js";
 import { skeletonGrid } from "../skeleton.js";
 
 const typeLabel = (type) => (type ? productName(type.name_en, type.name_lo) : "—");
@@ -203,7 +203,7 @@ export function openingRowsHtml(entries, types, weights, { removable = false } =
                 ${size ? `<span class="block text-[10px] text-gray-500">${escapeHtml(size)}</span>` : ""}
               </span>
               <input data-opening-input type="number" min="0" step="1" inputmode="numeric" enterkeyhint="next" value="${qtyOf.get(s.sku_id) ?? 0}"
-                aria-label="${escapeHtml(productName(s.name_en, s.name_lo))} — ${t("stock.openingQtyLabel")}" class="w-16 shrink-0 rounded-lg border border-hairline py-1.5 text-center text-sm font-bold" />
+                aria-label="${escapeHtml(skuLabel(s))} — ${t("stock.openingQtyLabel")}" class="w-16 shrink-0 rounded-lg border border-hairline py-1.5 text-center text-sm font-bold" />
               ${removable ? `<button data-remove-row aria-label="${t("documents.delete")}" class="tap-target shrink-0 text-gray-400 hover:text-danger">×</button>` : ""}
             </div>`;
             })
@@ -242,6 +242,7 @@ async function renderCreateSkuFormInto(container, onCreated, onCancel, branch) {
     <button id="sku-back" class="mb-2 text-xs font-bold text-gray-500">&larr; ${t("login.back")}</button>
     <label for="sku-name" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuNameLabel")}</label>
     <input id="sku-name" type="text" maxlength="120" lang="lo" class="input-filled lao" />
+    <p class="mt-1 text-[11px] text-gray-500">${t("settings.skuNameHint")}</p>
     <div class="mt-3 grid grid-cols-2 gap-2">
       <div class="min-w-0">
         <label for="sku-type" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuTypeLabel")}</label>

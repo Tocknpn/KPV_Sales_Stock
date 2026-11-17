@@ -7,6 +7,7 @@
 import { storeFor, newRouter, readBody, HttpError, audit, scopeBranch, targetBranches } from "../app";
 import { loadHeld } from "../replenishment";
 import { MAX_IMPORT_ROWS, exportRows, planImport } from "../skuImport";
+import { stripWeight } from "../skuName";
 import type { NewSku, Store } from "../store";
 import { requireAdmin, requireManager, hashPassword, isValidPassword, normalizeUsername, isValidUsername, isManagerOf, MIN_PASSWORD } from "../auth";
 import { isLive } from "../time";
@@ -45,9 +46,10 @@ function planNumbers(input: Record<string, any>): { avg: number | null; lead: nu
   return { avg, lead };
 }
 
-// The SKU name: one Lao name (name, or name_lo; old files may only have name_en).
+// The SKU name: one Lao name (name, or name_lo; old files may only have name_en),
+// the product only: a trailing size is dropped (the size is the SKU's weight).
 function skuNameOf(input: Record<string, any>) {
-  return String(input.name ?? input.name_lo ?? input.name_en ?? "").trim().slice(0, 120);
+  return stripWeight(String(input.name ?? input.name_lo ?? input.name_en ?? "")).slice(0, 120);
 }
 
 function slug(name: string) {
@@ -289,7 +291,7 @@ r.patch("/skus/:id", async (c) => {
   const patch: Partial<MasterSku> = {};
   const nameInput = body.name ?? body.name_lo ?? body.name_en;
   if (nameInput !== undefined) {
-    const name = String(nameInput ?? "").trim().slice(0, 120);
+    const name = stripWeight(String(nameInput ?? "")).slice(0, 120);
     if (!name) throw new HttpError(400, "name cannot be empty", "BAD_SKU");
     patch.name_en = name;
     patch.name_lo = name;

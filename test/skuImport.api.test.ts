@@ -1,6 +1,6 @@
 // SKU import/export per branch (decided 2026-11-17). The browser reads and
 // writes the .xlsx; the Worker gets and returns plain rows.
-// Demo: GB-001 = ທອງຄຳແທ່ງ 1 ບາດ (Gold Bars, 15.244 g), rule 2.5/day, 3 days in every branch.
+// Demo: GB-001 = ທອງຄຳແທ່ງ, 1 ບາດ (Gold Bars, 15.244 g), rule 2.5/day, 3 days in every branch.
 import { beforeEach, describe, expect, it } from "vitest";
 import { getStore } from "../src/store";
 import { freshApp, call, asAdmin, asStaff, asManager } from "./helpers";
@@ -35,7 +35,7 @@ describe("SKU import", () => {
     expect(made).toMatchObject({ type_id: "RINGS_ACCESSORIES", weight_id: "BAHT_025", baht_weight: 0.25 });
     expect(await ruleOf(made.sku_id, "B-MM")).toMatchObject({ avg_daily_sell: 1, lead_time_days: 4 });
     expect((await store().branchSkus()).filter((b) => b.sku_id === made.sku_id && b.carried).map((b) => b.branch_id)).toEqual(["B-MM"]);
-    expect(await skuOf("GB-001")).toMatchObject({ name_lo: "ຄຳແທ່ງ 1 ບາດ" });
+    expect(await skuOf("GB-001")).toMatchObject({ name_lo: "ຄຳແທ່ງ" });
     // An empty cell leaves the value as it is (decided 2026-11-17).
     expect(await ruleOf("GB-001", "B-MM")).toMatchObject({ avg_daily_sell: 6, lead_time_days: 3 });
     expect(await ruleOf("GB-001", "B-VT")).toMatchObject({ avg_daily_sell: 2.5, lead_time_days: 3 });
@@ -127,7 +127,7 @@ describe("SKU import", () => {
     const ok = await imp(admin, [{ sku_id: "GB-001", name: "", type: "", grams: "", avg_daily_sell: 8, branch_id: "B-TS" }], { branchId: "all" });
     expect(ok.json).toMatchObject({ updated: 1 });
     expect(await ruleOf("GB-001", "B-TS")).toMatchObject({ avg_daily_sell: 8 });
-    expect(await skuOf("GB-001")).toMatchObject({ name_lo: "ທອງຄຳແທ່ງ 1 ບາດ" });
+    expect(await skuOf("GB-001")).toMatchObject({ name_lo: "ທອງຄຳແທ່ງ" });
   });
 
   it("all branches: one new SKU on several branch rows is created once", async () => {
@@ -205,7 +205,7 @@ describe("SKU import", () => {
     const res = await imp(staff, [{ sku_id: "GB-001", name: "ຊື່ໃໝ່", type: "ສາຍຄໍ", grams: 7.622, avg_daily_sell: 3, lead_time_days: 3 }]);
     expect(res.status).toBe(200);
     expect(res.json).toMatchObject({ updated: 1, ignored: [{ line: 2, field: "name" }, { line: 2, field: "type" }, { line: 2, field: "grams" }] });
-    expect(await skuOf("GB-001")).toMatchObject({ name_lo: "ທອງຄຳແທ່ງ 1 ບາດ", type_id: "GOLD_BARS", weight_id: "BAHT_1" });
+    expect(await skuOf("GB-001")).toMatchObject({ name_lo: "ທອງຄຳແທ່ງ", type_id: "GOLD_BARS", weight_id: "BAHT_1" });
     expect(await ruleOf("GB-001", "B-MM")).toMatchObject({ avg_daily_sell: 3 });
   });
 
@@ -241,7 +241,7 @@ describe("SKU export", () => {
     const ids = res.json.rows.map((r: any) => r.sku_id);
     expect(ids).not.toContain("SP-904");
     expect(res.json.rows.find((r: any) => r.sku_id === "GB-001")).toEqual({
-      sku_id: "GB-001", name: "ທອງຄຳແທ່ງ 1 ບາດ", type: "ທອງຄຳແທ່ງ", grams: 15.244, avg_daily_sell: 2.5, lead_time_days: 3, branch_id: null,
+      sku_id: "GB-001", name: "ທອງຄຳແທ່ງ", type: "ທອງຄຳແທ່ງ", grams: 15.244, avg_daily_sell: 2.5, lead_time_days: 3, branch_id: null,
     });
   });
 

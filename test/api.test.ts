@@ -579,9 +579,10 @@ describe("numbers agree across screens", () => {
 describe("SKU master data", () => {
   it("a SKU is one Lao name + type + size; editing sets the name and the planning numbers", async () => {
     const admin = await asAdmin();
+    // A typed size is dropped: the name is the product only (2026-11-17).
     const made = await call(admin, "POST", "/skus", { sku_id: "LAO-1", name: "ແຫວນ 1 ສະຫຼຶງ", type_id: "RINGS_ACCESSORIES", weight_id: "BAHT_025", purity: "96.5%", unit_price_lak: 5, reorder_level: 9, branchId: "B-MM" });
     expect(made.status).toBe(200);
-    expect(made.json).toMatchObject({ name_lo: "ແຫວນ 1 ສະຫຼຶງ", name_en: "ແຫວນ 1 ສະຫຼຶງ", baht_weight: 0.25, purity: null, unit_price_lak: 0, group_name: null });
+    expect(made.json).toMatchObject({ name_lo: "ແຫວນ", name_en: "ແຫວນ", baht_weight: 0.25, purity: null, unit_price_lak: 0, group_name: null });
     expect((await call(admin, "POST", "/skus", { name: " ", type_id: "RINGS_ACCESSORIES", weight_id: "BAHT_025", branchId: "B-MM" })).status).toBe(400);
 
     const rules = async () => (await getStore({} as any).rules()).filter((x) => x.scope === "sku" && x.scope_key === "LAO-1");

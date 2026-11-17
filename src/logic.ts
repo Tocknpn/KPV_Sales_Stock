@@ -3,6 +3,7 @@
 // came from Supabase or the in-memory demo store. Every screen that shows a
 // reorder point, a value or a weight gets it from the functions in this file,
 // so the numbers cannot disagree between screens.
+import { skuLabel } from "./skuName";
 import type {
   Branch,
   Desk,
@@ -495,6 +496,8 @@ export function buildDashboard(input: DashboardInput) {
       sku_id: sku.sku_id,
       name_en: sku.name_en,
       name_lo: sku.name_lo,
+      baht_weight: sku.baht_weight ?? null,
+      std_gram_weight: sku.std_gram_weight ?? null,
       category: sku.category,
       desk_id: deskId,
       branch_id: branchId,
@@ -509,6 +512,8 @@ export function buildDashboard(input: DashboardInput) {
     sku_id: p.sku.sku_id,
     name_en: p.sku.name_en,
     name_lo: p.sku.name_lo,
+    baht_weight: p.sku.baht_weight ?? null,
+    std_gram_weight: p.sku.std_gram_weight ?? null,
     category: p.sku.category,
     desk_id: p.desk_id,
     branch_id: p.branch_id,
@@ -671,7 +676,7 @@ export function buildAging(skus: MasterSku[], agingRows: LedgerRow[], filter: Da
     groups.get(key)!.push(r);
   }
 
-  const items: { sku_id: string; name_en: string; name_lo: string | null; category: string; desk_id: string; branch_id: string; estDays: number }[] = [];
+  const items: { sku_id: string; name_en: string; name_lo: string | null; baht_weight: number | null; std_gram_weight: number | null; category: string; desk_id: string; branch_id: string; estDays: number }[] = [];
   for (const groupRows of groups.values()) {
     const sorted = [...groupRows].sort((a, b) => b.ledger_date.localeCompare(a.ledger_date));
     const latest = sorted[0];
@@ -691,6 +696,8 @@ export function buildAging(skus: MasterSku[], agingRows: LedgerRow[], filter: Da
       sku_id: latest.sku_id,
       name_en: sku.name_en,
       name_lo: sku.name_lo,
+      baht_weight: sku.baht_weight ?? null,
+      std_gram_weight: sku.std_gram_weight ?? null,
       category: sku.category,
       desk_id: latest.desk_id,
       branch_id: latest.branch_id,
@@ -720,7 +727,7 @@ export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus
     const q = filter.q.toLowerCase();
     rows = rows.filter((r) => {
       const sku = skuById.get(r.sku_id);
-      return r.sku_id.toLowerCase().includes(q) || sku?.name_en.toLowerCase().includes(q) || (sku?.name_lo ?? "").toLowerCase().includes(q);
+      return r.sku_id.toLowerCase().includes(q) || sku?.name_en.toLowerCase().includes(q) || (sku?.name_lo ?? "").toLowerCase().includes(q) || (sku ? skuLabel(sku).toLowerCase().includes(q) : false);
     });
   }
 
@@ -768,6 +775,8 @@ export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus
       sku_id: last.sku_id,
       name_en: sku?.name_en ?? last.sku_id,
       name_lo: sku?.name_lo ?? null,
+      baht_weight: sku?.baht_weight ?? null,
+      std_gram_weight: sku?.std_gram_weight ?? null,
       icon: sku?.icon ?? "ring",
       category: sku?.category ?? "",
       delta: inSum - outSum + adjustSum,

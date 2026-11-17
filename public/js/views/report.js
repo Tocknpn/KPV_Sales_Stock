@@ -3,7 +3,8 @@ import { state, branchName, deskById } from "../state.js";
 import { openActionSheet } from "../ui.js";
 import { fmtInt, fmtLak, fmtLakSigned, fmtBaht, icon, escapeHtml, debounce } from "../util.js";
 import { renderFillBar } from "../charts.js";
-import { t, productName } from "../i18n.js";
+import { t } from "../i18n.js";
+import { skuLabel } from "../sku-groups.js";
 import { openDeskDay } from "./stock.js";
 import { skeletonTable } from "../skeleton.js";
 
@@ -256,7 +257,7 @@ function render(root, data) {
         <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600">${icon(it.icon, "h-5 w-5")}</span>
         <div class="flex-1">
           <div class="flex items-center justify-between gap-2">
-            <span class="truncate text-xs font-bold text-gray-900">${escapeHtml(productName(it.name_en, it.name_lo))}</span>
+            <span class="truncate text-xs font-bold text-gray-900">${escapeHtml(skuLabel(it))}</span>
             <span class="status-pill shrink-0 ${deltaUp ? "bg-success-bg text-success" : "bg-danger-bg text-danger"}">${deltaUp ? "+" : ""}${it.delta}</span>
           </div>
           <div class="mt-1 flex items-center justify-between text-[11px] text-gray-600">
@@ -289,7 +290,7 @@ function render(root, data) {
             <tr>
               <td class="whitespace-nowrap px-3 py-2 text-gray-500">${r.ledger_date.slice(5)}</td>
               <td class="px-3 py-2 text-gray-500">${r.desk_id}</td>
-              <td class="px-3 py-2 font-semibold text-gray-800">${escapeHtml(productName(r.name_en, r.name_lo))}</td>
+              <td class="px-3 py-2 font-semibold text-gray-800">${escapeHtml(skuLabel(r))}</td>
               <td class="px-3 py-2 text-right text-gray-500">${r.opening_qty}</td>
               <td class="px-3 py-2 text-right text-success">+${r.stock_in + r.transfer_in + Math.max(r.move_qty ?? 0, 0)}</td>
               <td class="px-3 py-2 text-right text-warning">-${(r.stock_out ?? r.retail_sale + r.wholesale + r.destock) + r.transfer_out + r.move + Math.max(-(r.move_qty ?? 0), 0)}</td>

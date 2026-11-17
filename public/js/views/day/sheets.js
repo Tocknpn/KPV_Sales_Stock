@@ -4,7 +4,8 @@ import { api } from "../../api.js";
 import { toast, openSheet, closeSheet, openActionSheet } from "../../ui.js";
 import { fmtDate, fmtLaosFull, fmtInt, fmtBaht, escapeHtml } from "../../util.js";
 import { t } from "../../i18n.js";
-import { closingOf, skuName } from "./row.js";
+import { closingOf } from "./row.js";
+import { skuLabel } from "../../sku-groups.js";
 
 // t() with {placeholders}.
 export function tf(key, vars) {
@@ -54,7 +55,7 @@ function showConflict(body, ctx, res, refresh) {
 export function openConflictSheet(ctx, res) {
   const row = ctx.row(res.skuId);
   openSheet(`${messageSlot()}`, {
-    title: `${escapeHtml(skuName(row))} · ${t("day.conflictTitle")}`,
+    title: `${escapeHtml(skuLabel(row))} · ${t("day.conflictTitle")}`,
     onMount: (body) => {
       showConflict(body, ctx, res, () => {});
       // Either answer ends the question.
@@ -79,7 +80,7 @@ export function openCountNoteSheet(ctx, skuId) {
     <button type="button" data-save class="btn-primary mt-4 w-full">${t("day.save")}</button>
   `,
     {
-      title: `${escapeHtml(skuName(row))} · ${t("day.countNoteTitle")}`,
+      title: `${escapeHtml(skuLabel(row))} · ${t("day.countNoteTitle")}`,
       onMount: (body) => {
         body.querySelector("[data-save]").addEventListener("click", () => {
           const to = body.querySelector("#count-note").value.trim() || null;
@@ -110,7 +111,7 @@ export function openDestockNoteSheet(ctx, skuId) {
     <button type="button" data-save class="btn-primary mt-4 w-full">${t("day.save")}</button>
   `,
     {
-      title: `${escapeHtml(skuName(row))} · ${t("day.destock")}`,
+      title: `${escapeHtml(skuLabel(row))} · ${t("day.destock")}`,
       onMount: (body) => {
         body.querySelector("[data-save]").addEventListener("click", () => {
           const to = body.querySelector("#destock-note").value.trim() || null;
@@ -173,7 +174,7 @@ export function openCaseInfoSheet(ctx) {
         ? Object.entries(init.skus)
             .map(([id, qty]) => {
               const named = init.names?.[id];
-              return `<li class="flex justify-between gap-3"><span class="min-w-0 truncate">${escapeHtml(id)}${named ? ` · ${escapeHtml(skuName(named))}` : ""}</span><span class="font-bold tabular-nums">${fmtInt(qty)}</span></li>`;
+              return `<li class="flex justify-between gap-3"><span class="min-w-0 truncate">${escapeHtml(id)}${named ? ` · ${escapeHtml(skuLabel(named))}` : ""}</span><span class="font-bold tabular-nums">${fmtInt(qty)}</span></li>`;
             })
             .join("")
         : "";
@@ -230,7 +231,7 @@ export function openReopenSheet(ctx) {
 export function openRemoveItemSheet(ctx) {
   openActionSheet(
     t("day.removeItem"),
-    ctx.rows().map((r) => ({ label: escapeHtml(skuName(r)), value: r.sku_id })),
+    ctx.rows().map((r) => ({ label: escapeHtml(skuLabel(r)), value: r.sku_id })),
     async (opt) => {
       await ctx.queue.flushAll();
       await api.removeDeskSku(ctx.deskCard.desk_id, opt.value, ctx.date);
