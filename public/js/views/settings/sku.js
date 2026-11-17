@@ -269,16 +269,14 @@ async function renderSkuTab(body) {
   const searchOpen = skuSearchQuery.trim().length > 0;
 
   body.innerHTML = `
-    ${
-      isAdmin(state.user)
-        ? `<label for="sku-branch" class="mb-1 block text-[11px] font-bold text-gray-600">${t("settings.branchPick")}</label>
-      <select id="sku-branch" lang="lo" class="input-filled mb-3 text-xs">
+    <div class="mb-1.5 flex items-center gap-1.5">
+      ${
+        isAdmin(state.user)
+          ? `<select id="sku-branch" lang="lo" aria-label="${t("settings.branchPick")}" class="chip min-h-0 w-auto max-w-[40%] shrink-0 truncate border-hairline bg-white text-[11px] font-bold text-gray-900">
         ${branchList().map((b) => `<option value="${escapeHtml(b.branch_id)}" ${b.branch_id === branchId ? "selected" : ""}>${escapeHtml(productName(b.name_en, b.name_lo))}</option>`).join("")}
       </select>`
-        : ""
-    }
-    <div class="mb-2 flex items-center gap-1.5">
-      <div class="shrink-0 whitespace-nowrap text-[11px] font-semibold text-gray-600">${fmtInt(skus.filter((s) => s.active).length)} ${t("settings.activeSkus")}</div>
+          : ""
+      }
       <select id="sku-group-filter" class="chip min-h-0 min-w-0 flex-1 truncate border-hairline bg-white text-[11px] text-gray-600">
         <option value="all">${t("settings.filterGroupShort")}</option>
         ${types.map((ty) => `<option value="${ty.type_id}" ${skuGroupFilter === ty.type_id ? "selected" : ""}>${escapeHtml(typeLabel(ty))}</option>`).join("")}
@@ -305,7 +303,10 @@ async function renderSkuTab(body) {
       <input id="sku-search" type="search" placeholder="${t("settings.searchPlaceholder")}" value="${escapeHtml(skuSearchQuery)}"
         class="chip min-h-0 w-full border-hairline bg-white text-gray-600 placeholder:text-gray-400" />
     </div>
-    <p class="mb-2 px-1 text-[11px] font-medium text-gray-600">${escapeHtml(tf("replen.defaults", { lead: num(plan.config.defaultLeadTimeDays), margin: num(plan.config.warningMarginDays) }))}</p>
+    <p class="mb-2 flex flex-wrap gap-x-3 px-1 text-[11px] font-medium text-gray-600">
+      <span class="font-semibold">${fmtInt(skus.filter((s) => s.active).length)} ${t("settings.activeSkus")}</span>
+      <span>${escapeHtml(tf("replen.defaults", { lead: num(plan.config.defaultLeadTimeDays), margin: num(plan.config.warningMarginDays) }))}</span>
+    </p>
     <div id="sku-list-wrap"></div>
     ${
       notCarried > 0
@@ -421,18 +422,22 @@ function renderSkuList(body, skus, types, weights, activeTypes, activeWeights) {
         const name = g.type ? productName(g.type.name_en, g.type.name_lo) : "—";
         return `
       <div class="mb-2">
-        <button data-type-toggle="${escapeHtml(keyOf(g))}" aria-expanded="${open}" aria-controls="sku-grp-${escapeHtml(keyOf(g))}" ${filtering ? "disabled" : ""}
-          class="focus-ring flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-gray-600 ${filtering ? "" : "active:bg-gray-100"}">
-          <span class="${open ? "rotate-90" : ""} inline-flex">${CHEVRON}</span>
-          <span lang="lo" class="lao min-w-0 flex-1 truncate text-xs font-extrabold uppercase tracking-wide">${escapeHtml(name)}</span>
+        <div class="flex items-center gap-1.5 pr-2">
+          <button data-type-toggle="${escapeHtml(keyOf(g))}" aria-expanded="${open}" aria-controls="sku-grp-${escapeHtml(keyOf(g))}" ${filtering ? "disabled" : ""}
+            class="focus-ring flex min-w-0 flex-1 items-center gap-2 rounded-xl px-2 py-2 text-left text-gray-600 ${filtering ? "" : "active:bg-gray-100"}">
+            <span class="${open ? "rotate-90" : ""} inline-flex">${CHEVRON}</span>
+            <span lang="lo" class="lao min-w-0 flex-1 truncate text-xs font-extrabold uppercase tracking-wide">${escapeHtml(name)}</span>
+          </button>
+          ${
+            canEditBranch() && g.typeId
+              ? `<button data-type-plan="${escapeHtml(g.typeId)}" class="flex h-6 shrink-0 items-center rounded-full border border-brand-600 px-2 text-[10px] font-bold text-brand-700 active:bg-brand-50">${t("settings.typeSetAll")}</button>`
+              : ""
+          }
           <span class="shrink-0 rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-bold text-gray-600">${g.items.length}</span>
-        </button>
+        </div>
         ${
-          canEditBranch() && g.typeId
-            ? `<div class="-mt-1 mb-1.5 flex items-center justify-end gap-2 px-2 text-[11px] text-gray-600">
-                <span class="min-w-0 truncate">${escapeHtml(typePlanText(g.typeId))}</span>
-                <button data-type-plan="${escapeHtml(g.typeId)}" class="tap-target shrink-0 rounded-full border border-brand-600 px-3 text-[11px] font-bold text-brand-700 active:bg-brand-50">${t("settings.typeSetAll")}</button>
-              </div>`
+          canEditBranch() && g.typeId && typePlanText(g.typeId)
+            ? `<div class="-mt-1 mb-1.5 truncate px-8 text-[11px] text-gray-500">${escapeHtml(typePlanText(g.typeId))}</div>`
             : ""
         }
         <div id="sku-grp-${escapeHtml(keyOf(g))}" class="card divide-y divide-hairline p-0 ${open ? "" : "hidden"}">
