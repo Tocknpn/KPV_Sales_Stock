@@ -155,7 +155,9 @@ describe('branch_velocity', () => {
 });
 
 describe('replenishment_rule and config', () => {
+  // These pin migration 06 on a database from before migration 15 (no branch_sku).
   it('data copy creates sku rules once', async () => {
+    await db.exec(`drop table if exists branch_sku`);
     await db.exec(`update master_sku set avg_daily_sales = 1.5 where sku_id = 'S1';
                    update master_sku set order_lead_time_days = 10 where sku_id = 'S2'`);
     const mig = migration();
@@ -171,12 +173,20 @@ describe('replenishment_rule and config', () => {
   });
 
   it('a manually changed rule survives a re-run of the migration', async () => {
+    await db.exec(`drop table if exists branch_sku`);
     await db.exec(`update master_sku set avg_daily_sales = 1.5 where sku_id = 'S1'`);
     await db.exec(migration());
     await db.exec(`update replenishment_rule set avg_daily_sell = 4 where scope_key = 'S1'`);
     await db.exec(migration());
     const r = await db.query<{ v: string }>(`select avg_daily_sell::text v from replenishment_rule where scope_key = 'S1'`);
     expect(r.rows[0].v).toBe('4.000');
+  });
+
+  it('after migration 15 the copy is skipped', async () => {
+    await db.exec(`update master_sku set avg_daily_sales = 1.5 where sku_id = 'S1'`);
+    await db.exec(migration());
+    const r = await db.query(`select 1 from replenishment_rule where branch_id is null`);
+    expect(r.rows).toEqual([]);
   });
 
   it('config defaults and window check', async () => {

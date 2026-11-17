@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { freshDb } from './db';
 
@@ -38,5 +38,27 @@ describe('20261117_15_branch_sku', () => {
 
     await db.exec(migration());
     expect(await snapshot()).toEqual(first);
+  });
+
+  // README / GO-LIVE: on an existing project the whole sequence is re-run.
+  it('re-running every migration after 15 keeps each branch its own values', async () => {
+    const db = await freshDb({ withBase: true });
+    await db.exec(`
+      insert into master_sku (sku_id, name_en, name_lo, category, type_id, avg_daily_sales, order_lead_time_days) values
+        ('NK-1', 'Snake 1', 'ງູ 1', 'Gold Bars', 'GOLD_BARS', 1, 9);
+      insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell, lead_time_days) values
+        ('sku', 'NK-1', 'B-MM', 2, 3),
+        ('sku', 'NK-1', 'B-VT', 5, 6);
+      insert into branch_sku (branch_id, sku_id, carried) values ('B-MM', 'NK-1', true), ('B-VT', 'NK-1', false);
+    `);
+    const snapshot = async () => ({
+      rules: (await db.query(`select scope_key, branch_id, avg_daily_sell::float as avg, lead_time_days::float as lead
+                                from replenishment_rule where scope_key = 'NK-1' order by branch_id`)).rows,
+      carried: (await db.query(`select branch_id, carried from branch_sku where sku_id = 'NK-1' order by branch_id`)).rows,
+    });
+    const before = await snapshot();
+    const dir = join(process.cwd(), 'supabase', 'migrations');
+    for (const f of readdirSync(dir).filter((x) => x.endsWith('.sql')).sort()) await db.exec(readFileSync(join(dir, f), 'utf8'));
+    expect(JSON.stringify(await snapshot())).toBe(JSON.stringify(before));
   });
 });

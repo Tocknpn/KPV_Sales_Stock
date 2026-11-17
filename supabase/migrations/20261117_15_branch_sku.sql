@@ -5,7 +5,7 @@
 --     existing branch rule keeps its own values and only takes the company
 --     value for a field it had blank.
 --   * branch_sku: whether a branch carries a SKU. A missing row = not carried.
---     Every existing (branch, SKU) pair starts carried.
+--     Every existing (branch, SKU) pair starts carried (first run only).
 -- The role guards for both tables live in users_roles.sql.
 
 -- 1. The carries switch.
@@ -28,9 +28,12 @@ create trigger trg_branch_sku_touch before update on branch_sku
 revoke all on branch_sku from anon, authenticated;
 alter table branch_sku enable row level security;
 
+-- One-time seed: only while the table is still empty, so a re-run never
+-- switches back on a SKU that a branch turned off or never carried.
 insert into branch_sku (branch_id, sku_id, carried)
 select b.branch_id, m.sku_id, true
   from branches b cross join master_sku m
+ where not exists (select 1 from branch_sku)
 on conflict (branch_id, sku_id) do nothing;
 
 -- 2. Company rules -> branch rules.

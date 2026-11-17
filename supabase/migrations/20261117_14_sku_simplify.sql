@@ -10,42 +10,49 @@
 --   * Stock-out mode is fixed to 'dynamic' (the setting is hidden).
 -- No column is dropped: purity, unit_price_lak, reorder_level, group_name stay unused.
 
--- 1. Group rules -> SKU rules, at the same branch level.
-update replenishment_rule r
-   set avg_daily_sell = coalesce(r.avg_daily_sell, g.avg_daily_sell),
-       lead_time_days = coalesce(r.lead_time_days, g.lead_time_days)
-  from replenishment_rule g
-  join master_sku m on m.group_name = g.scope_key
- where g.scope = 'group'
-   and r.scope = 'sku'
-   and r.scope_key = m.sku_id
-   and coalesce(r.branch_id, '*') = coalesce(g.branch_id, '*')
-   and ((r.avg_daily_sell is null and g.avg_daily_sell is not null)
-     or (r.lead_time_days is null and g.lead_time_days is not null));
+-- Steps 1 and 2 are skipped once migration 15 has run (branch_sku exists):
+-- rules are per branch from then on, and step 2 would delete them.
+do $$
+begin
+if to_regclass('public.branch_sku') is null then
+  -- 1. Group rules -> SKU rules, at the same branch level.
+  update replenishment_rule r
+     set avg_daily_sell = coalesce(r.avg_daily_sell, g.avg_daily_sell),
+         lead_time_days = coalesce(r.lead_time_days, g.lead_time_days)
+    from replenishment_rule g
+    join master_sku m on m.group_name = g.scope_key
+   where g.scope = 'group'
+     and r.scope = 'sku'
+     and r.scope_key = m.sku_id
+     and coalesce(r.branch_id, '*') = coalesce(g.branch_id, '*')
+     and ((r.avg_daily_sell is null and g.avg_daily_sell is not null)
+       or (r.lead_time_days is null and g.lead_time_days is not null));
 
-insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell, lead_time_days, is_seed)
-select 'sku', m.sku_id, g.branch_id, g.avg_daily_sell, g.lead_time_days, g.is_seed
-  from replenishment_rule g
-  join master_sku m on m.group_name = g.scope_key
- where g.scope = 'group'
-   and not exists (
-     select 1 from replenishment_rule r
-      where r.scope = 'sku' and r.scope_key = m.sku_id
-        and coalesce(r.branch_id, '*') = coalesce(g.branch_id, '*'));
+  insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell, lead_time_days, is_seed)
+  select 'sku', m.sku_id, g.branch_id, g.avg_daily_sell, g.lead_time_days, g.is_seed
+    from replenishment_rule g
+    join master_sku m on m.group_name = g.scope_key
+   where g.scope = 'group'
+     and not exists (
+       select 1 from replenishment_rule r
+        where r.scope = 'sku' and r.scope_key = m.sku_id
+          and coalesce(r.branch_id, '*') = coalesce(g.branch_id, '*'));
 
-delete from replenishment_rule where scope = 'group';
+  delete from replenishment_rule where scope = 'group';
 
--- 2. Branch rules -> company-wide (first branch by id when several differ).
-insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell, lead_time_days, is_seed)
-select distinct on (b.scope, b.scope_key) b.scope, b.scope_key, null, b.avg_daily_sell, b.lead_time_days, b.is_seed
-  from replenishment_rule b
- where b.branch_id is not null
-   and not exists (
-     select 1 from replenishment_rule r
-      where r.scope = b.scope and r.scope_key = b.scope_key and r.branch_id is null)
- order by b.scope, b.scope_key, b.branch_id;
+  -- 2. Branch rules -> company-wide (first branch by id when several differ).
+  insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell, lead_time_days, is_seed)
+  select distinct on (b.scope, b.scope_key) b.scope, b.scope_key, null, b.avg_daily_sell, b.lead_time_days, b.is_seed
+    from replenishment_rule b
+   where b.branch_id is not null
+     and not exists (
+       select 1 from replenishment_rule r
+        where r.scope = b.scope and r.scope_key = b.scope_key and r.branch_id is null)
+   order by b.scope, b.scope_key, b.branch_id;
 
-delete from replenishment_rule where branch_id is not null;
+  delete from replenishment_rule where branch_id is not null;
+end if;
+end $$;
 
 -- 3. Baht weight from the size.
 update master_sku

@@ -51,15 +51,22 @@ alter table system_config
 -- ---------------------------------------------------------------------------
 -- One-time copy of the old per-SKU values into company-wide SKU rules. A SKU
 -- that already has a company-wide sku rule is left alone, so re-running the
--- migration never overwrites edits.
+-- migration never overwrites edits. Skipped once migration 15 has run
+-- (branch_sku exists): rules are per branch from then on, and a company rule
+-- made here would be pushed over every branch's own values by 14 and 15.
 -- ---------------------------------------------------------------------------
-insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell, lead_time_days, is_seed)
-select 'sku', m.sku_id, null, m.avg_daily_sales, m.order_lead_time_days, m.is_seed
-  from master_sku m
- where (m.avg_daily_sales is not null or m.order_lead_time_days is not null)
-   and not exists (
-     select 1 from replenishment_rule r
-      where r.scope = 'sku' and r.scope_key = m.sku_id and r.branch_id is null);
+do $$
+begin
+  if to_regclass('public.branch_sku') is null then
+    insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell, lead_time_days, is_seed)
+    select 'sku', m.sku_id, null, m.avg_daily_sales, m.order_lead_time_days, m.is_seed
+      from master_sku m
+     where (m.avg_daily_sales is not null or m.order_lead_time_days is not null)
+       and not exists (
+         select 1 from replenishment_rule r
+          where r.scope = 'sku' and r.scope_key = m.sku_id and r.branch_id is null);
+  end if;
+end $$;
 
 -- ---------------------------------------------------------------------------
 -- branch_velocity: units sold per in-stock day, per SKU, for one branch.
