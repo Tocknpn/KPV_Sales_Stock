@@ -46,10 +46,14 @@ export interface ImportPlan {
   updatedRows: { sku_id: string; branch_id: string }[];
 }
 
-// A cell as text: trimmed, non-breaking spaces as spaces, inner runs of spaces as one.
+// Lao text in one form: NFC, and AM (U+0EB3) typed as NIGGAHITA + AA
+// (U+0ECD U+0EB2) folded into AM, so the two spellings compare equal.
+export const laoForm = (s: string) => s.normalize("NFC").replace(/\u0ECD\u0EB2/g, "\u0EB3");
+
+// A cell as text: Lao form, trimmed, non-breaking spaces as spaces, inner runs of spaces as one.
 export function cellText(v: unknown): string {
   if (v === null || v === undefined) return "";
-  return String(v).replace(/ /g, " ").replace(/\s+/g, " ").trim();
+  return laoForm(String(v)).replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
 }
 
 // A number cell: "" = null; NaN when it is not a number.
@@ -76,9 +80,10 @@ function planCell(v: unknown, field: string, max: number, decimals: number): Pla
 const valueOf = (c: PlanCell, current: number | null) => (c.kind === "keep" ? current : c.kind === "clear" ? null : c.value);
 export const typeLabel = (t: SkuType) => t.name_lo || t.name_en;
 
+// Type and size lookups include inactive ones; planImport decides what an inactive one means.
 export function findType(types: SkuType[], text: string): SkuType | undefined {
-  const k = text.toLowerCase();
-  return types.find((t) => t.type_id.toLowerCase() === k || t.name_en.toLowerCase() === k || (t.name_lo ?? "").toLowerCase() === k);
+  const k = laoForm(text).toLowerCase();
+  return types.find((t) => t.type_id.toLowerCase() === k || laoForm(t.name_en).toLowerCase() === k || laoForm(t.name_lo ?? "").toLowerCase() === k);
 }
 
 export function findWeight(weights: SkuWeight[], grams: number): SkuWeight | undefined {
@@ -135,9 +140,11 @@ export function planImport(input: {
   const carried = new Set(input.branchSkus.filter((b) => b.carried).map((b) => `${b.branch_id}|${b.sku_id}`));
   const ruleOf = new Map(input.rules.filter((r) => r.scope === "sku" && r.branch_id).map((r) => [`${r.branch_id}|${r.scope_key}`, r]));
   const seen = new Map<string, number>(); // branch|sku -> first line
-  const patchLine = new Map<string, number>(); // sku -> line of its first catalogue change
+  // Admin only: each existing SKU's name / type / size as its first line sets it.
+  const firstLook = new Map<string, { line: number; look: string }>();
+  const currentName = (s: MasterSku) => laoForm(s.name_lo || s.name_en);
   // A new SKU is name + type + size (name compared without case).
-  const identity = (name: string, typeId: string | null, weightId: string | null) => `${name.toLowerCase()}|${typeId ?? ""}|${weightId ?? ""}`;
+  const identity = (name: string, typeId: string | null, weightId: string | null) => `${laoForm(name).toLowerCase()}|${typeId ?? ""}|${weightId ?? ""}`;
   const existingByIdentity = new Map(input.skus.map((s) => [identity(s.name_lo || s.name_en, s.type_id, s.weight_id), s]));
   const newByIdentity = new Map<string, ImportPlan["newSkus"][number]>();
 
@@ -184,6 +191,8 @@ export function planImport(input: {
       if (!name) return fail("name is required");
       if (!type) return fail("type is required");
       if (!weight) return fail("grams is required");
+      if (!type.active) return fail(`type ${typeText} is not in use`);
+      if (!weight.active) return fail(`size ${gramsCell} g is not in use`);
       const id = identity(name, type.type_id, weight.weight_id);
       const existing = existingByIdentity.get(id);
       if (existing) return fail(`this SKU already exists as ${existing.sku_id} — put ${existing.sku_id} in sku_id`);
@@ -202,6 +211,7 @@ export function planImport(input: {
 
     const sku = skuById.get(code) ?? skuByLower.get(code.toLowerCase());
     if (!sku) return fail(`unknown sku_id ${code}`);
+    if (!sku.active) return fail(`sku_id ${sku.sku_id} is not in use`);
     const key = `${branch}|${sku.sku_id}`;
     const first = seen.get(key);
     if (first !== undefined) return fail(`sku_id ${sku.sku_id} is also on line ${first}`);
@@ -209,21 +219,22 @@ export function planImport(input: {
 
     // Catalogue changes (blank = unchanged).
     const changes: { name?: string; type?: SkuType; weight?: SkuWeight } = {};
-    if (name && name !== (sku.name_lo || sku.name_en)) changes.name = name;
+    if (name && name !== currentName(sku)) changes.name = name;
     if (type && type.type_id !== sku.type_id) changes.type = type;
     if (weight && weight.weight_id !== sku.weight_id) changes.weight = weight;
     const changed = Object.keys(changes) as ("name" | "type" | "weight")[];
     if (changed.length > 0 && !input.isAdmin) {
       for (const f of changed) plan.ignored.push({ line, field: f === "weight" ? "grams" : f });
-    } else if (changed.length > 0) {
-      const prior = plan.skuPatches.get(sku.sku_id);
-      if (prior) {
-        const clash = (prior.name ?? null) !== (changes.name ?? null) || prior.type?.type_id !== changes.type?.type_id || prior.weight?.weight_id !== changes.weight?.weight_id;
-        if (clash) return fail(`sku_id ${sku.sku_id} has a different name, type or size on line ${patchLine.get(sku.sku_id)}`);
-      } else {
-        plan.skuPatches.set(sku.sku_id, changes);
-        patchLine.set(sku.sku_id, line);
-      }
+    } else if (input.isAdmin) {
+      // Moving a SKU onto a type or size no longer in use is refused.
+      if (changes.type && !changes.type.active) return fail(`type ${typeText} is not in use`);
+      if (changes.weight && !changes.weight.active) return fail(`size ${gramsCell} g is not in use`);
+      // Every line of a SKU must describe it the same way (blank = as it is now).
+      const look = [changes.name ?? currentName(sku), changes.type?.type_id ?? sku.type_id, changes.weight?.weight_id ?? sku.weight_id].join("|");
+      const first = firstLook.get(sku.sku_id);
+      if (first && first.look !== look) return fail(`sku_id ${sku.sku_id} has a different name, type or size on line ${first.line}`);
+      if (!first) firstLook.set(sku.sku_id, { line, look });
+      if (changed.length > 0) plan.skuPatches.set(sku.sku_id, changes);
     }
 
     const rule = ruleOf.get(key);

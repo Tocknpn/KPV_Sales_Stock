@@ -156,6 +156,42 @@ describe("SKU import", () => {
     expect(res.json.errors).toEqual([{ line: 2, error: "this SKU already exists as GB-001 — put GB-001 in sku_id" }]);
   });
 
+  it("a SKU kept on one line and renamed on a later line is an error", async () => {
+    const res = await imp(await asAdmin(), [
+      { sku_id: "GB-001", name: "ທອງຄຳແທ່ງ 1 ບາດ", branch_id: "B-MM" },
+      { sku_id: "GB-001", name: "ຊື່ໃໝ່", branch_id: "B-VT" },
+    ], { branchId: "all" });
+    expect(res.json.errors).toEqual([{ line: 3, error: "sku_id GB-001 has a different name, type or size on line 2" }]);
+  });
+
+  it("Lao AM typed as two marks still matches", async () => {
+    // ຳ (U+0EB3) typed as ໍ + າ (U+0ECD U+0EB2)
+    const split = (s: string) => s.replace(/\u0EB3/g, "\u0ECD\u0EB2");
+    const admin = await asAdmin();
+    const res = await imp(admin, [{ ...NEW_ROW, name: "ແຫວນທອງຄຳ", type: split("ທອງຄຳແທ່ງ"), grams: 15.244 }], { dryRun: true });
+    expect(res.json).toMatchObject({ created: 1, errors: [] });
+    const staff = await asStaff("B-MM");
+    const same = await imp(staff, [{ sku_id: "GB-001", name: split("ທອງຄຳແທ່ງ 1 ບາດ"), type: split("ທອງຄຳແທ່ງ"), grams: 15.244 }], { branchId: undefined, dryRun: true });
+    expect(same.json).toMatchObject({ unchanged: 1, ignored: [] });
+  });
+
+  it("inactive types, sizes and SKUs are errors", async () => {
+    const admin = await asAdmin();
+    await call(admin, "PATCH", "/sku-types/BRACELETS", { active: false });
+    await call(admin, "PATCH", "/sku-weights/KG_1", { active: false });
+    await call(admin, "PATCH", "/skus/SP-904", { active: false });
+    const res = await imp(admin, [
+      { ...NEW_ROW, type: "ສາຍແຂນ" },
+      { ...NEW_ROW, name: "ໃໝ່ 2", grams: 1000 },
+      { sku_id: "SP-904" },
+    ]);
+    expect(res.json.errors).toEqual([
+      { line: 2, error: "type ສາຍແຂນ is not in use" },
+      { line: 3, error: "size 1000 g is not in use" },
+      { line: 4, error: "sku_id SP-904 is not in use" },
+    ]);
+  });
+
   it("staff import is forced to own branch", async () => {
     const staff = await asStaff("B-MM");
     const res = await imp(staff, [NEW_ROW], { branchId: "B-VT" });
