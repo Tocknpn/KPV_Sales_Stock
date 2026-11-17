@@ -35,6 +35,7 @@ export const MASK_RULES = [
   { sel: "[data-card]", unless: "TEST", style: "filter: blur(6px)" },
   { sel: "[data-pw-text]", style: "filter: blur(6px)" },
   { sel: "#mode-banner", style: "display: none !important" },
+  { sel: "#toast > div", only: "ໂໝດທົດລອງ", style: "display: none !important" },
 ];
 
 export async function openPhone(role = "anon") {
@@ -69,6 +70,7 @@ export async function mask(page, rules = MASK_RULES) {
     for (const r of rules) {
       for (const el of document.querySelectorAll(r.sel)) {
         if (r.unless && (el.textContent || "").includes(r.unless)) continue;
+        if (r.only && !(el.textContent || "").includes(r.only)) continue;
         el.setAttribute("style", `${el.getAttribute("style") || ""};${r.style}`);
         n++;
       }
@@ -79,7 +81,26 @@ export async function mask(page, rules = MASK_RULES) {
 
 export async function shot(page, name, opts = {}) {
   await settle(page);
-  const masked = opts.mask === false ? 0 : await mask(page, opts.rules);
+  if (opts.left) await page.evaluate(() => document.querySelectorAll("*").forEach((el) => { if (el.scrollLeft > 0) el.scrollLeft = 0; }));
+  if (opts.right) await page.evaluate(() => document.querySelectorAll("*").forEach((el) => { if (el.scrollWidth > el.clientWidth + 4 && getComputedStyle(el).overflowX !== "visible") el.scrollLeft = el.scrollWidth; }));
+  if (opts.gridDay) {
+    await page.evaluate((day) => {
+      const cell = [...document.querySelectorAll("div,span,th,td")].find((e) => e.childElementCount === 0 && e.textContent.trim() === day);
+      cell?.scrollIntoView({ inline: "center", block: "nearest" });
+    }, opts.gridDay);
+    await page.evaluate(() => window.scrollTo(0, 0));
+  }
+  if (opts.scrollTo) {
+    await page.evaluate((text) => {
+      const el = [...document.querySelectorAll("h1,h2,h3,p,div,span,button")].find((e) => e.childElementCount === 0 && e.textContent.trim() === text);
+      el?.scrollIntoView({ block: "start" });
+    }, opts.scrollTo);
+    await page.waitForTimeout(300);
+  }
+  // The demo toast and the data-mode strip are always hidden; blurring is optional.
+  const hideOnly = MASK_RULES.filter((r) => r.style.includes("display"));
+  await mask(page, hideOnly);
+  const masked = opts.mask === false ? 0 : await mask(page, opts.rules ?? MASK_RULES.filter((r) => !hideOnly.includes(r)));
   mkdirSync(SHOTS_DIR, { recursive: true });
   const path = join(SHOTS_DIR, `${name}.jpg`);
   await page.screenshot({ path, type: "jpeg", quality: 78, fullPage: Boolean(opts.fullPage) });
@@ -88,7 +109,10 @@ export async function shot(page, name, opts = {}) {
 }
 
 export async function api(page, path) {
-  const res = await page.request.get(`${BASE_URL}/api${path}`);
+  // The app keeps its session token in localStorage and sends it as a Bearer header.
+  if (!page.url().startsWith(BASE_URL)) await page.goto(`${BASE_URL}/`);
+  const token = await page.evaluate(() => localStorage.getItem("kpv_session_token"));
+  const res = await page.request.get(`${BASE_URL}/api${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
   if (!res.ok()) throw new Error(`GET ${path} → ${res.status()} ${await res.text()}`);
   return res.json();
 }
