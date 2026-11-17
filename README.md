@@ -1,4 +1,4 @@
-# KPV Goldsmith & Retail Inventory
+# KPV Stock Tracking
 
 Mobile-first stock app for KPV's gold desks: daily desk counts, instant moves
 between cases, linked transfers between branches, documents and purchase
@@ -123,11 +123,11 @@ Three roles. Staff and managers see only their own branch; admin sees all.
 |---|---|---|---|
 | Day entries, counts, close, moves, receive transfers (own branch) | yes | yes | yes, all branches |
 | Reopen a Done day | no | own branch, latest, within 3 days | latest |
-| Replenishment rules | read | own branch rules | all |
+| Avg/day + lead time (per branch), "branch sells it" switch, add a SKU, xlsx import/export | own branch | own branch | any branch, or every branch at once |
 | Closed days | read | own branch | all |
 | Unlock a locked account | no | own branch staff | yes |
 | Users (create, role, branch, username, password reset) | no | no | yes |
-| SKUs, types, sizes, exchange rate, config | no (gold price strip is readable) | no (gold price strip is readable) | yes |
+| Rename an SKU, change its type or size, deactivate it; types, sizes, exchange rate, config | no (gold price strip is readable) | no (gold price strip is readable) | yes |
 | Approve / reject proposals, delete documents | no | no | yes |
 | Audit history | own case, today | own branch | all |
 
@@ -154,8 +154,10 @@ through triggers keyed on the acting staff member (the Worker sends
   **Transfers** to another branch are *in transit* until the receiving case
   confirms; the gold stays in the company total meanwhile.
 - **Quantities** are whole pieces, 0 to 99 999. Stock can never go negative.
-- **Replenishment.** Avg/day and lead time come from rules (SKU, group or type,
-  company-wide or per branch) or are measured from the ledger. The runway tells
+- **Replenishment.** Avg/day and lead time come from each branch's own rules
+  (SKU, then type; migration 15 retired company-wide rules) or are measured from
+  the ledger. The SKU list is shared by the company; `branch_sku` says which
+  SKUs each branch sells. The runway tells
   how many days of stock are left; alerts fire inside the lead time plus margin.
 - **Value** = Baht weight x gold price; items without gold weight use their unit
   price. The gold price comes from `gold_prices` (the daily fetcher) and is shown

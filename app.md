@@ -1,4 +1,6 @@
 # Project Name: KPV Goldsmith & Retail Inventory Mobile Web App
+
+> Original brief, kept as written. The app is now called **KPV Stock Tracking** (2026-11-17); roles and SKU rules have moved on since — see README.md and the Lao manual.
 **Architecture**: Cloudflare as FrontEnd and Supabase as the Database, both Free Plan
 **Target Platform**: Mobile Web / PWA (responsive portrait ~390px, senior-friendly, touch-first)
 **Design System**: Warm golds & deep amber accents (`#b45309`), clean elevated cards, readable typography (`Plus Jakarta Sans`), minimal text, high visual indicators (progress bars, status chips, donut charts).

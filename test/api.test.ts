@@ -625,6 +625,55 @@ describe("SKU master data", () => {
   });
 });
 
+// Staff and managers see only their own branch in every report (2026-11-17).
+describe("branch scope", () => {
+  const branchesIn = (rows: any[]) => new Set(rows.map((r: any) => r.branch_id));
+
+  it("staff dashboard only has own branch", async () => {
+    const staff = await asStaff("B-MM");
+    const dash = (await call(staff, "GET", "/dashboard?branchId=B-TS")).json;
+    expect(dash.branchCards.map((b: any) => b.branch_id)).toEqual(["B-MM"]);
+    for (const item of dash.watchlist.topLow) expect(item.branch_id).toBe("B-MM");
+  });
+
+  it("manager report only has own branch", async () => {
+    const manager = await asManager("B-MM");
+    const res = await call(manager, "GET", "/report?branchId=B-TS");
+    expect(res.status).toBe(200);
+    const text = JSON.stringify(res.json);
+    for (const other of ["TS-D01", "IT-D01", "VT-D01"]) expect(text).not.toContain(other);
+    expect(text).toContain("MM-D01");
+  });
+
+  it("staff audit only has own branch", async () => {
+    const staff = await asStaff("B-MM");
+    expect((await call(staff, "GET", "/audit?deskId=TS-D01")).status).toBe(403);
+    expect((await call(staff, "GET", "/audit?branchId=B-TS")).status).toBe(403);
+    const mine = await call(staff, "GET", "/audit?deskId=MM-D01");
+    expect(mine.status).toBe(200);
+    const manager = await asManager("B-MM");
+    expect((await call(manager, "GET", "/audit?branchId=B-TS")).status).toBe(403);
+  });
+
+  it("admin dashboard reorder count = sum of per-branch counts", async () => {
+    const admin = await asAdmin();
+    // GB-001: critical at Morning Market only (huge avg there), calm everywhere else.
+    await call(admin, "PUT", "/replenishment/rules", { scope: "sku", key: "GB-001", branchId: "B-MM", avgDailySell: 5000, leadTimeDays: 7 });
+    await call(admin, "PUT", "/replenishment/rules", { scope: "sku", key: "GB-001", branchId: "B-VT", avgDailySell: 0.001, leadTimeDays: 7 });
+    const mm = (await call(admin, "GET", "/replenishment?branchId=B-MM")).json.rows.find((r: any) => r.sku_id === "GB-001");
+    const vt = (await call(admin, "GET", "/replenishment?branchId=B-VT")).json.rows.find((r: any) => r.sku_id === "GB-001");
+    expect(mm.status).toBe("critical");
+    expect(vt.status).toBe("ok");
+    const all = (await call(admin, "GET", "/dashboard")).json;
+    const perBranch = await Promise.all(["B-MM", "B-TS", "B-IT", "B-VT"].map(async (b) => (await call(admin, "GET", `/dashboard?branchId=${b}`)).json.watchlist.lowCount));
+    expect(all.watchlist.lowCount).toBe(perBranch.reduce((a, n) => a + n, 0));
+    const gb = all.watchlist.topLow.filter((i: any) => i.sku_id === "GB-001");
+    // Each branch follows its own rule: listed at Morning Market, not at Vangthong.
+    expect(branchesIn(gb).has("B-MM")).toBe(true);
+    expect(branchesIn(gb).has("B-VT")).toBe(false);
+  });
+});
+
 describe("SKU per branch", () => {
   const skuOf = async (s: any, id: string, branch?: string) =>
     (await call(s, "GET", `/skus${branch ? `?branchId=${branch}` : ""}`)).json.skus.find((x: any) => x.sku_id === id);

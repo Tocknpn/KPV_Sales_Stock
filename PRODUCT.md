@@ -45,7 +45,9 @@ heavyweight ERP.
 ## Operating Context
 
 - 4 branches, each with its own 4 desks (Desk 01–04); roles are Admin,
-  Cashier, Auditor.
+  Branch Manager and Staff (decided 2026-11-17). Staff and managers see and run
+  only their own branch, including its SKU numbers; managers also unlock staff
+  and reopen recent days; admin sees all and owns users and the SKU list.
 - Daily ritual: morning check-in (verify opening stock, receive stock-in),
   evening settlement (record sales/wholesale/transfers, compute closing,
   submit for audit verification).
@@ -78,7 +80,7 @@ heavyweight ERP.
 
 ## Brand Commitments
 
-- Name: **KPV Goldsmith & Retail Inventory**.
+- Name: **KPV Stock Tracking** (renamed 2026-11-17 from KPV Goldsmith & Retail Inventory).
 - Palette (confirmed 2026-11-02, superseding the earlier amber brand):
   primary/brand deep maroon `#990000` (full `brand` 50–900 ramp in
   `tailwind.config.js`, HSL(0°,100%,L) anchored at 600); success `#10b981`;
