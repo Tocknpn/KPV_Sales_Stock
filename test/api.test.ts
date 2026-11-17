@@ -720,6 +720,15 @@ describe("SKU per branch", () => {
     expect((await call(staff, "PATCH", "/skus/GB-001", { avg_daily_sell: 9, branchId: "B-VT" })).json.code).toBe("BRANCH_DENIED");
   });
 
+  it("a SKU edit with nothing to change is refused and not audited", async () => {
+    const staff = await asStaff("B-MM");
+    const before = (await getStore({} as any).auditLog({ limit: 500 })).length;
+    const res = await call(staff, "PATCH", "/skus/GB-001", { branchId: "B-MM" });
+    expect(res.status).toBe(400);
+    expect(res.json.code).toBe("NOTHING_TO_CHANGE");
+    expect((await getStore({} as any).auditLog({ limit: 500 })).length).toBe(before);
+  });
+
   it("carried off refused while stock held", async () => {
     const staff = await asStaff("B-MM");
     const res = await call(staff, "PUT", "/skus/GB-001/carried", { carried: false });

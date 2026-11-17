@@ -316,6 +316,7 @@ r.patch("/skus/:id", async (c) => {
       patch.baht_weight = bahtOfGrams(weight.gram_value);
     }
   }
+  if (Object.keys(patch).length === 0 && !plan) throw new HttpError(400, "Nothing to change", "NOTHING_TO_CHANGE");
   const id = c.req.param("id") ?? "";
   const sku = Object.keys(patch).length > 0 ? await store.updateSku(id, patch) : (await store.skus()).find((s) => s.sku_id === id) ?? null;
   if (!sku) throw new HttpError(404, "SKU not found", "NOT_FOUND");
