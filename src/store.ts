@@ -1175,8 +1175,11 @@ class SupabaseStore implements Store {
 
   private async rest<T>(path: string, init?: RequestInit): Promise<T> {
     const res = await this.send(path, init);
-    if (res.status === 204) return [] as unknown as T;
-    return (await res.json()) as T;
+    // 204, or a 201 with no body (Prefer: return=minimal): the write worked,
+    // there is just nothing to read back.
+    const text = await res.text();
+    if (text.trim() === "") return [] as unknown as T;
+    return JSON.parse(text) as T;
   }
 
   // Reads every row, paging past PostgREST's 1000-row cap. `path` must carry

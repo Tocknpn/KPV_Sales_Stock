@@ -33,6 +33,14 @@ describe("missing-migration errors", () => {
     expect(err).not.toBeInstanceOf(StoreError);
   });
 
+  it("an empty 201 answer (Prefer: return=minimal) is a success, not a crash", async () => {
+    globalThis.fetch = (async () => new Response(null, { status: 201 })) as any;
+    const store = getStore({ SUPABASE_URL: "https://x.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "k" } as any, { id: "u1" });
+    await expect(
+      store.audit({ actor_id: "u1", actor_name: "A", action: "desk.create", target: "MM-D01", detail: null, branch_id: "B-MM", desk_id: "MM-D01" } as any)
+    ).resolves.toBeUndefined();
+  });
+
   it("SCHEMA answers 503 SCHEMA_OUTDATED", () => {
     expect(storeErrorResponse(new StoreError("SCHEMA" as any, "x"))).toEqual({
       status: 503,
