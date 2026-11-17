@@ -5,6 +5,8 @@ import { t, productName } from "../../i18n.js";
 import { state } from "../../state.js";
 import { isAdmin } from "../../session.js";
 import { parseCsv, csvRowsToSkus, CSV_TEMPLATE } from "../../csv.js";
+import { groupSkusByType } from "../../sku-groups.js";
+import { skeletonList } from "../../skeleton.js";
 
 // Staff can look at the master data; only an admin can change it.
 const canEdit = () => isAdmin(state.user);
@@ -16,6 +18,9 @@ let skuGroupFilter = "all"; // "all" | type_id
 let skuSizeFilter = "all"; // "all" | weight_id
 let skuSearchQuery = "";
 let knownGroups = []; // existing product groups, suggested in the SKU form
+// Type groups the user opened in the SKU list (key = type_id, "none" = no type).
+// Starts empty: every group collapsed. Kept while the app is open.
+const openTypes = new Set();
 
 export async function renderSku(root) {
   skuGroupFilter = "all";
@@ -52,7 +57,7 @@ function paintTabs(root) {
 
 async function renderTab(root) {
   const body = root.querySelector("#sku-tab-body");
-  body.innerHTML = `<div class="py-10 text-center text-sm text-gray-600">Loading…</div>`;
+  body.innerHTML = skeletonList(8);
   if (activeTab === "type") return renderTypeTab(body);
   if (activeTab === "weight") return renderWeightTab(body);
   return renderSkuTab(body);
@@ -221,7 +226,7 @@ async function renderSkuTab(body) {
       <div class="shrink-0 whitespace-nowrap text-[11px] font-semibold text-gray-600">${fmtInt(skus.filter((s) => s.active).length)} ${t("settings.activeSkus")}</div>
       <select id="sku-group-filter" class="chip min-h-0 min-w-0 flex-1 truncate border-hairline bg-white text-[11px] text-gray-600">
         <option value="all">${t("settings.filterGroupShort")}</option>
-        ${types.map((ty) => `<option value="${ty.type_id}" ${skuGroupFilter === ty.type_id ? "selected" : ""}>${escapeHtml(ty.name_en)}</option>`).join("")}
+        ${types.map((ty) => `<option value="${ty.type_id}" ${skuGroupFilter === ty.type_id ? "selected" : ""}>${escapeHtml(productName(ty.name_en, ty.name_lo))}</option>`).join("")}
       </select>
       <select id="sku-size-filter" class="chip min-h-0 min-w-0 flex-1 truncate border-hairline bg-white text-[11px] text-gray-600">
         <option value="all">${t("settings.filterSizeShort")}</option>
@@ -291,39 +296,58 @@ function visibleSkus(skus) {
   );
 }
 
-function renderSkuList(body, skus, types, weights, activeTypes, activeWeights) {
-  const visible = visibleSkus(skus);
-  const typeOrder = new Map(types.map((ty, i) => [ty.type_id, ty.sort_order ?? i]));
-  const weightOrder = new Map(weights.map((w, i) => [w.weight_id, w.sort_order ?? i]));
+const CHEVRON = `<svg class="h-4 w-4 shrink-0 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 6l6 6-6 6"/></svg>`;
 
-  const groups = new Map();
-  for (const s of visible) {
-    const key = s.type_id || "—";
-    if (!groups.has(key)) groups.set(key, { name: s.type_name || "—", items: [] });
-    groups.get(key).items.push(s);
-  }
-  const sortedGroups = [...groups.entries()].sort(
-    (a, b) => (typeOrder.get(a[0]) ?? 999) - (typeOrder.get(b[0]) ?? 999)
-  );
-  for (const [, group] of sortedGroups) {
-    group.items.sort((a, b) => (weightOrder.get(a.weight_id) ?? 999) - (weightOrder.get(b.weight_id) ?? 999));
-  }
+function renderSkuList(body, skus, types, weights, activeTypes, activeWeights) {
+  const groups = groupSkusByType(visibleSkus(skus), types, weights);
+  // While searching or filtering, every matching group is shown open.
+  const filtering = skuSearchQuery.trim() !== "" || skuGroupFilter !== "all" || skuSizeFilter !== "all";
+  const keyOf = (g) => g.typeId ?? "none";
+  const isOpen = (g) => filtering || openTypes.has(keyOf(g));
+  const allOpen = groups.length > 0 && groups.every(isOpen);
 
   const wrap = body.querySelector("#sku-list-wrap");
-  wrap.innerHTML = sortedGroups.length
-    ? sortedGroups
-        .map(
-          ([, group]) => `
-      <div class="mb-3">
-        <div class="mb-1.5 px-1 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">${escapeHtml(group.name)} · ${group.items.length}</div>
-        <div class="card divide-y divide-hairline p-0">
-          ${group.items.map((s) => skuRow(s)).join("")}
+  wrap.innerHTML = groups.length
+    ? `
+    ${
+      filtering
+        ? ""
+        : `<div class="mb-1.5 flex justify-end"><button id="sku-toggle-all" class="tap-target px-1 text-[11px] font-bold text-brand-700">${allOpen ? t("settings.collapseAll") : t("settings.expandAll")}</button></div>`
+    }
+    ${groups
+      .map((g) => {
+        const open = isOpen(g);
+        const name = g.type ? productName(g.type.name_en, g.type.name_lo) : "—";
+        return `
+      <div class="mb-2">
+        <button data-type-toggle="${escapeHtml(keyOf(g))}" aria-expanded="${open}" aria-controls="sku-grp-${escapeHtml(keyOf(g))}" ${filtering ? "disabled" : ""}
+          class="focus-ring flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-gray-600 ${filtering ? "" : "active:bg-gray-100"}">
+          <span class="${open ? "rotate-90" : ""} inline-flex">${CHEVRON}</span>
+          <span lang="lo" class="lao min-w-0 flex-1 truncate text-xs font-extrabold uppercase tracking-wide">${escapeHtml(name)}</span>
+          <span class="shrink-0 rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-bold text-gray-600">${g.items.length}</span>
+        </button>
+        <div id="sku-grp-${escapeHtml(keyOf(g))}" class="card divide-y divide-hairline p-0 ${open ? "" : "hidden"}">
+          ${open ? g.items.map((s) => skuRow(s)).join("") : ""}
         </div>
-      </div>`
-        )
-        .join("")
+      </div>`;
+      })
+      .join("")}`
     : `<div class="card p-0"><div class="py-6 text-center text-xs text-gray-500">—</div></div>`;
 
+  const rerender = () => renderSkuList(body, skus, types, weights, activeTypes, activeWeights);
+  wrap.querySelector("#sku-toggle-all")?.addEventListener("click", () => {
+    if (allOpen) openTypes.clear();
+    else groups.forEach((g) => openTypes.add(keyOf(g)));
+    rerender();
+  });
+  wrap.querySelectorAll("[data-type-toggle]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.typeToggle;
+      if (openTypes.has(key)) openTypes.delete(key);
+      else openTypes.add(key);
+      rerender();
+    })
+  );
   wrap.querySelectorAll("[data-edit-sku]").forEach((btn) =>
     btn.addEventListener("click", () => canEdit() && openSkuForm(skus.find((s) => s.sku_id === btn.dataset.editSku), activeTypes, activeWeights, types, weights, body))
   );
