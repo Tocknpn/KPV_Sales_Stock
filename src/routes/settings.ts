@@ -6,6 +6,7 @@
 // Mounted behind requireAuth in src/index.ts.
 import { storeFor, newRouter, readBody, HttpError, audit, scopeBranch, targetBranches } from "../app";
 import { loadHeld } from "../replenishment";
+import { MAX_IMPORT_ROWS, exportRows, planImport } from "../skuImport";
 import type { NewSku, Store } from "../store";
 import { requireAdmin, requireManager, hashPassword, isValidPassword, normalizeUsername, isValidUsername, isManagerOf, MIN_PASSWORD } from "../auth";
 import { isLive } from "../time";
@@ -14,7 +15,6 @@ import type { MasterSku, SkuType, SkuWeight } from "../types";
 
 const r = newRouter();
 
-const MAX_IMPORT_ROWS = 500;
 // Every SKU is gold (decided 2026-11-17): its Baht weight follows its size.
 export const GRAMS_PER_BAHT = 15.244;
 const bahtOfGrams = (g: number | null | undefined) => (g && g > 0 ? Math.round((g / GRAMS_PER_BAHT) * 10000) / 10000 : 0);
@@ -170,36 +170,107 @@ r.post("/skus", async (c) => {
   return c.json(created);
 });
 
-// CSV import. Body: { rows: [{ sku_id, name, type, weight, avg_daily_sell, lead_time_days }] }
-// (the browser parses the file). Every row is validated first; if any row is
-// wrong nothing is imported and the errors are returned per line.
-r.post("/skus/import", requireAdmin, async (c) => {
+// GET /skus/export?branchId=<id>|all: the rows of the SKU file (the browser
+// writes the .xlsx). One branch = the SKUs it carries with its own values; a
+// staff / manager always gets their own branch. "all" (admin only) = one row
+// per branch and SKU, with branch_id filled.
+r.get("/skus/export", async (c) => {
   const store = storeFor(c);
+  const user = c.get("user");
+  const asked = c.req.query("branchId") || undefined;
+  if (asked === "all" && user.role !== "admin") throw new HttpError(403, "Only an admin can export every branch", "ROLE_DENIED");
+  const all = asked === "all";
+  const branchIds = all ? (await store.branches()).map((b) => b.branch_id) : [scopeBranch(user, asked)].filter((b): b is string => !!b);
+  if (branchIds.length === 0) throw new HttpError(400, "branchId is required", "BRANCH_REQUIRED");
+  if (!all && !(await store.branches()).some((b) => b.branch_id === branchIds[0])) throw new HttpError(404, "Branch not found", "BRANCH_NOT_FOUND");
+  const [skus, types, rules, branchSkus] = await Promise.all([store.skus(), store.skuTypes(), store.rules(), store.branchSkus(all ? {} : { branchId: branchIds[0] })]);
+  return c.json({ branchId: all ? "all" : branchIds[0], rows: exportRows({ branchIds, withBranch: all, skus, types, rules, branchSkus }) });
+});
+
+// POST /skus/import { branchId: <id>|"all", fileName, rows, dryRun }. Every
+// row is checked first; if any is wrong nothing is written and the errors are
+// returned per sheet line (422). dryRun returns the same counts and writes
+// nothing. Nothing is ever deleted.
+r.post("/skus/import", async (c) => {
+  const store = storeFor(c);
+  const user = c.get("user");
   const body = await readBody(c);
-  const rows: Record<string, any>[] = Array.isArray(body.rows) ? body.rows : [];
+  const all = body.branchId === "all";
+  if (all && user.role !== "admin") throw new HttpError(403, "Only an admin can import every branch", "ROLE_DENIED");
+  const branchId = all ? null : (await targetBranches(store, user, body.branchId))[0];
+  const rows: Record<string, unknown>[] = Array.isArray(body.rows) ? body.rows : [];
   if (rows.length === 0) throw new HttpError(400, "The file has no rows", "EMPTY_IMPORT");
   if (rows.length > MAX_IMPORT_ROWS) throw new HttpError(400, `Import at most ${MAX_IMPORT_ROWS} rows at a time`, "IMPORT_TOO_LARGE");
 
-  const [types, weights, existing] = await Promise.all([store.skuTypes(), store.skuWeights(), store.skus()]);
-  const taken = new Set(existing.map((s) => s.sku_id.toLowerCase()));
-  const errors: { line: number; error: string }[] = [];
-  const built: BuiltSku[] = [];
-  rows.forEach((row, i) => {
-    const line = i + 2; // line 1 is the CSV header
-    const b = buildSku(row ?? {}, types, weights);
-    if (typeof b === "string") return errors.push({ line, error: b });
-    if (taken.has(b.sku.sku_id.toLowerCase())) return errors.push({ line, error: `sku_id ${b.sku.sku_id} already exists` });
-    taken.add(b.sku.sku_id.toLowerCase());
-    built.push(b);
-  });
-  if (errors.length > 0) throw new HttpError(422, "Nothing was imported — fix these rows and try again", "IMPORT_INVALID", { errors });
+  const [skus, types, weights, rules, branchSkus, branches] = await Promise.all([
+    store.skus(),
+    store.skuTypes(),
+    store.skuWeights(),
+    store.rules(),
+    store.branchSkus(),
+    store.branches(),
+  ]);
+  const plan = planImport({ rows, branchId, isAdmin: user.role === "admin", branchIds: branches.map((b) => b.branch_id), skus, types, weights, rules, branchSkus });
+  const summary = { created: plan.created, updated: plan.updated, unchanged: plan.unchanged, ignored: plan.ignored, errors: plan.errors };
+  if (plan.errors.length > 0) throw new HttpError(422, "Nothing was imported — fix these rows and try again", "IMPORT_INVALID", summary);
+  if (body.dryRun === true) return c.json(summary);
 
+  // New SKUs: one all-or-nothing create, then carried + values in their row's branch.
+  const built = plan.newSkus.map((n) => {
+    const b = buildSku({ name: n.name, type_id: n.type.type_id, weight_id: n.weight.weight_id }, types, weights);
+    if (typeof b === "string") throw new HttpError(500, b, "IMPORT_INVALID");
+    return { n, sku: b.sku };
+  });
   const created = await store.createSkus(built.map((b) => b.sku));
-  const allIds = (await store.branches()).map((b) => b.branch_id);
-  await store.setCarried(created.flatMap((s) => allIds.map((branch_id) => ({ branch_id, sku_id: s.sku_id, carried: true }))));
-  for (const b of built) if (b.avg !== null || b.lead !== null) await writeSkuRule(store, b.sku.sku_id, allIds, b.avg, b.lead);
-  await audit(store, c.get("user"), "sku.import", `${created.length} SKUs`, { sku_ids: created.map((s) => s.sku_id).slice(0, 50) });
-  return c.json({ imported: created.length });
+  await store.setCarried(built.map((b) => ({ branch_id: b.n.branch_id, sku_id: b.sku.sku_id, carried: true })));
+  for (const b of built) if (b.n.avg !== null || b.n.lead !== null) await writeSkuRule(store, b.sku.sku_id, [b.n.branch_id], b.n.avg, b.n.lead);
+
+  // Catalogue changes (admin only; planImport ignores them for others).
+  const skuById = new Map(skus.map((s) => [s.sku_id, s]));
+  for (const [skuId, ch] of plan.skuPatches) {
+    const p: Partial<MasterSku> = {};
+    if (ch.name) Object.assign(p, { name_en: ch.name, name_lo: ch.name });
+    if (ch.type) Object.assign(p, { type_id: ch.type.type_id, category: ch.type.name_en });
+    if (ch.weight) Object.assign(p, { weight_id: ch.weight.weight_id, std_gram_weight: ch.weight.gram_value, baht_weight: bahtOfGrams(ch.weight.gram_value) });
+    await store.updateSku(skuId, p);
+  }
+  for (const x of plan.rules) await writeSkuRule(store, x.sku_id, [x.branch_id], x.avg, x.lead);
+  await store.setCarried(plan.carried);
+
+  // Audit: one row per SKU and branch written, then the summary.
+  for (const b of built) {
+    await audit(store, user, "sku.import_row", b.sku.sku_id, {
+      branch_id: b.n.branch_id,
+      before: null,
+      after: { name: b.n.name, type_id: b.n.type.type_id, weight_id: b.n.weight.weight_id, avg_daily_sell: b.n.avg, lead_time_days: b.n.lead },
+    });
+  }
+  for (const u of plan.updatedRows) {
+    const sku = skuById.get(u.sku_id)!;
+    const ch = plan.skuPatches.get(u.sku_id);
+    const rule = plan.rules.find((x) => x.sku_id === u.sku_id && x.branch_id === u.branch_id);
+    const before: Record<string, unknown> = {};
+    const after: Record<string, unknown> = {};
+    if (ch?.name) Object.assign(before, { name: sku.name_lo || sku.name_en }), Object.assign(after, { name: ch.name });
+    if (ch?.type) Object.assign(before, { type_id: sku.type_id }), Object.assign(after, { type_id: ch.type.type_id });
+    if (ch?.weight) Object.assign(before, { weight_id: sku.weight_id }), Object.assign(after, { weight_id: ch.weight.weight_id });
+    if (rule) {
+      Object.assign(before, { avg_daily_sell: rule.before.avg, lead_time_days: rule.before.lead });
+      Object.assign(after, { avg_daily_sell: rule.avg, lead_time_days: rule.lead });
+    }
+    if (plan.carried.some((x) => x.sku_id === u.sku_id && x.branch_id === u.branch_id)) Object.assign(before, { carried: false }), Object.assign(after, { carried: true });
+    await audit(store, user, "sku.import_row", u.sku_id, { branch_id: u.branch_id, before, after });
+  }
+  const fileName = String(body.fileName ?? "").slice(0, 200);
+  await audit(store, user, "sku.import", fileName || "import", {
+    fileName,
+    branchId: all ? "all" : branchId,
+    created: plan.created,
+    updated: plan.updated,
+    unchanged: plan.unchanged,
+    sku_ids: created.map((s) => s.sku_id).slice(0, 50),
+  });
+  return c.json(summary);
 });
 
 // PATCH /skus/:id: name, type, size and active are admin only; avg/day and

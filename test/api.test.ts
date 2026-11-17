@@ -78,7 +78,8 @@ describe("user level", () => {
     const denied = [
       ["PATCH", "/skus/GB-001", { active: false }],
       ["PATCH", "/skus/GB-001", { name: "x" }],
-      ["POST", "/skus/import", { rows: [] }],
+      ["POST", "/skus/import", { branchId: "all", rows: [{}] }],
+      ["GET", "/skus/export?branchId=all", undefined],
       ["POST", "/sku-types", { name_en: "X" }],
       ["POST", "/settings/config", { spotLakPerBaht: 1 }],
       ["POST", "/users", { displayName: "X", username: "xxx", branchId: "B-MM", password: "111111" }],
@@ -577,35 +578,6 @@ describe("numbers agree across screens", () => {
 });
 
 describe("SKU master data", () => {
-  it("CSV import is all-or-nothing and reports the bad lines", async () => {
-    const admin = await asAdmin();
-    const count = async () => (await call(admin, "GET", "/skus?all=1")).json.skus.length;
-    const before = await count();
-    const bad = await call(admin, "POST", "/skus/import", {
-      rows: [
-        { name_en: "Ring A", type: "Rings & Accessories", weight: "0.5 Baht", purity: "96.5%", baht_weight: "0.5" },
-        { name_en: "Ring B", type: "No Such Type" },
-        { name_en: "", type: "Gold Bars" },
-        { sku_id: "GB-001", name_en: "Dup", type: "Gold Bars" },
-      ],
-    });
-    expect(bad.status).toBe(422);
-    expect(bad.json.errors.map((e: any) => e.line)).toEqual([3, 4, 5]);
-    expect(await count()).toBe(before);
-
-    const good = await call(admin, "POST", "/skus/import", {
-      rows: [
-        { sku_id: "RG-100", name_en: "Ring A", type: "rings & accessories", weight: "0.5 Baht", purity: "96.5%", baht_weight: "0.5", avg_daily_sales: "1.5", order_lead_time_days: "2" },
-        { name_en: "Bar Z", type: "Gold Bars", weight: "1 Baht", purity: "99.99%", baht_weight: 1 },
-      ],
-    });
-    expect(good.json.imported).toBe(2);
-    expect(await count()).toBe(before + 2);
-    const ring = (await call(admin, "GET", "/skus")).json.skus.find((s: any) => s.sku_id === "RG-100");
-    // One Lao name; every SKU is gold with its Baht weight from the size; purity / group ignored.
-    expect(ring).toMatchObject({ name_lo: "Ring A", name_en: "Ring A", category: "Rings & Accessories", std_gram_weight: 7.622, baht_weight: 0.5, purity: null, group_name: null });
-  });
-
   it("a SKU is one Lao name + type + size; editing sets the name and the planning numbers", async () => {
     const admin = await asAdmin();
     const made = await call(admin, "POST", "/skus", { sku_id: "LAO-1", name: "ແຫວນ 1 ສະຫຼຶງ", type_id: "RINGS_ACCESSORIES", weight_id: "BAHT_025", purity: "96.5%", unit_price_lak: 5, reorder_level: 9 });
@@ -624,7 +596,8 @@ describe("SKU master data", () => {
     expect((await call(admin, "PATCH", "/skus/LAO-1", { avg_daily_sell: -1 })).status).toBe(400);
   });
 
-  it("avg/day and lead time on create and import become SKU rules in the branches given", async () => {
+  // Import / export: test/skuImport.api.test.ts.
+  it("avg/day and lead time on create become SKU rules in the branches given", async () => {
     const admin = await asAdmin();
     const row = async (id: string) => {
       const rule = (await getStore({} as any).rules()).find((x) => x.scope === "sku" && x.scope_key === id && x.branch_id === "B-VT");
@@ -636,26 +609,6 @@ describe("SKU master data", () => {
     expect(made.status).toBe(200);
     expect(made.json.group_name).toBe(null);
     expect(await row("NEW-1")).toMatchObject({ avg: { value: 4 }, lead: { value: 6 } });
-
-    // A bad row imports nothing, and writes no rule.
-    const bad = await call(admin, "POST", "/skus/import", {
-      rows: [
-        { sku_id: "IMP-1", name_en: "Imp 1", type: "Gold Bars", avg_daily_sales: "2" },
-        { sku_id: "IMP-2", name_en: "Imp 2", type: "Gold Bars", order_lead_time_days: "99999" },
-      ],
-    });
-    expect(bad.status).toBe(422);
-    expect(await row("IMP-1")).toBeUndefined();
-
-    const good = await call(admin, "POST", "/skus/import", {
-      rows: [
-        { sku_id: "IMP-1", name_en: "Imp 1", type: "Gold Bars", avg_daily_sales: "2", order_lead_time_days: "3", group: "Imp" },
-        { sku_id: "IMP-3", name_en: "Imp 3", type: "Gold Bars", group: "Imp" },
-      ],
-    });
-    expect(good.json.imported).toBe(2);
-    expect(await row("IMP-1")).toMatchObject({ avg: { value: 2 }, lead: { value: 3 } });
-    expect(await row("IMP-3")).toBeUndefined();
   });
 
   it("an inactive SKU cannot be added to a desk", async () => {
