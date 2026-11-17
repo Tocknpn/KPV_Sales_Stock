@@ -1,0 +1,450 @@
+<body>
+<div class="wrap">
+
+<header class="top">
+  <h1>ຄູ່ມືນຳໃຊ້ — KPV ສະຕັອກ</h1>
+  <p>KPV Stock Tracking · ສຳລັບ ພະນັກງານສາຂາ, ຜູ້ຈັດການສາຂາ ແລະ ເຈົ້າຂອງ / ແອດມິນ</p>
+</header>
+
+<nav class="card toc">
+  <a href="#about">ລະບົບນີ້ແມ່ນຫຍັງ?</a>
+  <a href="#roles">ສິດທີ່ມີໃນລະບົບ</a>
+  <a href="#login">ການເຂົ້າສູ່ລະບົບ</a>
+  <a href="#workflow">ວົງຈອນປະຈຳວັນ</a>
+  <a href="#checkin">ການເຂົ້າວຽກ</a>
+  <a href="#tracking">ບັນທຶກສະຕັອກ</a>
+  <a href="#newcase">ສ້າງຕູ້ໃໝ່</a>
+  <a href="#move">ຍ້າຍສິນຄ້າລະຫວ່າງຕູ້</a>
+  <a href="#adjust">ປັບສະຕັອກ ແລະ ແກ້ໄຂ</a>
+  <a href="#sku">ຕັ້ງຄ່າ SKU</a>
+  <a href="#users">ຕັ້ງຄ່າຜູ້ໃຊ້</a>
+  <a href="#reports">ອ່ານລາຍງານ</a>
+  <a href="#documents">ເອກະສານ ແລະ ສັ່ງຊື້</a>
+  <a href="#routine">ວຽກປະຈຳ</a>
+  <a href="#trouble">ແກ້ບັນຫາ</a>
+</nav>
+
+<!-- ABOUT -->
+<section class="card" id="about">
+  <h2>💎 ລະບົບນີ້ແມ່ນຫຍັງ?</h2>
+  <p><b>KPV ສະຕັອກ</b> ແມ່ນລະບົບບັນທຶກ ແລະ ກວດນັບສະຕັອກທອງປະຈຳວັນ ຂອງແຕ່ລະຕູ້ ໃນທຸກສາຂາ. ໃຊ້ແທນການຈົດໃສ່ປຶ້ມ ຫຼື Excel. ເປີດໃຊ້ໄດ້ທັງໃນໂທລະສັບ ແລະ ແທັບເລັດ ຜ່ານ browser, ບໍ່ຕ້ອງຕິດຕັ້ງແອັບ.</p>
+  <ul>
+    <li><b>ບັນທຶກ ແລະ ກວດນັບທຸກມື້</b> — ຍອດເປີດ, ສິນຄ້າເຂົ້າ, ຂາຍ, ຕັດສະຕັອກ, ຍ້າຍ ເຂົ້າ/ອອກ ແລະ ຍອດປິດ ຂອງແຕ່ລະຕູ້</li>
+    <li><b>ແຈ້ງເຕືອນສະຕັອກຕ່ຳ</b> — ລະບົບຄິດວ່າສະຕັອກພໍຂາຍອີກຈັກມື້ ແລະ ເນັ້ນສີລາຍການທີ່ຕ້ອງສັ່ງ</li>
+    <li><b>ເອກະສານ ແລະ ຂໍ້ສະເໜີສັ່ງຊື້</b> — ພິມ ຫຼື ບັນທຶກເປັນ PDF</li>
+    <li><b>ພາບລວມ ແລະ ລາຍງານ</b> — ມູນຄ່າສະຕັອກ, ການເຄື່ອນໄຫວ ແລະ ຜົນການກວດນັບ ທຸກມື້</li>
+  </ul>
+  <table>
+    <tr><th style="width:32%">ສາຂາໃນລະບົບ</th><td>ຕະຫລາດເຊົ້າ · ວຽງຈັນເຊັນເຕີ (B-VTC) · ໄອເຕັກ · ວັງທອງ</td></tr>
+    <tr><th>ຕູ້ (Case)</th><td>ແຕ່ລະສາຂາມີຫຼາຍຕູ້. ສະຕັອກຖືກນັບແຍກ <b>ຕາມຕູ້</b></td></tr>
+    <tr><th>ຫົວໜ່ວຍ</th><td>ບາດ (Baht), ສະຫຼຶງ, ກລາມ ແລະ ຈຳນວນອັນ (pcs)</td></tr>
+    <tr><th>ພາສາ</th><td>ລາວ ແລະ English — ປ່ຽນໄດ້ທີ່ ຕັ້ງຄ່າ → ຕັ້ງຄ່າພາສາ</td></tr>
+  </table>
+  <div class="callout">
+    <b>ຫຼັກການສຳຄັນ:</b> ຍອດປິດຂອງທຸກຕູ້ ຕ້ອງກົງກັບຂອງຈິງ ທຸກມື້. ທຸກຕົວເລກໃນ ພາບລວມ ແລະ ລາຍງານ ມາຈາກສິ່ງທີ່ພະນັກງານບັນທຶກໃນໜ້າ ສະຕັອກ. ບັນທຶກຜິດ = ລາຍງານຜິດ.
+  </div>
+  <p class="note-small">* ຮູບໜ້າຈໍໃນຄູ່ມືນີ້ ຖ່າຍຈາກການທົດສອບລະບົບ ວັນທີ 17–18/11/2026 ດ້ວຍຂໍ້ມູນຕົວຢ່າງ: ສາຂາ ວັງທອງ, ຕູ້ <b>TEST ຕູ້ A</b> ແລະ <b>TEST ຕູ້ B</b>, SKU <b>TEST ສິນຄ້າຄູ່ມື</b>, ຜູ້ໃຊ້ <b>TEST ພະນັກງານຄູ່ມື</b>. ຕົວເລກບໍ່ແມ່ນຂໍ້ມູນຈິງ. ກົດຮູບເພື່ອຂະຫຍາຍ.</p>
+</section>
+
+<!-- ROLES -->
+<section class="card" id="roles">
+  <h2>👤 ສິດທີ່ມີໃນລະບົບ</h2>
+  <div class="tbl-scroll">
+  <table>
+    <tr><th style="width:22%">ລະດັບ</th><th style="width:30%">ເຫັນຂໍ້ມູນ</th><th>ເຮັດຫຍັງໄດ້</th></tr>
+    <tr>
+      <td><b>ພະນັກງານ</b><br><span class="pill p-grey">staff</span></td>
+      <td>ທຸກເມນູ, ລາຍງານ ແລະ ປະຫວັດການແກ້ໄຂ — <b>ສະເພາະສາຂາຂອງຕົນເອງ</b></td>
+      <td>ເຂົ້າວຽກ, ບັນທຶກສະຕັອກ, ຍ້າຍ, ຕັດສະຕັອກ, ນັບ ແລະ ປິດມື້, ສ້າງຕູ້ໃໝ່, ເພີ່ມ SKU ໃສ່ຕູ້, ສ້າງເອກະສານ ແລະ ຂໍ້ສະເໜີສັ່ງຊື້. ເພີ່ມ SKU ໃໝ່, ໃສ່ ຂາຍສະເລ່ຍ/ມື້ ແລະ ໄລຍະສັ່ງ ຂອງສາຂາ, ນຳເຂົ້າ / ສົ່ງອອກ Excel</td>
+    </tr>
+    <tr>
+      <td><b>ຜູ້ຈັດການສາຂາ</b><br><span class="pill p-amber">manager</span></td>
+      <td>ຄືກັບພະນັກງານ — <b>ສະເພາະສາຂາຂອງຕົນເອງ</b></td>
+      <td>ທຸກຢ່າງທີ່ພະນັກງານເຮັດໄດ້ <b>+</b> ປົດລັອກບັນຊີພະນັກງານ, <b>ເປີດມື້ນີ້ຄືນ</b> (ມື້ທີ່ ✓ ແລ້ວ, ບໍ່ເກີນ 3 ມື້ກ່ອນ), ແກ້ໄຂມື້ທີ່ຜ່ານມາບໍ່ດົນ</td>
+    </tr>
+    <tr>
+      <td><b>ເຈົ້າຂອງ / ແອດມິນ</b><br><span class="pill p-red">admin</span></td>
+      <td><b>ທຸກສາຂາ</b> — ເລືອກສາຂາໄດ້ໃນທຸກໜ້າ</td>
+      <td>ທຸກຢ່າງ <b>+</b> ເພີ່ມ / ແກ້ໄຂ ຜູ້ໃຊ້ ແລະ ເບິ່ງລະຫັດຜ່ານ, ລຶບເອກະສານ, ປ່ຽນຊື່ / ປະເພດ / ຂະໜາດ SKU, ປິດໃຊ້ງານ SKU, ຈັດການ ປະເພດ ແລະ ນ້ຳໜັກ, ໃສ່ຄ່າໃຫ້ <b>ທຸກສາຂາ</b> ເທື່ອດຽວ</td>
+    </tr>
+  </table>
+  </div>
+  <p><b>SKU ໃຊ້ຮ່ວມກັນທັງບໍລິສັດ</b> (ລະຫັດ, ຊື່, ປະເພດ, ຂະໜາດ). ແຕ່ <b>ຂາຍສະເລ່ຍ/ມື້</b>, <b>ໄລຍະສັ່ງ</b> ແລະ <b>ສາຂານີ້ມີຂາຍ</b> ແມ່ນຂອງແຕ່ລະສາຂາ.</p>
+  <div class="shots">
+    <figure><img src="shots/30-settings-menu.jpg" alt="ໜ້າຕັ້ງຄ່າ"><figcaption>ຕັ້ງຄ່າ — ຊື່ຜູ້ໃຊ້, ລະດັບ, ລາຄາທອງ ແລະ ເມນູຍ່ອຍ</figcaption></figure>
+  </div>
+</section>
+
+<!-- LOGIN -->
+<section class="card" id="login">
+  <h2>🔐 ການເຂົ້າສູ່ລະບົບ</h2>
+  <ol>
+    <li>ໃສ່ <b>ຊື່ຜູ້ໃຊ້</b> (ເຊັ່ນ <b>test.guide</b>) — ແອດມິນເປັນຄົນສ້າງໃຫ້</li>
+    <li>ໃສ່ <b>ລະຫັດຜ່ານ</b> (ຢ່າງໜ້ອຍ 6 ຕົວ). ກົດຮູບຕາ ເພື່ອເບິ່ງສິ່ງທີ່ພິມ</li>
+    <li>ກົດ <span class="btnlike">ເຂົ້າສູ່ລະບົບ</span> → ລະບົບເປີດໜ້າ <b>ສະຕັອກປະຈຳວັນ</b> ຂອງສາຂາທ່ານ</li>
+  </ol>
+  <div class="callout warn">
+    <b>ແທັບເລັດໃຊ້ຮ່ວມກັນ:</b> ລະບົບຈື່ການເຂົ້າສູ່ລະບົບ ປະມານ 30 ມື້. ເມື່ອປ່ຽນຄົນໃຊ້ ໃຫ້ກົດ <b>ຕັ້ງຄ່າ → ອອກຈາກລະບົບ</b> ທຸກຄັ້ງ — ບໍ່ດັ່ງນັ້ນ ທຸກການບັນທຶກຈະຂຶ້ນຊື່ຄົນເກົ່າ.
+    <div class="muted">ລືມລະຫັດຜ່ານ? ໃຫ້ແອດມິນຕັ້ງໃໝ່ໃຫ້. ໃສ່ຜິດຫຼາຍຄັ້ງ ບັນຊີຈະຖືກລັອກຊົ່ວຄາວ — ຜູ້ຈັດການສາຂາ ຫຼື ແອດມິນ ປົດລັອກໄດ້.</div>
+  </div>
+  <div class="shots">
+    <figure><img src="shots/01-login-empty.jpg" alt="ໜ້າເຂົ້າສູ່ລະບົບ"><figcaption>① ໜ້າເຂົ້າສູ່ລະບົບ</figcaption></figure>
+    <figure><img src="shots/02-login-filled.jpg" alt="ໃສ່ຊື່ຜູ້ໃຊ້ ແລະ ລະຫັດຜ່ານ"><figcaption>② ໃສ່ ຊື່ຜູ້ໃຊ້ ແລະ ລະຫັດຜ່ານ</figcaption></figure>
+    <figure><img src="shots/03-after-login.jpg" alt="ສະຕັອກປະຈຳວັນ"><figcaption>③ ເຂົ້າແລ້ວ — ໜ້າ ສະຕັອກປະຈຳວັນ</figcaption></figure>
+  </div>
+</section>
+
+<!-- WORKFLOW -->
+<section class="card" id="workflow">
+  <h2>🔄 ວົງຈອນປະຈຳວັນ ຂອງແຕ່ລະຕູ້</h2>
+  <p>ທຸກຕູ້ ທຸກມື້ ຜ່ານສະຖານະຕາມລຳດັບນີ້ (ເບິ່ງໄດ້ທີ່ປ້າຍໃນບັດຕູ້):</p>
+  <div class="flow">
+    <div class="step"><span class="n">1</span><span class="t"><span class="pill p-grey">ຍັງບໍ່ເລີ່ມ</span></span><span class="d">ຕູ້ຍັງບໍ່ເປີດມື້ນີ້ → ກົດ <b>ເຂົ້າວຽກ</b></span></div>
+    <div class="arrow">→</div>
+    <div class="step"><span class="n">2</span><span class="t"><span class="pill p-red">ເຂົ້າວຽກ</span></span><span class="d">ຍອດເປີດ = ຍອດປິດມື້ວານ. ພິມ ເຂົ້າ / ຂາຍ / ຕັດ / ຍ້າຍ ລະຫວ່າງມື້ (ໜ້າຕູ້ສະແດງ <b>ເປີດຢູ່</b>)</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><span class="n">3</span><span class="t"><span class="pill p-amber">ເລີ່ມນັບ</span></span><span class="d">ນັບຂອງຈິງ ໃສ່ຖັນ <b>ນັບ</b>; ຖ້າບໍ່ກົງ ໃສ່ໝາຍເຫດ</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><span class="n">4</span><span class="t"><span class="pill p-green">✓ ແລ້ວ</span></span><span class="d">ກົດ <b>✓ ປິດມື້</b> — ມື້ນັ້ນຖືກລັອກ</span></div>
+  </div>
+
+  <div class="formula">ຍອດປິດ = ຍອດເປີດ + ເຂົ້າ − ຂາຍຍ່ອຍ − ຂາຍສົ່ງ − ຕັດສະຕັອກ ± ຍ້າຍ ເຂົ້າ/ອອກ</div>
+  <p>ລະບົບຄິດ <b>ຍອດປິດ</b> ໃຫ້ເອງ ແລະ ຍອດປິດມື້ນີ້ ຈະເປັນ <b>ຍອດເປີດ</b> ຂອງມື້ຕໍ່ໄປ. ບໍ່ສາມາດເຂົ້າວຽກມື້ໃໝ່ໄດ້ ຖ້າມື້ກ່ອນຂອງຕູ້ນັ້ນຍັງບໍ່ ✓ ແລ້ວ (ບັດຂຶ້ນ <b>ຄ້າງກວດ</b>).</p>
+
+  <div class="tbl-scroll">
+  <table>
+    <tr><th style="width:24%">ຖັນໃນຕາຕະລາງຕູ້</th><th>ຄວາມໝາຍ — ໃສ່ຫຍັງ</th></tr>
+    <tr><td><b>ຍອດເປີດ</b></td><td>ຍອດປິດຂອງມື້ກ່ອນ (ເບິ່ງໄດ້ຢ່າງດຽວ)</td></tr>
+    <tr><td><b>ເຂົ້າ</b> <span class="pill p-green">ຂຽວ</span></td><td>ສິນຄ້າເຕີມເຂົ້າຕູ້ມື້ນີ້ — ໃສ່ເລກບວກ</td></tr>
+    <tr><td><b>ຂາຍຍ່ອຍ</b>, <b>ຂາຍສົ່ງ</b> <span class="pill p-red">ແດງ</span></td><td>ຈຳນວນທີ່ຂາຍອອກ — ໃສ່ເລກບວກ (ຂາຍ 2 ອັນ ໃສ່ 2)</td></tr>
+    <tr><td><b>ຕັດສະຕັອກ</b> <span class="pill p-red">ແດງ</span></td><td>ເອົາອອກທີ່ບໍ່ແມ່ນການຂາຍ (ເສຍ, ເພ, ໃຊ້ພາຍໃນ) — <b>ຕ້ອງໃສ່ເຫດຜົນ</b></td></tr>
+    <tr><td><b>ຍ້າຍ ເຂົ້າ/ອອກ</b></td><td>ຍ້າຍລະຫວ່າງຕູ້: ຕູ້ສົ່ງ ໃສ່ <b>−2</b>, ຕູ້ຮັບ ໃສ່ <b>+2</b>. ເບິ່ງ <a href="#move">ຍ້າຍສິນຄ້າ</a></td></tr>
+    <tr><td><b>ຍອດປິດ</b> / <b>ນັບ</b></td><td>ລະບົບຄິດຍອດປິດໃຫ້. ຫຼັງກົດ <b>ເລີ່ມນັບ</b> ຖັນນີ້ກາຍເປັນ <b>ນັບ</b> ໃຫ້ໃສ່ຈຳນວນທີ່ນັບໄດ້ຈິງ</td></tr>
+  </table>
+  </div>
+  <p class="muted">ໃນໂທລະສັບ ຕາຕະລາງເລື່ອນໄປຊ້າຍ-ຂວາໄດ້; ຊື່ສິນຄ້າຄ້າງຢູ່ຊ້າຍສະເໝີ. ທຸກໜ້າມີລິ້ງຂອງຕົນເອງ (ເຊັ່ນ <b>/daily_stock</b>) — ໂຫຼດໃໝ່ ຈະຢູ່ໜ້າເດີມ.</p>
+</section>
+
+<!-- CHECK-IN -->
+<section class="card" id="checkin">
+  <h2>🌅 ການເຂົ້າວຽກ (ຕອນເຊົ້າ)</h2>
+  <ol>
+    <li>ເປີດເມນູ <b>ສະຕັອກ</b>. ກວດ <b>ວັນທີ</b> ດ້ານເທິງ ແລະ ສາຂາ</li>
+    <li>ບັດຕູ້ທີ່ <span class="pill p-grey">ຍັງບໍ່ເລີ່ມ</span> ມີປຸ່ມ <span class="btnlike">ເຂົ້າວຽກ</span> — ກົດທຸກຕູ້ທີ່ຮັບຜິດຊອບ</li>
+    <li>ກົດ <span class="btnlike">ກວດສະຕັອກ</span> ເພື່ອເປີດໜ້າຕູ້. ຖັນ <b>ຍອດເປີດ</b> ຕ້ອງເທົ່າກັບຍອດປິດມື້ວານ</li>
+    <li>ທຽບ ຍອດເປີດ ກັບຂອງຈິງໃນຕູ້. ຖ້າບໍ່ກົງ ແຈ້ງຫົວໜ້າທັນທີ</li>
+  </ol>
+  <div class="callout">
+    <b>ຕົວຢ່າງຈາກການທົດສອບ:</b> ມື້ 17/11 TEST ຕູ້ A ປິດ TEST ສິນຄ້າຄູ່ມື <b>10</b> ອັນ. ມື້ 18/11 ກົດເຂົ້າວຽກ → ຍອດເປີດ <b>10</b> ອັນ ອັດຕະໂນມັດ.
+    <div class="muted">ກ່ອນເຂົ້າວຽກ ບັດຕູ້ສະແດງ 0.0 Baht · 0 pcs — ແມ່ນປົກກະຕິ, ຕົວເລກຈະຂຶ້ນຫຼັງກົດ ເຂົ້າວຽກ.</div>
+  </div>
+  <div class="shots">
+    <figure><img src="shots/14-cards-not-started.jpg" alt=""><figcaption>ບັດຕູ້ ຍັງບໍ່ເລີ່ມ — ກົດ ເຂົ້າວຽກ</figcaption></figure>
+    <figure><img src="shots/15-checkin-opening.jpg" alt=""><figcaption>ຫຼັງເຂົ້າວຽກ — ຍອດເປີດ = ຍອດປິດມື້ວານ</figcaption></figure>
+  </div>
+</section>
+
+<!-- TRACKING -->
+<section class="card" id="tracking">
+  <h2>📝 ບັນທຶກສະຕັອກ ລະຫວ່າງມື້</h2>
+  <ul>
+    <li>ແຕະຊ່ອງໃດ ແປ້ນຕົວເລກຈະຂຶ້ນ — ພິມເລກ ແລ້ວກົດ <b>ຕໍ່ໄປ</b>. ລະບົບບັນທຶກເອງທັນທີ (ມຸມຂວາເທິງຂຶ້ນ <b>ບັນທຶກແລ້ວ</b>)</li>
+    <li>ບັນທຶກ <b>ທັນທີທີ່ເກີດ</b> — ຮັບສິນຄ້າ ໃສ່ ເຂົ້າ, ຂາຍ ໃສ່ ຂາຍຍ່ອຍ / ຂາຍສົ່ງ</li>
+    <li>ລຸ່ມຊື່ສິນຄ້າ ອາດມີປ້າຍ <span class="pill p-amber">ເຕືອນ ≈ 4.0 ມື້</span> ຫຼື <span class="pill p-red">ວິກິດ</span> = ສະຕັອກຂອງສາຂາພໍຂາຍອີກປະມານຈັກມື້</li>
+    <li>ເມນູ <b>⋯</b> ມຸມຂວາເທິງ: <b>+ ເພີ່ມ SKU</b> ໃສ່ຕູ້, ເອົາລາຍການອອກ, <b>ບັນທຶກນຳເງິນເຂົ້າຕູ້ເຊຟ</b></li>
+  </ul>
+  <div class="callout"><b>ຕົວຢ່າງ:</b> TEST ຕູ້ A ມື້ 18/11 — ເຂົ້າ <b>3</b>, ຂາຍຍ່ອຍ <b>2</b>, ຂາຍສົ່ງ <b>1</b>.</div>
+  <div class="shots">
+    <figure><img src="shots/16-grid-entries.jpg" alt=""><figcaption>ໃສ່ ເຂົ້າ 3 · ຂາຍຍ່ອຍ 2 · ຂາຍສົ່ງ 1</figcaption></figure>
+    <figure><img src="shots/13-day1-count.jpg" alt=""><figcaption>ໂໝດນັບ — ແຕະ "10 ✓" ຖ້ານັບໄດ້ເທົ່າຍອດປິດ</figcaption></figure>
+  </div>
+</section>
+
+<!-- NEW CASE -->
+<section class="card" id="newcase">
+  <h2>🗄 ສ້າງຕູ້ໃໝ່</h2>
+  <ol>
+    <li>ໜ້າ <b>ສະຕັອກ</b> → ປຸ່ມ <b>+</b> ມຸມຂວາລຸ່ມ</li>
+    <li>ໃສ່ <b>ຊື່/ເລກທີ່ຕູ້</b> (ເຊັ່ນ TEST ຕູ້ A)</li>
+    <li>ກົດ <b>+ ເພີ່ມ SKU</b> → ເລືອກສິນຄ້າ (ຄົ້ນຫາໄດ້) → ກົດເພີ່ມ</li>
+    <li>ໃສ່ <b>ຍອດເປີດ</b> ຂອງແຕ່ລະ SKU ແລ້ວກົດ <span class="btnlike">ສ້າງຕູ້</span></li>
+  </ol>
+  <p>ຕູ້ໃໝ່ <b>ເຂົ້າວຽກໃຫ້ອັດຕະໂນມັດ</b> ໃນມື້ທີ່ສ້າງ — ບັນທຶກ ແລະ ປິດມື້ໄດ້ທັນທີ. ສະເພາະມື້ທຳອິດ ສາມາດໃສ່ຍອດເປີດຂອງ SKU ທີ່ເພີ່ມພາຍຫຼັງໄດ້.</p>
+  <div class="callout"><b>ຕົວຢ່າງ:</b> TEST ຕູ້ A = TEST ສິນຄ້າຄູ່ມື 10 + ທອງຄຳແທ່ງ 1 ບາດ 5 + ທອງຄຳແທ່ງ 2 ບາດ 5 (3 SKU · 20 ອັນ). TEST ຕູ້ B = TEST ສິນຄ້າຄູ່ມື 4.</div>
+  <div class="shots">
+    <figure><img src="shots/11-case-new-form.jpg" alt=""><figcaption>ຟອມ ສ້າງຕູ້ໃໝ່ — SKU ແລະ ຍອດເປີດ</figcaption></figure>
+    <figure><img src="shots/12-case-cards.jpg" alt=""><figcaption>ຕູ້ໃໝ່ຂຶ້ນໃນລາຍການ ສະຖານະ ເຂົ້າວຽກ</figcaption></figure>
+  </div>
+</section>
+
+<!-- MOVE -->
+<section class="card" id="move">
+  <h2>🔁 ຍ້າຍສິນຄ້າລະຫວ່າງຕູ້</h2>
+  <p>ໃຊ້ຖັນ <b>ຍ້າຍ ເຂົ້າ/ອອກ</b> ທັງສອງຕູ້ — ບໍ່ຕ້ອງໃສ່ໃນຊ່ອງ ເຂົ້າ:</p>
+  <div class="flow">
+    <div class="step"><span class="n">1</span><span class="t">ຕູ້ທີ່ສົ່ງ</span><span class="d">ພິມ <b>−2</b> (ຫຼື ພິມ 2 ແລ້ວກົດ <b>±</b>) → ແຖບລຸ່ມຂຶ້ນ <b>− ອອກ</b> ສີແດງ</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><span class="n">2</span><span class="t">ຕູ້ທີ່ຮັບ</span><span class="d">ພິມ <b>2</b> → ແຖບລຸ່ມຂຶ້ນ <b>+ ເຂົ້າ</b> ສີຂຽວ</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><span class="n">3</span><span class="t">ກວດ</span><span class="d">ການຍ້າຍທັງໝົດຂອງມື້ ຕ້ອງບວກລົບກັນເທົ່າ 0. ຖ້າບໍ່ເທົ່າ, ໜ້າ <b>ພາບລວມ</b> ຈະເຕືອນ</span></div>
+  </div>
+  <div class="callout warn"><b>ທັງສອງຝ່າຍຕ້ອງໃສ່.</b> ລະບົບບໍ່ໃສ່ໃຫ້ອີກຕູ້ອັດຕະໂນມັດ — ສົ່ງ −2 ແຕ່ຕູ້ຮັບບໍ່ໃສ່ +2 ສະຕັອກຈະຫາຍ 2 ອັນ.</div>
+  <div class="shots">
+    <figure><img src="shots/17-move-out-A.jpg" alt=""><figcaption>TEST ຕູ້ A ສົ່ງອອກ −2</figcaption></figure>
+    <figure><img src="shots/18-move-in-B.jpg" alt=""><figcaption>TEST ຕູ້ B ຮັບເຂົ້າ +2</figcaption></figure>
+  </div>
+</section>
+
+<!-- ADJUST -->
+<section class="card" id="adjust">
+  <h2>⚖️ ປັບສະຕັອກ ແລະ ແກ້ໄຂ</h2>
+  <h3>1. ຕັດສະຕັອກ (ເສຍ / ເພ / ໃຊ້ພາຍໃນ)</h3>
+  <p>ໃສ່ຈຳນວນໃນຖັນ <b>ຕັດສະຕັອກ</b> → ລຸ່ມແຖວຂຶ້ນ <b>ໃສ່ເຫດຜົນ</b> ສີແດງ → ກົດ ແລ້ວພິມເຫດຜົນ → <b>ບັນທຶກ</b>. ບໍ່ມີເຫດຜົນ ປິດມື້ບໍ່ໄດ້.</p>
+  <h3>2. ນັບບໍ່ກົງ (ຕ່າງ)</h3>
+  <p>ກົດ <span class="btnlike">ເລີ່ມນັບ</span>. ຖັນສຸດທ້າຍກາຍເປັນ <b>ນັບ</b> — ຕົວເລກນ້ອຍດ້ານເທິງແມ່ນຍອດປິດທີ່ລະບົບຄາດໄວ້. ນັບໄດ້ເທົ່າກັນ ແຕະ "7 ✓"; ບໍ່ເທົ່າ ພິມຈຳນວນທີ່ນັບໄດ້. ລຸ່ມແຖວຂຶ້ນ <b>ຕ່າງ −1</b> → ກົດ <b>ໃສ່ໝາຍເຫດ</b> ອະທິບາຍ. ໃນລາຍງານ ສ່ວນຕ່າງນີ້ສະແດງເປັນ <b>ປັບຕາມການນັບຈິງ</b>.</p>
+  <div class="callout"><b>ຕົວຢ່າງ:</b> TEST ຕູ້ A: 10 + 3 − 2 − 1 − 1 (ຕັດ) − 2 (ຍ້າຍ) = ຍອດປິດ <b>7</b>. ນັບໄດ້ <b>6</b> → ຕ່າງ <b>−1</b>, ໝາຍເຫດ "TEST ນັບຂາດ 1".</div>
+  <h3>3. ປິດມື້</h3>
+  <p>ກວດທຸກແຖວ ແລ້ວກົດ <span class="btnlike">✓ ປິດມື້</span>. ຖ້າຍັງຂາດ ນັບ, ໝາຍເຫດ ຫຼື ເຫດຜົນ ລະບົບຈະເນັ້ນແຖວນັ້ນສີແດງ. ກ່ອນ 15:30 ລະບົບຖາມຢືນຢັນກ່ອນ. ປິດແລ້ວ ໜ້າຕູ້ຂຶ້ນ <b>ປິດແລ້ວ … ໂດຍ …</b> ແລະ ແກ້ໄຂບໍ່ໄດ້.</p>
+  <h3>4. ເປີດມື້ນີ້ຄືນ (ຜູ້ຈັດການ / ແອດມິນ)</h3>
+  <p>ຖ້າປິດມື້ແລ້ວ ແຕ່ພົບວ່າຜິດ: ຜູ້ຈັດການ ຫຼື ແອດມິນ ເປີດໜ້າຕູ້ → <b>ເປີດມື້ນີ້ຄືນ</b> → ໃສ່ <b>ເຫດຜົນ (ບັງຄັບ)</b>. ແກ້ໄຂ ແລ້ວກົດ <b>✓ ປິດມື້</b> ອີກຄັ້ງ — ຍອດເປີດມື້ຕໍ່ໄປອັບເດດເອງ. ເປີດຄືນໄດ້ສະເພາະມື້ຫຼ້າສຸດ ທີ່ບໍ່ເກີນ 3 ມື້.</p>
+  <div class="shots">
+    <figure><img src="shots/19-destock-reason.jpg" alt=""><figcaption>ຕັດສະຕັອກ 1 — ເຫດຜົນ (ບັງຄັບ)</figcaption></figure>
+    <figure><img src="shots/20-count-variance.jpg" alt=""><figcaption>ນັບໄດ້ 6 ຈາກ 7 — ຕ່າງ −1 ພ້ອມໝາຍເຫດ</figcaption></figure>
+    <figure><img src="shots/21-done-locked.jpg" alt=""><figcaption>✓ ແລ້ວ — ລັອກ, ແກ້ໄຂບໍ່ໄດ້</figcaption></figure>
+    <figure><img src="shots/22-reopen.jpg" alt=""><figcaption>ເປີດມື້ນີ້ຄືນ — ຕ້ອງໃສ່ເຫດຜົນ</figcaption></figure>
+  </div>
+</section>
+
+<!-- SKU -->
+<section class="card" id="sku">
+  <h2>📦 ຕັ້ງຄ່າ SKU</h2>
+  <p><b>ຕັ້ງຄ່າ → ຕັ້ງຄ່າ SKU</b>. SKU ຖືກຈັດກຸ່ມຕາມ <b>ປະເພດ</b> (ກົດຫົວກຸ່ມເພື່ອເປີດ, ຫຼື <b>ເປີດທັງໝົດ</b>). ແອດມິນເລືອກສາຂາໄດ້ຢູ່ກ່ອງທຳອິດ.</p>
+  <h4>ເພີ່ມ SKU ໃໝ່ (ປຸ່ມ + ສີແດງ)</h4>
+  <ul>
+    <li><b>ຊື່ສິນຄ້າ</b> — ຊື່ເທົ່ານັ້ນ (ເຊັ່ນ ຄຳແທ່ງ), <b>ບໍ່ຕ້ອງໃສ່ນ້ຳໜັກ</b>. ໜ້າອື່ນຈະສະແດງ ຊື່ + ຂະໜາດ ເຊັ່ນ "TEST ສິນຄ້າຄູ່ມື 1 ສະຫຼຶງ"</li>
+    <li><b>ປະເພດ</b> ແລະ <b>ຂະໜາດ</b> — ເລືອກຈາກລາຍການ</li>
+    <li><b>ຂາຍສະເລ່ຍ/ມື້ (ອັນ)</b> ແລະ <b>ໄລຍະສັ່ງ (ມື້)</b> — ຂອງສາຂານີ້. ວ່າງ = ໃຊ້ຄ່າຂອງປະເພດ; ຖ້າບໍ່ມີ ລະບົບຄິດ ຂາຍ/ມື້ ຈາກການຂາຍຈິງ ແລະ ໃຊ້ໄລຍະສັ່ງເລີ່ມຕົ້ນ</li>
+    <li>ແອດມິນ: ໝາຍ <b>ໃຊ້ກັບທຸກສາຂາ</b> ເພື່ອໃຫ້ທຸກສາຂາມີຂາຍ; ບໍ່ໝາຍ = ສະເພາະສາຂາທີ່ເລືອກ</li>
+  </ul>
+  <p>ປຸ່ມ <b>ຕັ້ງຄ່າທັງໝົດ</b> ຢູ່ຫົວປະເພດ ໃສ່ ຂາຍສະເລ່ຍ/ມື້ ແລະ ໄລຍະສັ່ງ ໃຫ້ທຸກ SKU ໃນປະເພດນັ້ນ. ສະວິດທ້າຍແຖວ = <b>ສາຂານີ້ມີຂາຍ</b> (ປິດບໍ່ໄດ້ ຖ້າຍັງມີສະຕັອກ). ປ່ຽນຊື່ / ປະເພດ / ຂະໜາດ, ປິດໃຊ້ງານ, ແຖບ ປະເພດ ແລະ ນ້ຳໜັກ <span class="pill p-red">ແອດມິນ</span>.</p>
+  <h4>ນຳເຂົ້າ / ສົ່ງອອກ Excel (ປຸ່ມ ⬆)</h4>
+  <div class="flow">
+    <div class="step"><span class="n">1</span><span class="t">ດາວໂຫຼດ</span><span class="d"><b>ດາວໂຫຼດລາຍການ</b> (ພ້ອມຄ່າປັດຈຸບັນ) ຫຼື <b>ດາວໂຫຼດແບບຟອມ</b></span></div>
+    <div class="arrow">→</div>
+    <div class="step"><span class="n">2</span><span class="t">ແກ້ໄຂໃນ Excel</span><span class="d">ຖັນ * ຕ້ອງໃສ່. <b>ລະຫັດວ່າງ = SKU ໃໝ່</b>. ຊ່ອງ ຂາຍ/ມື້ ຫຼື ໄລຍະສັ່ງ ວ່າງ = ບໍ່ປ່ຽນ; ໃສ່ <b>-</b> ເພື່ອລຶບຄ່າ</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><span class="n">3</span><span class="t">ເລືອກໄຟລ໌</span><span class="d">ລະບົບສະແດງ ໃໝ່ / ປ່ຽນ / ບໍ່ປ່ຽນ ກ່ອນ. ມີແຖວຜິດ = ບໍ່ນຳເຂົ້າຫຍັງເລີຍ</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><span class="n">4</span><span class="t">ຢືນຢັນ</span><span class="d">ບັນທຶກ ແລະ ເກັບປະຫວັດ. ບໍ່ມີການລຶບ SKU</span></div>
+  </div>
+  <div class="shots">
+    <figure><img src="shots/07-sku-list.jpg" alt=""><figcaption>ລາຍການ SKU ຂອງສາຂາ ຕາມປະເພດ</figcaption></figure>
+    <figure><img src="shots/08-sku-new.jpg" alt=""><figcaption>ເພີ່ມ SKU ໃໝ່ — ຊື່, ປະເພດ, ຂະໜາດ, ຂາຍ/ມື້, ໄລຍະສັ່ງ</figcaption></figure>
+    <figure><img src="shots/09-sku-values.jpg" alt=""><figcaption>SKU ໃໝ່ ໃນກຸ່ມ ທອງຄຳແທ່ງ</figcaption></figure>
+    <figure><img src="shots/10-sku-import.jpg" alt=""><figcaption>ນຳເຂົ້າ / ສົ່ງອອກ Excel</figcaption></figure>
+  </div>
+</section>
+
+<!-- USERS -->
+<section class="card" id="users">
+  <h2>👥 ຕັ້ງຄ່າຜູ້ໃຊ້</h2>
+  <p><b>ຕັ້ງຄ່າ → ຕັ້ງຄ່າຜູ້ໃຊ້</b>. ຫົວລາຍການບອກຈຳນວນ ແອດມິນ / ຜູ້ຈັດການສາຂາ / ພະນັກງານ.</p>
+  <ol>
+    <li><span class="pill p-red">ແອດມິນ</span> ກົດ <span class="btnlike">+ ເພີ່ມຜູ້ໃຊ້</span></li>
+    <li>ໃສ່ <b>ຊື່</b>, <b>ຊື່ຜູ້ໃຊ້</b> (3–30 ຕົວ: a-z, 0-9, . _ - ບໍ່ມີຍະຫວ່າງ), <b>ລະດັບ</b>, <b>ສາຂາ</b> ແລະ <b>ລະຫັດຜ່ານ</b> (ຢ່າງໜ້ອຍ 6 ຕົວ)</li>
+    <li>ກົດ <b>ບັນທຶກ</b> → ບອກ ຊື່ຜູ້ໃຊ້ ແລະ ລະຫັດຜ່ານ ໃຫ້ພະນັກງານ</li>
+  </ol>
+  <ul>
+    <li>ກົດຊື່ຜູ້ໃຊ້ ເພື່ອແກ້ໄຂ, ຍ້າຍສາຂາ, ຕັ້ງລະຫັດໃໝ່, <b>ປົດລັອກ</b> ຫຼື <b>ປິດການໃຊ້ງານ</b> (ຄົນລາອອກ)</li>
+    <li>ແອດມິນ ເບິ່ງລະຫັດຜ່ານໄດ້ (ກົດຮູບຕາ). ຜູ້ຈັດການສາຂາ ປົດລັອກພະນັກງານໃນສາຂາຕົນໄດ້ເທົ່ານັ້ນ</li>
+  </ul>
+  <div class="shots">
+    <figure><img src="shots/04-users-list.jpg" alt=""><figcaption>ລາຍຊື່ຜູ້ໃຊ້</figcaption></figure>
+    <figure><img src="shots/05-users-new.jpg" alt=""><figcaption>ເພີ່ມຜູ້ໃຊ້ (ລະຫັດຜ່ານຖືກປິດໄວ້ໃນຮູບ)</figcaption></figure>
+    <figure><img src="shots/06-users-created.jpg" alt=""><figcaption>ບັນທຶກແລ້ວ — ພະນັກງານ 5 → 6</figcaption></figure>
+  </div>
+</section>
+
+<!-- REPORTS -->
+<section class="card" id="reports">
+  <h2>📊 ອ່ານລາຍງານ</h2>
+  <h3>1. ພາບລວມ</h3>
+  <p>ກອງຕາມ ໄລຍະເວລາ, ສາຂາ, ຕູ້, ປະເພດ ແລະ ສະຖານະ. ອ່ານຈາກເທິງລົງລຸ່ມ:</p>
+  <div class="tbl-scroll">
+  <table>
+    <tr><th style="width:30%">ບັດ</th><th>ບອກຫຍັງ</th></tr>
+    <tr><td><b>ທອງທັງໝົດທີ່ມີ</b></td><td>ນ້ຳໜັກ (ບາດ), ຈຳນວນ (pcs), ມູນຄ່າ LAK / USD ຕາມ <b>ລາຄາທອງ</b> ຂາຍຂອງມື້. ມຸມຂວາ "2/6 ຕູ້ແລ້ວ" = ຕູ້ທີ່ ✓ ແລ້ວມື້ນີ້</td></tr>
+    <tr><td><b>ຕ້ອງສັ່ງເພີ່ມ</b></td><td>ຈຳນວນ SKU <span class="pill p-red">ວິກິດ</span> / <span class="pill p-amber">ເຕືອນ</span> ຂອງແຕ່ລະສາຂາ — ສະຕັອກພໍຂາຍໜ້ອຍກວ່າ ໄລຍະສັ່ງ</td></tr>
+    <tr><td><b>ການເຄື່ອນໄຫວ</b></td><td>ມູນຄ່າ ແລະ ຈຳນວນ <b>ສິນຄ້າເຂົ້າ</b> ແລະ <b>ສິນຄ້າອອກ</b> ຂອງໄລຍະທີ່ເລືອກ</td></tr>
+    <tr><td><b>ຈຸດທີ່ຕ້ອງເບິ່ງ</b></td><td>SKU ສະຕັອກເກີນ ຫຼື ຕ່ຳກວ່າຈຸດສັ່ງຄືນ</td></tr>
+    <tr><td><b>ອາຍຸສະຕັອກສະເລ່ຍ</b></td><td>SKU ທີ່ຄ້າງດົນທີ່ສຸດ (ມື້)</td></tr>
+    <tr><td><b>ສະຖານະສະຕັອກ</b></td><td>ສ່ວນແບ່ງ ພຽງພໍ / ສະຕັອກຕ່ຳ / ໝົດ</td></tr>
+  </table>
+  </div>
+  <h3>2. ລາຍງານການເຄື່ອນໄຫວ</h3>
+  <p>ເລືອກ <b>ເດືອນ</b>, <b>ສາຂາ</b>, <b>ຕູ້</b> ຫຼື ຄົ້ນຫາສິນຄ້າ.</p>
+  <ul>
+    <li><b>ຕາຕະລາງກວດແຕ່ລະວັນ</b> — ແຖວ = ຕູ້, ຖັນ = ວັນທີ. <b>✓</b> ປົກກະຕິ · <b>ຕົວເລກແດງ</b> = ນັບບໍ່ກົງ (ບາດ) · <b>⚠</b> ຕ້ອງໂສ້ຂາດ/ເປີດຄືນ · <b>·</b> ຍັງບໍ່ກວດ</li>
+    <li>4 ບັດ: <b>ຍອດເປີດ · ຍອດປິດ · ສິນຄ້າເຂົ້າ · ສິນຄ້າອອກ</b> (ມູນຄ່າ ແລະ pcs). ສິນຄ້າອອກ ລວມ ຂາຍ, ຕັດສະຕັອກ ແລະ ຍ້າຍອອກ</li>
+    <li><b>ປັບຕາມການນັບຈິງ</b> — ຜົນລວມຂອງສ່ວນຕ່າງ ນັບ − ຍອດປິດ</li>
+    <li><b>ລາຍລະອຽດແຕ່ລະລາຍການ</b> — ເບິ່ງແບບ <b>ບັດ</b> ຫຼື <b>ຕາຕະລາງ</b>; ປ້າຍ +/− = ປ່ຽນແປງໃນເດືອນ</li>
+  </ul>
+  <div class="callout">
+    <b>ອ່ານຕົວຢ່າງ (TEST ຕູ້ A, ເດືອນ 11):</b> ຍອດເປີດ <b>20 pcs</b> → ສິນຄ້າເຂົ້າ <b>+3</b> → ສິນຄ້າອອກ <b>−6</b> (ຂາຍຍ່ອຍ 2 + ຂາຍສົ່ງ 1 + ຕັດ 1 + ຍ້າຍອອກ 2) → ປັບຕາມການນັບຈິງ <b>−1</b> → ຍອດປິດ <b>16 pcs</b>. ໃນຕາຕະລາງກວດ: 17 ✓, 18 <b>−0.25</b> (ຂາດ 1 ສະຫຼຶງ = 0.25 ບາດ).
+  </div>
+  <h3>3. ປະຫວັດ</h3>
+  <ul>
+    <li><b>ແຖບ ປະຫວັດ ໃນໜ້າຕູ້</b> — ແຕ່ລະວັນ: ເປີດ / ເຂົ້າ / ອອກ / ປິດ / ນັບ (ບາດ), ພ້ອມທຸງ <b>ນັບບໍ່ກົງ</b> ແລະ <b>ເປີດແກ້ໄຂຄືນ</b></li>
+    <li><b>ຕັ້ງຄ່າ → ປະຫວັດການແກ້ໄຂ</b> — ທຸກການປ່ຽນແປງ: ໃຜ, ເວລາ, ຕູ້, ຄ່າເກົ່າ → ຄ່າໃໝ່. ກອງຕາມ ຕູ້, ຜູ້ເຮັດ, ວັນທີ</li>
+  </ul>
+  <div class="shots">
+    <figure><img src="shots/23-dashboard.jpg" alt=""><figcaption>ພາບລວມ — ທອງທັງໝົດ, ຕ້ອງສັ່ງເພີ່ມ, ການເຄື່ອນໄຫວ</figcaption></figure>
+    <figure><img src="shots/24-dashboard-watch.jpg" alt=""><figcaption>ອາຍຸສະຕັອກສະເລ່ຍ ແລະ ສະຖານະສະຕັອກ</figcaption></figure>
+    <figure><img src="shots/25-report-summary.jpg" alt=""><figcaption>ລາຍງານ — ຕາຕະລາງກວດ ແລະ 4 ບັດຫຼັກ</figcaption></figure>
+    <figure><img src="shots/26-report-rows.jpg" alt=""><figcaption>ປັບຕາມການນັບຈິງ ແລະ ລາຍລະອຽດແຕ່ລະລາຍການ</figcaption></figure>
+    <figure><img src="shots/27-case-history.jpg" alt=""><figcaption>ປະຫວັດຂອງຕູ້ — ທຸງ ນັບບໍ່ກົງ / ເປີດແກ້ໄຂຄືນ</figcaption></figure>
+    <figure><img src="shots/28-audit.jpg" alt=""><figcaption>ປະຫວັດການແກ້ໄຂ</figcaption></figure>
+  </div>
+</section>
+
+<!-- DOCUMENTS -->
+<section class="card" id="documents">
+  <h2>📄 ເອກະສານ ແລະ ຂໍ້ສະເໜີສັ່ງຊື້</h2>
+  <ul>
+    <li><span class="btnlike">+ ເອກະສານໃໝ່</span> — ໃບຮັບ/ສົ່ງທອງ: ຫົວຂໍ້, ສາຂາ, ຕູ້, ວັນທີ ແລະ ລາຍການ (ຈຳນວນ, ນ້ຳໜັກ G, ໝາຍເຫດ)</li>
+    <li><b>ຂໍ້ສະເໜີສັ່ງຊື້ໃໝ່</b> — ເລືອກ ສາຂາ ແລະ ຕູ້: ລະບົບດຶງທຸກລາຍການພ້ອມ <b>ຍອດຄົງ</b> ແລະ ເນັ້ນສີ ລາຍການທີ່ຕ່ຳກວ່າຈຸດສັ່ງຊື້. ໃສ່ຈຳນວນ ແລ້ວກົດ <b>ບັນທຶກ ແລະ ພິມຂໍ້ສະເໜີ</b></li>
+    <li>ກົດ <b>ພິມ / PDF</b> ໃນບັດເອກະສານ. ລຶບເອກະສານໄດ້ສະເພາະແອດມິນ</li>
+  </ul>
+  <div class="flow">
+    <div class="step"><span class="n">1</span><span class="t">ພົບສະຕັອກຕ່ຳ</span><span class="d">ປ້າຍ ເຕືອນ / ວິກິດ ໃນໜ້າຕູ້ ຫຼື ພາບລວມ → ຕ້ອງສັ່ງເພີ່ມ</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><span class="n">2</span><span class="t">ຂໍ້ສະເໜີສັ່ງຊື້ໃໝ່</span><span class="d">ເມນູ ເອກະສານ → ເລືອກ ສາຂາ ແລະ ຕູ້</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><span class="n">3</span><span class="t">ໃສ່ຈຳນວນ</span><span class="d">ລາຍການທີ່ຕ້ອງສັ່ງ ຖືກເນັ້ນສີໄວ້ແລ້ວ</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><span class="n">4</span><span class="t">ບັນທຶກ ແລະ ພິມ</span><span class="d">ສົ່ງໃຫ້ເຈົ້າຂອງ/ແອດມິນ ອະນຸມັດ</span></div>
+  </div>
+  <div class="shots">
+    <figure><img src="shots/29-proposal.jpg" alt=""><figcaption>ຂໍ້ສະເໜີສັ່ງຊື້ — ທອງຄຳແທ່ງ 1 ບາດ ຖືກເນັ້ນສີ</figcaption></figure>
+  </div>
+</section>
+
+<!-- ROUTINE -->
+<section class="card" id="routine">
+  <h2>🗓 ວຽກປະຈຳ ຕາມລະດັບຜູ້ໃຊ້</h2>
+
+  <span class="pill p-grey role-tag">ພະນັກງານ / ຜູ້ຈັດການສາຂາ</span>
+  <div class="cols">
+    <div>
+      <h4>ຕອນເຊົ້າ — ເປີດຮ້ານ</h4>
+      <ul>
+        <li>ເຂົ້າສູ່ລະບົບ ດ້ວຍຊື່ຜູ້ໃຊ້ຂອງຕົນເອງ</li>
+        <li>ກົດ <b>ເຂົ້າວຽກ</b> ທຸກຕູ້ທີ່ຮັບຜິດຊອບ</li>
+        <li>ກວດ <b>ຍອດເປີດ</b> ທຽບກັບຂອງຈິງ</li>
+        <li>ເບິ່ງບັດ <b>ຄ້າງກວດ</b> — ປິດມື້ທີ່ຄ້າງກ່ອນ</li>
+      </ul>
+    </div>
+    <div>
+      <h4>ລະຫວ່າງມື້</h4>
+      <ul>
+        <li>ບັນທຶກ ເຂົ້າ / ຂາຍ / ຕັດສະຕັອກ ທັນທີ</li>
+        <li>ຍ້າຍ: ໃສ່ທັງ <b>−</b> ຕູ້ສົ່ງ ແລະ <b>+</b> ຕູ້ຮັບ</li>
+        <li>ເບິ່ງປ້າຍ ເຕືອນ / ວິກິດ ໃນໜ້າຕູ້</li>
+        <li>ສ້າງເອກະສານ ທຸກຄັ້ງທີ່ຮັບ/ສົ່ງທອງ</li>
+      </ul>
+    </div>
+    <div>
+      <h4>ຕອນແລງ — ຫຼັງ 15:30</h4>
+      <ul>
+        <li>ກົດ <b>ເລີ່ມນັບ</b>, ນັບຂອງຈິງທຸກແຖວ</li>
+        <li>ຕ່າງ ≠ 0 → ໃສ່ໝາຍເຫດ</li>
+        <li>ໃສ່ ບັນທຶກນຳເງິນເຂົ້າຕູ້ເຊຟ (⋯)</li>
+        <li>ກົດ <b>✓ ປິດມື້</b></li>
+        <li>ສ້າງ ຂໍ້ສະເໜີສັ່ງຊື້ ຖ້າສະຕັອກຕ່ຳ</li>
+        <li>ອອກຈາກລະບົບ</li>
+      </ul>
+    </div>
+  </div>
+  <p class="muted">ຜູ້ຈັດການສາຂາ: ກວດທຸກຕູ້ ✓ ແລ້ວ ກ່ອນກັບ, ເປີດມື້ຄືນເມື່ອມີຂໍ້ຜິດພາດ, ປົດລັອກບັນຊີພະນັກງານ.</p>
+
+  <span class="pill p-red role-tag" style="margin-top:22px">ເຈົ້າຂອງ / ແອດມິນ</span>
+  <div class="cols">
+    <div>
+      <h4>ປະຈຳວັນ</h4>
+      <ul>
+        <li>ພາບລວມ: "x/y ຕູ້ແລ້ວ" ແລະ <b>ຕ້ອງສັ່ງເພີ່ມ</b></li>
+        <li>ກວດ ແລະ ອະນຸມັດ ຂໍ້ສະເໜີສັ່ງຊື້</li>
+        <li>ເບິ່ງຄຳເຕືອນ ການຍ້າຍບໍ່ເທົ່າ 0</li>
+      </ul>
+    </div>
+    <div>
+      <h4>ປະຈຳອາທິດ</h4>
+      <ul>
+        <li>ລາຍງານ: ຕາຕະລາງກວດ — ຕົວເລກແດງ ແລະ ⚠</li>
+        <li>ກວດໝາຍເຫດ ນັບບໍ່ກົງ ແລະ ຕັດສະຕັອກ</li>
+        <li>ປະຫວັດການແກ້ໄຂ: ການເປີດມື້ຄືນ</li>
+      </ul>
+    </div>
+    <div>
+      <h4>ປະຈຳເດືອນ</h4>
+      <ul>
+        <li>ກວດ <b>ຂາຍສະເລ່ຍ/ມື້</b> ແລະ <b>ໄລຍະສັ່ງ</b></li>
+        <li>ເພີ່ມ / ປິດໃຊ້ງານ SKU</li>
+        <li>ກວດບັນຊີຜູ້ໃຊ້ — ໃໝ່ / ລາອອກ</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- TROUBLE -->
+<section class="card" id="trouble">
+  <h2>⚠️ ແກ້ບັນຫາ ແລະ ຂໍ້ຄວນລະວັງ</h2>
+  <div class="callout bad">
+    <b>ປິດມື້ແລ້ວ ແຕ່ບັນທຶກຜິດ</b>
+    <div class="muted">ມື້ທີ່ ✓ ແລ້ວ ຖືກລັອກ. ແຈ້ງຜູ້ຈັດການສາຂາ ຫຼື ແອດມິນ ໃຫ້ <b>ເປີດມື້ນີ້ຄືນ</b> (ພາຍໃນ 3 ມື້, ສະເພາະມື້ຫຼ້າສຸດ), ແກ້ໄຂ ແລ້ວປິດມື້ອີກຄັ້ງ.</div>
+  </div>
+  <div class="callout bad">
+    <b>ເຂົ້າວຽກບໍ່ໄດ້ / ບັດຂຶ້ນ "ຄ້າງກວດ"</b>
+    <div class="muted">ມື້ກ່ອນຂອງຕູ້ນັ້ນ ຍັງບໍ່ໄດ້ປິດ. ເປີດມື້ນັ້ນ (ເລືອກວັນທີດ້ານເທິງ), ນັບ ແລະ ກົດ ✓ ປິດມື້ ກ່ອນ.</div>
+  </div>
+  <div class="callout bad">
+    <b>ລະບົບຖາມ "ຍັງບໍ່ທັນ 15:30 — ແນ່ໃຈບໍ່?"</b>
+    <div class="muted">ເວລາປິດປົກກະຕິ ແມ່ນຫຼັງ 15:30. ຖ້າຍັງມີການຂາຍ ໃຫ້ຍົກເລີກ ແລ້ວລໍຖ້າ.</div>
+  </div>
+  <div class="callout bad">
+    <b>ປິດມື້ບໍ່ໄດ້ — ແຖວຂຶ້ນສີແດງ</b>
+    <div class="muted">ຂາດ ຈຳນວນນັບ, ໝາຍເຫດຂອງ <b>ຕ່າງ</b> ຫຼື ເຫດຜົນ <b>ຕັດສະຕັອກ</b>. ກົດຂໍ້ຄວາມສີແດງໃຕ້ແຖວ ແລ້ວໃສ່ໃຫ້ຄົບ.</div>
+  </div>
+  <div class="callout bad">
+    <b>ພາບລວມ ເຕືອນ ການຍ້າຍບໍ່ເທົ່າ 0</b>
+    <div class="muted">ມີຕູ້ໜຶ່ງໃສ່ ຍ້າຍ ແຕ່ອີກຕູ້ບໍ່ໃສ່. ກວດທັງສອງຕູ້ ແລະ ໃສ່ຝ່າຍທີ່ຂາດ.</div>
+  </div>
+  <div class="callout bad">
+    <b>ແກ້ໄຂ SKU / ລຶບເອກະສານ / ເລືອກສາຂາອື່ນ ບໍ່ໄດ້</b>
+    <div class="muted">ສິດເຫຼົ່ານີ້ເປັນຂອງແອດມິນ. ພະນັກງານ ແລະ ຜູ້ຈັດການ ເຫັນສະເພາະສາຂາຂອງຕົນ — ແຈ້ງແອດມິນ.</div>
+  </div>
+  <div class="callout bad">
+    <b>ລະບົບໃຫ້ເຂົ້າສູ່ລະບົບໃໝ່</b>
+    <div class="muted">ລະຫັດຜ່ານຖືກປ່ຽນ, ບັນຊີຖືກປິດ ຫຼື ເຂົ້າສູ່ລະບົບດົນເກີນ 30 ມື້.</div>
+  </div>
+  <div class="callout">
+    <b>ຈື່ໄວ້ 3 ຂໍ້:</b> ① ບັນທຶກທັນທີ ບໍ່ລໍຖ້າທ້າຍມື້ ② ນັບຂອງຈິງທຸກແລງ ກ່ອນ ✓ ປິດມື້ ③ ອອກຈາກລະບົບ ທຸກຄັ້ງທີ່ປ່ຽນຄົນໃຊ້
+  </div>
+</section>
+
+<footer>KPV ສະຕັອກ — ຄູ່ມືນຳໃຊ້ · 17/11/2026</footer>
+</div>
+
+<div id="zoom" role="dialog" aria-label="ຮູບຂະຫຍາຍ"><img alt=""></div>
+<script>
+(function () {
+  var z = document.getElementById('zoom'), zi = z.querySelector('img');
+  document.querySelectorAll('figure img').forEach(function (img) {
+    img.addEventListener('click', function () { zi.src = img.src; zi.alt = img.alt; z.classList.add('on'); });
+  });
+  z.addEventListener('click', function () { z.classList.remove('on'); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') z.classList.remove('on'); });
+})();
+</script>
+</body>
+</html>

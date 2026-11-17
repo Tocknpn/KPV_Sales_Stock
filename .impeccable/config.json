@@ -8,6 +8,15 @@
         "value": "plus jakarta sans",
         "createdAt": "2026-11-12T08:21:11.285Z",
         "reason": "Same brand typeface (lowercase match); PRODUCT.md Brand Commitments"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "docs/guidebook/guide.src.html"
+        ],
+        "createdAt": "2026-11-17T09:35:37.468Z",
+        "reason": "Claude: #zoom img src is set by the click-to-zoom script; shots/ srcs are inlined at build — same pattern as the existing guidebook"
       }
     ]
   }

@@ -42,6 +42,7 @@ move −2, closing 7, counted 6 ("TEST ນັບຂາດ 1"), done. B opening 4
 3. **A case not yet checked in shows 0.0 Baht · 0 pcs** on its card, although it closed yesterday with 20 pcs (shot 14). Possibly by design (the card shows today's rows); confusing for staff.
 4. Simulation only: audit entries are grouped under the real date (17 Nov) because the audit uses the real clock.
 5. The movement report counts a move out as **ສິນຄ້າອອກ** (−6 pcs includes the 2 moved to case B). Worth knowing when reading a single case; branch totals net out.
+6. **Profile card is half English** on the Lao screen: branch "Vangthong" and role "staff" (shot 30).
 
 ## Cleanup
 
