@@ -629,40 +629,50 @@ r.post("/stock/desk/:deskId/reopen", requireManager, async (c) => {
 // ---------------------------------------------------------------------------
 // Add / remove a SKU on a desk day
 // ---------------------------------------------------------------------------
+// Adds one SKU ({ sku_id, opening_qty }) or several ({ items: [...] }) to a
+// case's day. Every item is checked before anything is written.
+const MAX_ADD_ITEMS = 200;
 r.post("/stock/desk/:deskId/sku", async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
   const today = businessDate(c.env);
   const date = requireDate(body.date, today);
-  const skuId = String(body.sku_id ?? "");
   const desk = await requireDesk(store, user, c.req.param("deskId"));
   await requireOpenDay(store, user, desk.desk_id, date, today);
 
-  const sku = (await store.skus()).find((s) => s.sku_id === skuId);
-  if (!sku || !sku.active) throw new HttpError(400, "Unknown or inactive SKU", "BAD_SKU");
+  const items: any[] = Array.isArray(body.items) ? body.items : [{ sku_id: body.sku_id, opening_qty: body.opening_qty }];
+  if (items.length === 0 || items.length > MAX_ADD_ITEMS) throw new HttpError(400, `Add between 1 and ${MAX_ADD_ITEMS} SKUs`, "BAD_SKU");
 
-  const key = { ledger_date: date, desk_id: desk.desk_id, sku_id: skuId, branch_id: desk.branch_id };
-  const existing = (await store.ledger({ date, deskId: desk.desk_id })).find((row) => row.sku_id === skuId);
-  if (existing) {
-    if (existing.excluded) await store.patchLedgerRows([{ ...key, excluded: false, performed_by: user.accountId }]);
-    return c.json({ ok: true });
+  const activeSkus = new Set((await store.skus()).filter((s) => s.active).map((s) => s.sku_id));
+  // sku_id -> opening; a repeated SKU keeps its last opening.
+  const wanted = new Map<string, number>();
+  for (const item of items) {
+    const skuId = String(item?.sku_id ?? "");
+    if (!activeSkus.has(skuId)) throw new HttpError(400, "Unknown or inactive SKU", "BAD_SKU");
+    let opening = 0;
+    if (item.opening_qty !== undefined && item.opening_qty !== null && item.opening_qty !== "") {
+      const qty = parseQty(item.opening_qty);
+      if (qty === null) throw new HttpError(400, "Opening must be a whole number, 0 or more", "BAD_QTY");
+      opening = qty;
+    }
+    wanted.set(skuId, opening);
   }
 
   // Starting stock can only be typed on a desk's very first day; afterwards
   // stock arrives through "In" or an incoming transfer.
-  let opening = 0;
-  if (body.opening_qty !== undefined && body.opening_qty !== null && body.opening_qty !== "") {
-    const qty = parseQty(body.opening_qty);
-    if (qty === null) throw new HttpError(400, "Opening must be a whole number, 0 or more", "BAD_QTY");
-    if (qty > 0) {
-      const [earlier] = await store.deskDays({ deskId: desk.desk_id, before: date, limit: 1 });
-      if (earlier) throw new HttpError(409, "Opening stock can only be set on a desk's first day", "OPENING_LOCKED");
-      opening = qty;
-    }
+  if ([...wanted.values()].some((q) => q > 0)) {
+    const [earlier] = await store.deskDays({ deskId: desk.desk_id, before: date, limit: 1 });
+    if (earlier) throw new HttpError(409, "Opening stock can only be set on a desk's first day", "OPENING_LOCKED");
   }
-  await store.insertLedgerRows([{ ...key, opening_qty: opening, performed_by: user.accountId }]);
-  return c.json({ ok: true });
+
+  const key = (sku_id: string) => ({ ledger_date: date, desk_id: desk.desk_id, sku_id, branch_id: desk.branch_id });
+  const existing = new Map((await store.ledger({ date, deskId: desk.desk_id })).map((row) => [row.sku_id, row]));
+  const restore = [...wanted.keys()].filter((id) => existing.get(id)?.excluded);
+  const fresh = [...wanted].filter(([id]) => !existing.has(id));
+  if (restore.length) await store.patchLedgerRows(restore.map((id) => ({ ...key(id), excluded: false, performed_by: user.accountId })));
+  if (fresh.length) await store.insertLedgerRows(fresh.map(([id, opening_qty]) => ({ ...key(id), opening_qty, performed_by: user.accountId })));
+  return c.json({ ok: true, added: fresh.length, restored: restore.length });
 });
 
 r.delete("/stock/desk/:deskId/sku/:skuId", async (c) => {
