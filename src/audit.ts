@@ -1,6 +1,7 @@
 // Row-level audit rules, shared by the DemoStore so its audit rows match what
 // the Postgres trigger audit_row_change() writes (supabase/migrations/
 // 20261112_02_audit.sql). Keep the two in step.
+import { currentDeskId } from "./legacyCodes";
 import type { AuditEntry } from "./types";
 import type { Actor } from "./actor";
 import { laosDate } from "./time";
@@ -118,14 +119,16 @@ export function reopenedDatesFrom(entries: AuditEntry[], deskIds: string[], from
   const wanted = new Set(deskIds);
   const out = new Map<string, Set<string>>();
   for (const e of entries) {
-    if (e.table_name !== "desk_days" || e.op !== "UPDATE" || !e.desk_id || !wanted.has(e.desk_id)) continue;
+    // An entry from before a case was renamed carries its old code.
+    const deskId = e.desk_id ? currentDeskId(e.desk_id) : null;
+    if (e.table_name !== "desk_days" || e.op !== "UPDATE" || !deskId || !wanted.has(deskId)) continue;
     if (e.old_values?.status !== "done" || e.new_values?.status === "done" || e.new_values?.status == null) continue;
     const raw = e.row_key?.ledger_date ?? e.old_values?.ledger_date;
     const date = typeof raw === "string" ? raw : laosDate(new Date(e.created_at));
     if (date < from || date > to) continue;
-    const set = out.get(e.desk_id) ?? new Set<string>();
+    const set = out.get(deskId) ?? new Set<string>();
     set.add(date);
-    out.set(e.desk_id, set);
+    out.set(deskId, set);
   }
   return out;
 }

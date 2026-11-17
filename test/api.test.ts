@@ -1,7 +1,7 @@
 // End-to-end rules through the real routes, on the demo dataset:
 //   MM-D01  checked in today (GB-001, GB-002, NK-010, RG-030)
 //   MM-D02  Done yesterday, not started today
-//   TS-D01  yesterday left at check_in (unfinished)
+//   VTC-D01  yesterday left at check_in (unfinished)
 //   IT-D01  Done today
 //   VT-D01  in final count today
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -62,13 +62,13 @@ describe("login", () => {
 describe("user level", () => {
   it("staff are confined to their own branch", async () => {
     const staff = await asStaff("B-MM");
-    const cards = (await call(staff, "GET", "/stock/desks?branchId=B-TS")).json.desks;
+    const cards = (await call(staff, "GET", "/stock/desks?branchId=B-VTC")).json.desks;
     expect(new Set(cards.map((d: any) => d.branch_id))).toEqual(new Set(["B-MM"]));
-    expect((await call(staff, "GET", `/stock/desk/TS-D01?date=${TODAY}`)).status).toBe(403);
-    expect((await call(staff, "POST", "/stock/desk/TS-D01/checkin", { date: TODAY })).status).toBe(403);
-    expect((await call(staff, "GET", "/dashboard?deskId=TS-D01")).status).toBe(403);
-    expect((await call(staff, "GET", "/report?deskId=TS-D01")).status).toBe(403);
-    // A Talat Sao document cannot be printed by Morning Market staff.
+    expect((await call(staff, "GET", `/stock/desk/VTC-D01?date=${TODAY}`)).status).toBe(403);
+    expect((await call(staff, "POST", "/stock/desk/VTC-D01/checkin", { date: TODAY })).status).toBe(403);
+    expect((await call(staff, "GET", "/dashboard?deskId=VTC-D01")).status).toBe(403);
+    expect((await call(staff, "GET", "/report?deskId=VTC-D01")).status).toBe(403);
+    // A Vientiane Center document cannot be printed by Morning Market staff.
     expect((await call(staff, "GET", "/documents/a0000000-0000-0000-0000-000000000002/print")).status).toBe(403);
     expect((await call(staff, "GET", "/documents/a0000000-0000-0000-0000-000000000001/print")).status).toBe(200);
   });
@@ -167,18 +167,18 @@ describe("admin-readable passwords", () => {
 
 describe("daily cycle", () => {
   it("check-in is blocked until the unfinished earlier day is Done", async () => {
-    const staff = await asStaff("B-TS");
-    const blocked = await call(staff, "POST", "/stock/desk/TS-D01/checkin", { date: TODAY });
+    const staff = await asStaff("B-VTC");
+    const blocked = await call(staff, "POST", "/stock/desk/VTC-D01/checkin", { date: TODAY });
     expect(blocked.status).toBe(409);
     expect(blocked.json.code).toBe("EARLIER_DAY_OPEN");
     expect(blocked.json.openDate).toBe(YESTERDAY);
-    const card = (await call(staff, "GET", "/stock/desks")).json.desks.find((d: any) => d.desk_id === "TS-D01");
+    const card = (await call(staff, "GET", "/stock/desks")).json.desks.find((d: any) => d.desk_id === "VTC-D01");
     expect(card.openEarlierDate).toBe(YESTERDAY);
 
     // Staff may finish the unfinished day themselves, then check in.
-    expect((await closeDay(staff, "TS-D01", YESTERDAY)).status).toBe(200);
-    expect((await call(staff, "POST", "/stock/desk/TS-D01/checkin", { date: TODAY })).status).toBe(200);
-    expect((await detailOf(staff, "TS-D01", TODAY)).status).toBe("check_in");
+    expect((await closeDay(staff, "VTC-D01", YESTERDAY)).status).toBe(200);
+    expect((await call(staff, "POST", "/stock/desk/VTC-D01/checkin", { date: TODAY })).status).toBe(200);
+    expect((await detailOf(staff, "VTC-D01", TODAY)).status).toBe("check_in");
   });
 
   it("Done is refused until every row is counted and explained", async () => {
@@ -322,7 +322,7 @@ describe("daily cycle", () => {
   });
 
   it("GET /desks/:id/info refuses staff of another branch", async () => {
-    const other = await asStaff("B-TS");
+    const other = await asStaff("B-VTC");
     expect((await call(other, "GET", "/desks/MM-D01/info")).status).toBe(403);
   });
 
@@ -415,14 +415,14 @@ describe("linked transfers", () => {
   it("gold leaves the sender, stays in the company total while in transit, and lands when confirmed", async () => {
     // Same-branch hand-overs are instant Moves (test/moves.test.ts); this is the cross-branch send / receive flow.
     const staff = await asStaff("B-MM");
-    const ts = await asStaff("B-TS");
+    const ts = await asStaff("B-VTC");
     const admin = await asAdmin();
     const total = async () => (await call(admin, "GET", "/dashboard")).json.portfolio.total_pcs;
     const totalBefore = await total();
     const fromBefore = rowOf(await detailOf(staff, "MM-D01", TODAY), "GB-001");
 
-    expect((await call(staff, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "TS-D02", skuId: "GB-001", qty: 999 })).json.code).toBe("NOT_ENOUGH_STOCK");
-    const sent = await call(staff, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "TS-D02", skuId: "GB-001", qty: 3 });
+    expect((await call(staff, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "VTC-D02", skuId: "GB-001", qty: 999 })).json.code).toBe("NOT_ENOUGH_STOCK");
+    const sent = await call(staff, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "VTC-D02", skuId: "GB-001", qty: 3 });
     expect(sent.status).toBe(200);
     expect(sent.json.kind).toBe("transfer"); // another branch
 
@@ -434,11 +434,11 @@ describe("linked transfers", () => {
 
     // The receiving desk must have an open day to receive into.
     expect((await call(ts, "POST", `/transfers/${sent.json.id}/receive`, { date: TODAY })).json.code).toBe("NOT_CHECKED_IN");
-    await call(ts, "POST", "/stock/desk/TS-D02/checkin", { date: TODAY });
+    await call(ts, "POST", "/stock/desk/VTC-D02/checkin", { date: TODAY });
     expect((await call(ts, "POST", `/transfers/${sent.json.id}/receive`, { date: TODAY })).status).toBe(200);
     expect((await call(ts, "POST", `/transfers/${sent.json.id}/receive`, { date: TODAY })).json.code).toBe("NOT_IN_TRANSIT");
 
-    const received = rowOf(await detailOf(ts, "TS-D02", TODAY), "GB-001");
+    const received = rowOf(await detailOf(ts, "VTC-D02", TODAY), "GB-001");
     expect(received.transfer_in).toBe(3);
     expect(received.closing_qty).toBe(3);
     expect(await total()).toBe(totalBefore);
@@ -447,9 +447,9 @@ describe("linked transfers", () => {
 
   it("a transfer to another branch can be cancelled before it is received", async () => {
     const mm = await asStaff("B-MM");
-    const ts = await asStaff("B-TS");
+    const ts = await asStaff("B-VTC");
     const before = rowOf(await detailOf(mm, "MM-D01", TODAY), "RG-030");
-    const sent = await call(mm, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "TS-D02", skuId: "RG-030", qty: 2 });
+    const sent = await call(mm, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "VTC-D02", skuId: "RG-030", qty: 2 });
     expect(sent.json.kind).toBe("transfer");
     expect(rowOf(await detailOf(mm, "MM-D01", TODAY), "RG-030").transfer_out).toBe(2);
     // Only the sending branch may cancel.
@@ -461,7 +461,7 @@ describe("linked transfers", () => {
 
   it("the sender can close while the transfer is still in transit", async () => {
     const mm = await asStaff("B-MM");
-    await call(mm, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "TS-D02", skuId: "RG-030", qty: 2 });
+    await call(mm, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "VTC-D02", skuId: "RG-030", qty: 2 });
     expect((await closeDay(mm, "MM-D01", TODAY)).status).toBe(200);
   });
 });
@@ -478,7 +478,7 @@ describe("documents", () => {
 
   it("a desk from another branch is refused", async () => {
     const admin = await asAdmin();
-    expect((await call(admin, "POST", "/documents", { title: "x", branchId: "B-MM", deskId: "TS-D01" })).json.code).toBe("DESK_NOT_IN_BRANCH");
+    expect((await call(admin, "POST", "/documents", { title: "x", branchId: "B-MM", deskId: "VTC-D01" })).json.code).toBe("DESK_NOT_IN_BRANCH");
   });
 
   it("proposals are approved once, by an admin; ordinary documents have no status", async () => {
@@ -631,31 +631,31 @@ describe("branch scope", () => {
 
   it("staff dashboard only has own branch", async () => {
     const staff = await asStaff("B-MM");
-    const dash = (await call(staff, "GET", "/dashboard?branchId=B-TS")).json;
+    const dash = (await call(staff, "GET", "/dashboard?branchId=B-VTC")).json;
     expect(dash.branchCards.map((b: any) => b.branch_id)).toEqual(["B-MM"]);
     for (const item of dash.watchlist.topLow) expect(item.branch_id).toBe("B-MM");
   });
 
   it("manager report only has own branch", async () => {
     const manager = await asManager("B-MM");
-    const res = await call(manager, "GET", "/report?branchId=B-TS");
+    const res = await call(manager, "GET", "/report?branchId=B-VTC");
     expect(res.status).toBe(200);
     const text = JSON.stringify(res.json);
-    for (const other of ["TS-D01", "IT-D01", "VT-D01"]) expect(text).not.toContain(other);
+    for (const other of ["VTC-D01", "IT-D01", "VT-D01"]) expect(text).not.toContain(other);
     expect(text).toContain("MM-D01");
   });
 
   it("staff audit only has own branch", async () => {
     const staff = await asStaff("B-MM");
-    expect((await call(staff, "GET", "/audit?deskId=TS-D01")).status).toBe(403);
-    expect((await call(staff, "GET", "/audit?branchId=B-TS")).status).toBe(403);
+    expect((await call(staff, "GET", "/audit?deskId=VTC-D01")).status).toBe(403);
+    expect((await call(staff, "GET", "/audit?branchId=B-VTC")).status).toBe(403);
     const mine = await call(staff, "GET", "/audit?deskId=MM-D01");
     expect(mine.status).toBe(200);
     const branch = await call(staff, "GET", "/audit");
     expect(branch.status).toBe(200);
     for (const e of branch.json.entries) expect([e.branch_id, e.to_branch_id]).toContain("B-MM");
     const manager = await asManager("B-MM");
-    expect((await call(manager, "GET", "/audit?branchId=B-TS")).status).toBe(403);
+    expect((await call(manager, "GET", "/audit?branchId=B-VTC")).status).toBe(403);
   });
 
   it("admin dashboard reorder count = sum of per-branch counts", async () => {
@@ -668,7 +668,7 @@ describe("branch scope", () => {
     expect(mm.status).toBe("critical");
     expect(vt.status).toBe("ok");
     const all = (await call(admin, "GET", "/dashboard")).json;
-    const perBranch = await Promise.all(["B-MM", "B-TS", "B-IT", "B-VT"].map(async (b) => (await call(admin, "GET", `/dashboard?branchId=${b}`)).json.watchlist.lowCount));
+    const perBranch = await Promise.all(["B-MM", "B-VTC", "B-IT", "B-VT"].map(async (b) => (await call(admin, "GET", `/dashboard?branchId=${b}`)).json.watchlist.lowCount));
     expect(all.watchlist.lowCount).toBe(perBranch.reduce((a, n) => a + n, 0));
     const gb = all.watchlist.topLow.filter((i: any) => i.sku_id === "GB-001");
     // Each branch follows its own rule: listed at Morning Market, not at Vangthong.
@@ -699,7 +699,7 @@ describe("SKU per branch", () => {
     expect((await call(admin, "POST", "/skus", { ...newSku, sku_id: "AD-1", branchId: "B-VT" })).status).toBe(200);
     expect(await carriedIn("AD-1")).toEqual(["B-VT"]);
     expect((await call(admin, "POST", "/skus", { ...newSku, sku_id: "AD-2", allBranches: true })).status).toBe(200);
-    expect(await carriedIn("AD-2")).toEqual(["B-IT", "B-MM", "B-TS", "B-VT"]);
+    expect(await carriedIn("AD-2")).toEqual(["B-IT", "B-MM", "B-VT", "B-VTC"]);
     expect((await call(admin, "POST", "/skus", { ...newSku, sku_id: "AD-3" })).json.code).toBe("BRANCH_REQUIRED");
   });
 
@@ -740,8 +740,8 @@ describe("SKU per branch", () => {
 
   it("carried off refused while inbound", async () => {
     const admin = await asAdmin();
-    expect((await call(admin, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "TS-D01", skuId: "GB-001", qty: 3 })).status).toBe(200);
-    expect((await call(admin, "PUT", "/skus/GB-001/carried", { branchId: "B-TS", carried: false })).json.code).toBe("STOCK_HELD");
+    expect((await call(admin, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "VTC-D01", skuId: "GB-001", qty: 3 })).status).toBe(200);
+    expect((await call(admin, "PUT", "/skus/GB-001/carried", { branchId: "B-VTC", carried: false })).json.code).toBe("STOCK_HELD");
   });
 
   it("carried off allowed at zero", async () => {
@@ -761,9 +761,9 @@ describe("SKU per branch", () => {
 describe("branch manager", () => {
   it("sees only own branch", async () => {
     const manager = await asManager("B-MM");
-    const cards = (await call(manager, "GET", "/stock/desks?branchId=B-TS")).json.desks;
+    const cards = (await call(manager, "GET", "/stock/desks?branchId=B-VTC")).json.desks;
     expect(new Set(cards.map((d: any) => d.branch_id))).toEqual(new Set(["B-MM"]));
-    expect((await call(manager, "GET", `/stock/desk/TS-D01?date=${TODAY}`)).status).toBe(403);
+    expect((await call(manager, "GET", `/stock/desk/VTC-D01?date=${TODAY}`)).status).toBe(403);
     const meta = (await call(manager, "GET", "/app-meta")).json;
     expect(new Set(meta.desks.map((d: any) => d.branch_id))).toEqual(new Set(["B-MM"]));
     expect(meta.user.role).toBe("manager");
@@ -786,7 +786,7 @@ describe("branch manager", () => {
     expect(old.status).toBe(403);
     expect(old.json.code).toBe("REOPEN_TOO_OLD");
     const manager = await asManager("B-MM");
-    expect((await call(manager, "POST", "/stock/desk/TS-D01/reopen", { date: YESTERDAY, reason: "other branch" })).status).toBe(403);
+    expect((await call(manager, "POST", "/stock/desk/VTC-D01/reopen", { date: YESTERDAY, reason: "other branch" })).status).toBe(403);
   });
 
   it("staff still cannot reopen; admin can reopen any age", async () => {
@@ -816,7 +816,7 @@ describe("branch manager", () => {
     expect((await call(manager, "PATCH", `/users/${id}`, { unlock: true })).status).toBe(200);
     expect((await call(null, "POST", "/auth/login", creds(id, "1234"))).status).toBe(200);
     // another branch's staff are out of reach
-    expect((await call(manager, "PATCH", `/users/${DEMO_STAFF["B-TS"]}`, { unlock: true })).status).toBe(403);
+    expect((await call(manager, "PATCH", `/users/${DEMO_STAFF["B-VTC"]}`, { unlock: true })).status).toBe(403);
   });
 
   it("admin can create a manager; a manager without a branch is refused", async () => {
@@ -824,7 +824,7 @@ describe("branch manager", () => {
     const bad = await call(admin, "POST", "/users", { displayName: "Boss", username: "boss", role: "manager", password: "222222" });
     expect(bad.status).toBe(400);
     expect(bad.json.code).toBe("BAD_BRANCH");
-    const ok = await call(admin, "POST", "/users", { displayName: "Boss", username: "boss", role: "manager", branchId: "B-TS", password: "222222" });
+    const ok = await call(admin, "POST", "/users", { displayName: "Boss", username: "boss", role: "manager", branchId: "B-VTC", password: "222222" });
     expect(ok.status).toBe(200);
     const session = await login(ok.json.id, "222222");
     expect((await call(session, "GET", "/auth/me")).json.user.role).toBe("manager");
@@ -1024,7 +1024,7 @@ describe("data mode and /api/meta (Task 18)", () => {
   it("admin meta reports seedRows > 0 when seed rows exist; others see null (unknown)", async () => {
     seedStaff();
     const admin = await asAdmin();
-    const staff = await asStaff("B-TS");
+    const staff = await asStaff("B-VTC");
     const env = { KPV_DATA_MODE: "test" };
     const a = await call(admin, "GET", "/meta", undefined, TODAY, env);
     expect(a.json.dataMode).toBe("test");
@@ -1035,8 +1035,8 @@ describe("data mode and /api/meta (Task 18)", () => {
 
   it("refuses a transfer or move between a real case and a mock case (MIXED_TEST_TRANSFER)", async () => {
     const staff = await asStaff("B-MM"); // first request builds the demo store for TODAY
-    db().desks.find((d: any) => d.desk_id === "TS-D02").is_seed = true;
-    const sent = await call(staff, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "TS-D02", skuId: "GB-001", qty: 1 });
+    db().desks.find((d: any) => d.desk_id === "VTC-D02").is_seed = true;
+    const sent = await call(staff, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "VTC-D02", skuId: "GB-001", qty: 1 });
     expect(sent.status).toBe(400);
     expect(sent.json.code).toBe("MIXED_TEST_TRANSFER");
     // nothing left the sender
@@ -1075,7 +1075,7 @@ describe("case history and issue grid", () => {
   });
 
   it("history refuses another branch, bad dates and caps days", async () => {
-    expect((await call(await asStaff("B-TS"), "GET", "/desks/MM-D01/history")).status).toBe(403);
+    expect((await call(await asStaff("B-VTC"), "GET", "/desks/MM-D01/history")).status).toBe(403);
     const staff = await asStaff("B-MM");
     expect((await call(staff, "GET", "/desks/MM-D01/history?to=nope")).status).toBe(400);
     expect((await call(staff, "GET", "/desks/MM-D01/history?days=0")).status).toBe(400);
@@ -1112,10 +1112,10 @@ describe("case history and issue grid", () => {
   it("grid: admin must name a branch, others are scoped, bad month is 400", async () => {
     const admin = await asAdmin();
     expect((await call(admin, "GET", "/report/grid?month=2026-11")).status).toBe(400);
-    expect((await call(admin, "GET", "/report/grid?month=2026-11&branch=B-TS")).status).toBe(200);
+    expect((await call(admin, "GET", "/report/grid?month=2026-11&branch=B-VTC")).status).toBe(200);
     const staff = await asStaff("B-MM");
     expect((await call(staff, "GET", "/report/grid?month=bad")).status).toBe(400);
-    const other = await call(staff, "GET", "/report/grid?month=2026-11&branch=B-TS");
+    const other = await call(staff, "GET", "/report/grid?month=2026-11&branch=B-VTC");
     expect(other.json.rows.every((r: any) => r.deskId.startsWith("MM-"))).toBe(true);
   });
 

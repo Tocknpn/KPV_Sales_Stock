@@ -36,11 +36,11 @@ beforeEach(async () => {
   db = await freshDb({ withBase: true, withRoles: true });
   admin = await account(null, 'Owner', 'admin');
   mgrMM = await account('B-MM', 'Mgr MM', 'manager');
-  mgrTS = await account('B-TS', 'Mgr TS', 'manager');
+  mgrTS = await account('B-VTC', 'Mgr TS', 'manager');
   staffMM = await account('B-MM', 'Staff MM', 'staff');
-  staffTS = await account('B-TS', 'Staff TS', 'staff');
+  staffTS = await account('B-VTC', 'Staff TS', 'staff');
   await db.exec(`insert into master_sku (sku_id, name_en, category) values ('S1','Test','Rings')`);
-  await db.exec(`insert into desks (desk_id, branch_id, display_name) values ('MM-D01','B-MM','x'), ('TS-D01','B-TS','x')`);
+  await db.exec(`insert into desks (desk_id, branch_id, display_name) values ('MM-D01','B-MM','x'), ('VTC-D01','B-VTC','x')`);
 });
 
 describe('role constraint', () => {
@@ -133,9 +133,9 @@ describe('branch values guard', () => {
 
   it('staff cannot touch another branch, company rules or the catalogue', async () => {
     await asActor(db, staffMM);
-    await expectPgError(db.query(`insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell) values ('sku','S1','B-TS',2)`), 'ROLE_DENIED');
+    await expectPgError(db.query(`insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell) values ('sku','S1','B-VTC',2)`), 'ROLE_DENIED');
     await expectPgError(db.query(`insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell) values ('sku','S1',null,2)`), 'ROLE_DENIED');
-    await expectPgError(db.query(`insert into branch_sku (branch_id, sku_id) values ('B-TS','S1')`), 'ROLE_DENIED');
+    await expectPgError(db.query(`insert into branch_sku (branch_id, sku_id) values ('B-VTC','S1')`), 'ROLE_DENIED');
     await expectPgError(db.query(`update master_sku set name_lo = 'x' where sku_id = 'S1'`), 'ROLE_DENIED');
     await expectPgError(db.query(`delete from master_sku where sku_id = 'S1'`), 'ROLE_DENIED');
     await expectPgError(db.query(`insert into sku_type (type_id, name_en) values ('X','X')`), 'ROLE_DENIED');
@@ -143,8 +143,8 @@ describe('branch values guard', () => {
 
   it('an admin may write any branch and company rules', async () => {
     await asActor(db, admin);
-    await db.query(`insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell) values ('sku','S1','B-TS',2), ('sku','S1',null,1)`);
-    await db.query(`insert into branch_sku (branch_id, sku_id) values ('B-TS','S1')`);
+    await db.query(`insert into replenishment_rule (scope, scope_key, branch_id, avg_daily_sell) values ('sku','S1','B-VTC',2), ('sku','S1',null,1)`);
+    await db.query(`insert into branch_sku (branch_id, sku_id) values ('B-VTC','S1')`);
     await db.query(`update master_sku set name_lo = 'ok' where sku_id = 'S1'`);
   });
 });
@@ -191,7 +191,7 @@ describe('desk day reopen guard', () => {
     await doneDay('MM-D01', 'B-MM', 2);
     await doneDay('MM-D01', 'B-MM', 3);
     await doneDay('MM-D01', 'B-MM', 4);
-    await doneDay('TS-D01', 'B-TS', 2);
+    await doneDay('VTC-D01', 'B-VTC', 2);
   });
 
   it('manager reopens own-branch Done day of 2 days ago', async () => {
@@ -209,7 +209,7 @@ describe('desk day reopen guard', () => {
   it('manager cannot reopen 4 days ago or another branch', async () => {
     await asActor(db, mgrMM);
     await expectPgError(reopen('MM-D01', 4), 'REOPEN_TOO_OLD');
-    await expectPgError(reopen('TS-D01', 2), 'ROLE_DENIED');
+    await expectPgError(reopen('VTC-D01', 2), 'ROLE_DENIED');
   });
 
   it('staff cannot reopen', async () => {
@@ -220,7 +220,7 @@ describe('desk day reopen guard', () => {
   it('admin can reopen any age', async () => {
     await asActor(db, admin);
     await reopen('MM-D01', 4);
-    await reopen('TS-D01', 2);
+    await reopen('VTC-D01', 2);
   });
 
   it('other updates of a Done day are not treated as a reopen', async () => {

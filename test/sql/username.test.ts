@@ -12,7 +12,7 @@ describe('20261113_08_username_login', () => {
       insert into staff_accounts (branch_id, display_name, pin_hash, role, created_at) values
         (null,   'Owner',       'h', 'admin', now() - interval '5 min'),
         ('B-MM', 'Somchai S.',  'h', 'staff', now() - interval '4 min'),
-        ('B-TS', 'Somchai S',   'h', 'staff', now() - interval '3 min'),
+        ('B-VTC', 'Somchai S',   'h', 'staff', now() - interval '3 min'),
         ('B-IT', 'ນ້ອຍ',         'h', 'staff', now() - interval '2 min'),
         ('B-VT', 'ແກ້ວ',         'h', 'staff', now() - interval '1 min'),
         ('B-VT', 'Al',          'h', 'staff', now());

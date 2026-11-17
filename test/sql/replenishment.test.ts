@@ -37,7 +37,7 @@ interface Day {
 /** One ledger row (and its desk day, created on first use). */
 async function day(d: Day): Promise<void> {
   const desk = d.desk ?? 'MM-D01';
-  const branch = desk.startsWith('TS') ? 'B-TS' : 'B-MM';
+  const branch = desk.startsWith('VTC') ? 'B-VTC' : 'B-MM';
   await db.query(
     `insert into desk_days (desk_id, ledger_date, branch_id, status) values ($1,$2,$3,$4)
      on conflict (desk_id, ledger_date) do nothing`,
@@ -73,9 +73,9 @@ beforeEach(async () => {
   await asActor(db, null, { jwtRole: 'postgres' });
   admin = await account(null, 'Owner', 'admin');
   mgrMM = await account('B-MM', 'Mgr MM', 'manager');
-  mgrTS = await account('B-TS', 'Mgr TS', 'manager');
+  mgrTS = await account('B-VTC', 'Mgr TS', 'manager');
   await db.exec(`insert into desks (desk_id, branch_id, display_name) values
-    ('MM-D01','B-MM','A'), ('MM-D02','B-MM','B'), ('TS-D01','B-TS','A')`);
+    ('MM-D01','B-MM','A'), ('MM-D02','B-MM','B'), ('VTC-D01','B-VTC','A')`);
   await db.exec(`insert into master_sku (sku_id, name_en, category) values
     ('S1','One','Ring'), ('S2','Two','Ring'), ('S3','Three','Ring')`);
 });
@@ -130,7 +130,7 @@ describe('branch_velocity', () => {
 
   it('other branches, excluded rows and open desks do not leak in', async () => {
     for (let i = 1; i <= 7; i++) await day({ date: dateOf(i), opening: 10, retail: 1 });
-    for (let i = 1; i <= 7; i++) await day({ date: dateOf(i), desk: 'TS-D01', opening: 10, retail: 5 });
+    for (let i = 1; i <= 7; i++) await day({ date: dateOf(i), desk: 'VTC-D01', opening: 10, retail: 5 });
     await day({ date: dateOf(1), sku: 'S2', opening: 10, retail: 5, excluded: true });
     // a second desk of the branch with an open day on an included date
     await day({ date: dateOf(2), desk: 'MM-D02', opening: 10, retail: 7, status: 'check_in' });
@@ -237,7 +237,7 @@ describe('replenishment_rule guard', () => {
   it('manager writes rules for their own branch only', async () => {
     await asActor(db, mgrMM);
     await rule('B-MM');
-    await expectPgError(rule('B-TS', 'S2'), 'ROLE_DENIED');
+    await expectPgError(rule('B-VTC', 'S2'), 'ROLE_DENIED');
     await db.query(`update replenishment_rule set avg_daily_sell = 5 where branch_id = 'B-MM'`);
     const v = await db.query<{ v: string }>(`select avg_daily_sell::text v from replenishment_rule where branch_id = 'B-MM'`);
     expect(v.rows[0].v).toBe('5.000');
@@ -249,7 +249,7 @@ describe('replenishment_rule guard', () => {
   it('admin writes company-wide and branch rules', async () => {
     await asActor(db, admin);
     await rule(null);
-    await rule('B-TS', 'S2');
+    await rule('B-VTC', 'S2');
     await db.query(`delete from replenishment_rule where branch_id is null`);
   });
 
@@ -258,7 +258,7 @@ describe('replenishment_rule guard', () => {
     const staff = await account('B-MM', 'Noy', 'staff');
     await asActor(db, staff);
     await rule('B-MM');
-    await expectPgError(rule('B-TS', 'S2'), 'ROLE_DENIED');
+    await expectPgError(rule('B-VTC', 'S2'), 'ROLE_DENIED');
     await expectPgError(rule(null, 'S2'), 'ROLE_DENIED');
   });
 });

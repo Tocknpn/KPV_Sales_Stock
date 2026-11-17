@@ -342,7 +342,7 @@ describe('purge_seed_data.sql', () => {
     expect(after.sku_type.real).toBe(5);
     expect(after.sku_weight.real).toBe(7);
     const br = await db.query<{ branch_id: string }>(`select branch_id from branches order by sort_order`);
-    expect(br.rows.map((b) => b.branch_id)).toEqual(['B-MM', 'B-TS', 'B-IT', 'B-VT']);
+    expect(br.rows.map((b) => b.branch_id)).toEqual(['B-MM', 'B-VTC', 'B-IT', 'B-VT']);
     expect((await one<{ n: number }>(db, `select count(*)::int n from system_config`)).n).toBe(1);
     expect(after.master_sku.real).toBe(before.master_sku.real);
   });

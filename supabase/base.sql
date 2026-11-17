@@ -6,9 +6,9 @@
 -- ============================================================================
 
 insert into branches (branch_id, name_en, name_lo, sort_order) values
-  ('B-MM', 'Morning Market', 'ຕະຫຼາດເຊົ້າ', 1),
-  ('B-TS', 'Talat Sao', 'ຕະຫຼາດສາວ', 2),
-  ('B-IT', 'ITECC', 'ໄອເທັກ', 3),
+  ('B-MM', 'Morning Market', 'ຕະຫລາດເຊົ້າ', 1),
+  ('B-VTC', 'Vientiane Center', 'ວຽງຈັນເຊັນເຕີ', 2),
+  ('B-IT', 'ITECC', 'ໄອເຕັກ', 3),
   ('B-VT', 'Vangthong', 'ວັງທອງ', 4);
 
 insert into system_config (id, safety_buffer_days, spot_lak_per_baht, usd_to_lak_rate) values

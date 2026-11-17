@@ -68,14 +68,14 @@ describe("moves", () => {
   });
 
   it("destination with an unfinished earlier day → DEST_NOT_OPEN with openDate", async () => {
-    // TS-D01 left yesterday unfinished; TS-D02 is a fresh case with some stock.
-    const ts = await asStaff("B-TS");
-    expect((await call(ts, "POST", "/stock/desk/TS-D02/checkin", { date: TODAY })).status).toBe(200);
-    expect((await call(ts, "POST", "/stock/desk/TS-D02/sku", { date: TODAY, sku_id: "GB-001", opening_qty: 5 })).status).toBe(200);
-    const res = await call(ts, "POST", "/moves", body({ fromDeskId: "TS-D02", toDeskId: "TS-D01" }));
+    // VTC-D01 left yesterday unfinished; VTC-D02 is a fresh case with some stock.
+    const ts = await asStaff("B-VTC");
+    expect((await call(ts, "POST", "/stock/desk/VTC-D02/checkin", { date: TODAY })).status).toBe(200);
+    expect((await call(ts, "POST", "/stock/desk/VTC-D02/sku", { date: TODAY, sku_id: "GB-001", opening_qty: 5 })).status).toBe(200);
+    const res = await call(ts, "POST", "/moves", body({ fromDeskId: "VTC-D02", toDeskId: "VTC-D01" }));
     expect(res.status).toBe(409);
     expect(res.json).toMatchObject({ code: "DEST_NOT_OPEN", openDate: YESTERDAY });
-    expect(rowOf(await detailOf(ts, "TS-D02"), "GB-001").move).toBe(0);
+    expect(rowOf(await detailOf(ts, "VTC-D02"), "GB-001").move).toBe(0);
   });
 
   it("undo after the destination sold the pieces → NOT_ENOUGH_STOCK, nothing changes", async () => {
@@ -120,7 +120,7 @@ describe("moves", () => {
 
   it("staff cannot move to another branch's case via /moves (OTHER_BRANCH)", async () => {
     const staff = await asStaff("B-MM");
-    const res = await call(staff, "POST", "/moves", body({ toDeskId: "TS-D02" }));
+    const res = await call(staff, "POST", "/moves", body({ toDeskId: "VTC-D02" }));
     expect(res.status).toBe(400);
     expect(res.json.code).toBe("OTHER_BRANCH");
   });
@@ -134,7 +134,7 @@ describe("moves", () => {
     expect(await code({ lines: [] })).toBe("BAD_QTY");
     expect(await code({ clientRef: "x" })).toBe("BAD_CLIENT_REF");
     expect(await code({ lines: [{ skuId: "GB-001", qty: 999 }] })).toBe("NOT_ENOUGH_STOCK");
-    expect((await call(staff, "POST", "/moves", body({ fromDeskId: "TS-D01" }))).status).toBe(403);
+    expect((await call(staff, "POST", "/moves", body({ fromDeskId: "VTC-D01" }))).status).toBe(403);
   });
 
   it("a Done destination or source day refuses with 423", async () => {

@@ -120,13 +120,13 @@ describe("SKU import", () => {
     const admin = await asAdmin();
     const res = await imp(admin, [
       { ...NEW_ROW, branch_id: "B-VT" },
-      { sku_id: "GB-001", name: "", type: "", grams: "", avg_daily_sell: 8, branch_id: "B-TS" },
+      { sku_id: "GB-001", name: "", type: "", grams: "", avg_daily_sell: 8, branch_id: "B-VTC" },
       { ...NEW_ROW, name: "x" },
     ], { branchId: "all" });
     expect(res.json.errors).toEqual([{ line: 4, error: "branch_id is required" }]);
-    const ok = await imp(admin, [{ sku_id: "GB-001", name: "", type: "", grams: "", avg_daily_sell: 8, branch_id: "B-TS" }], { branchId: "all" });
+    const ok = await imp(admin, [{ sku_id: "GB-001", name: "", type: "", grams: "", avg_daily_sell: 8, branch_id: "B-VTC" }], { branchId: "all" });
     expect(ok.json).toMatchObject({ updated: 1 });
-    expect(await ruleOf("GB-001", "B-TS")).toMatchObject({ avg_daily_sell: 8 });
+    expect(await ruleOf("GB-001", "B-VTC")).toMatchObject({ avg_daily_sell: 8 });
     expect(await skuOf("GB-001")).toMatchObject({ name_lo: "ທອງຄຳແທ່ງ" });
   });
 
@@ -252,7 +252,7 @@ describe("SKU export", () => {
     const all = (await call(admin, "GET", "/skus/export?branchId=all")).json.rows;
     const one = (await call(admin, "GET", "/skus/export?branchId=B-MM")).json.rows;
     expect(all.length).toBe(one.length * 4);
-    expect(new Set(all.map((r: any) => r.branch_id))).toEqual(new Set(["B-MM", "B-TS", "B-IT", "B-VT"]));
+    expect(new Set(all.map((r: any) => r.branch_id))).toEqual(new Set(["B-MM", "B-VTC", "B-IT", "B-VT"]));
   });
 
   it("an export imports back unchanged", async () => {

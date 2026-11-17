@@ -24,8 +24,8 @@ beforeEach(async () => {
   await db.exec(`insert into master_sku (sku_id, name_en, category) values ('S1','One','Rings'), ('S2','Two','Rings')`);
   await db.query(`insert into staff_accounts (id, display_name, pin_hash, role) values ($1,'Tester','x','admin')`, [ACTOR]);
   await asActor(db, ACTOR);
-  await db.exec(`insert into desks (desk_id, branch_id, display_name) values ('MM-D01','B-MM','a'),('MM-D02','B-MM','b'),('TS-D01','B-TS','c')`);
-  await db.query(`insert into desk_days (desk_id, ledger_date, branch_id) values ('MM-D01',$1,'B-MM'),('MM-D02',$1,'B-MM'),('TS-D01',$1,'B-TS')`, [D]);
+  await db.exec(`insert into desks (desk_id, branch_id, display_name) values ('MM-D01','B-MM','a'),('MM-D02','B-MM','b'),('VTC-D01','B-VTC','c')`);
+  await db.query(`insert into desk_days (desk_id, ledger_date, branch_id) values ('MM-D01',$1,'B-MM'),('MM-D02',$1,'B-MM'),('VTC-D01',$1,'B-VTC')`, [D]);
   await db.query(
     `insert into daily_stock_ledger (ledger_date, desk_id, branch_id, sku_id, opening_qty) values
        ($1,'MM-D01','B-MM','S1',10), ($1,'MM-D01','B-MM','S2',3), ($1,'MM-D02','B-MM','S1',1)`,
@@ -97,7 +97,7 @@ describe('move_stock', () => {
     await db.query(`update desk_days set status = 'done' where desk_id = 'MM-D01'`);
     expect(await move([{ sku_id: 'S1', qty: 1 }])).toMatchObject({ ok: false, code: 'DAY_LOCKED' });
     await db.query(`update desk_days set status = 'check_in' where desk_id = 'MM-D01'`);
-    expect(await move([{ sku_id: 'S1', qty: 1 }], REF1, 'MM-D01', 'TS-D01')).toMatchObject({ ok: false, code: 'OTHER_BRANCH' });
+    expect(await move([{ sku_id: 'S1', qty: 1 }], REF1, 'MM-D01', 'VTC-D01')).toMatchObject({ ok: false, code: 'OTHER_BRANCH' });
     expect(await move([{ sku_id: 'S1', qty: 1 }], REF1, 'MM-D01', 'MM-D01')).toMatchObject({ ok: false, code: 'SAME_DESK' });
     expect(await move([{ sku_id: 'S1', qty: 1 }], REF1, 'MM-D01', 'MM-D02', '2026-01-09')).toMatchObject({ ok: false, code: 'NOT_CHECKED_IN' });
     expect(await transferCount()).toBe(0);

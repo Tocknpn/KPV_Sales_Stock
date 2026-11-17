@@ -242,7 +242,7 @@ describe("audit paging cursor", () => {
     expect(urls[0]).toContain("limit=51");
     expect(urls[0]).toContain("2026-11-12T10%3A00%3A00.123456%2B00%3A00");
     expect(urls[0]).not.toContain("+");
-    expect(q).toContain("and=(or(created_at.lt.2026-11-12T10:00:00.123456%2B00:00,and(created_at.eq.2026-11-12T10:00:00.123456%2B00:00,id.lt.abc)),or(desk_id.eq.MM-D01,to_desk_id.eq.MM-D01))");
+    expect(q).toContain("and=(or(created_at.lt.2026-11-12T10:00:00.123456%2B00:00,and(created_at.eq.2026-11-12T10:00:00.123456%2B00:00,id.lt.abc)),or(desk_id.in.(MM-D01),to_desk_id.in.(MM-D01)))");
   });
 });
 

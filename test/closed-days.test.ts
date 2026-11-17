@@ -24,7 +24,7 @@ describe("closed days", () => {
     const ok = await call(m, "POST", "/closed-days", { branchId: "B-MM", date: "2026-12-25", reason: "Holiday" });
     expect(ok.status).toBe(200);
     expect(ok.json.added).toHaveLength(1);
-    expect((await call(m, "POST", "/closed-days", { branchId: "B-TS", date: "2026-12-25", reason: "x" })).status).toBe(403);
+    expect((await call(m, "POST", "/closed-days", { branchId: "B-VTC", date: "2026-12-25", reason: "x" })).status).toBe(403);
     const all = await call(m, "POST", "/closed-days", { branchId: "all", date: "2026-12-26", reason: "x" });
     expect(all.status).toBe(403);
     expect(all.json.code).toBe("ROLE_DENIED");
@@ -53,12 +53,12 @@ describe("closed days", () => {
   it("staff and managers only list their own branch; admin filters by branch", async () => {
     const admin = await asAdmin();
     await call(admin, "POST", "/closed-days", { branchId: "all", date: "2026-12-25", reason: "x" });
-    const staff = await call(await asStaff("B-MM"), "GET", "/closed-days?branchId=B-TS");
+    const staff = await call(await asStaff("B-MM"), "GET", "/closed-days?branchId=B-VTC");
     expect(staff.json.closedDays.map((d: any) => d.branch_id)).toEqual(["B-MM"]);
     const mgr = await call(await asManager("B-MM"), "GET", "/closed-days");
     expect(mgr.json.closedDays.map((d: any) => d.branch_id)).toEqual(["B-MM"]);
-    const ts = await call(admin, "GET", "/closed-days?branchId=B-TS");
-    expect(ts.json.closedDays.map((d: any) => d.branch_id)).toEqual(["B-TS"]);
+    const ts = await call(admin, "GET", "/closed-days?branchId=B-VTC");
+    expect(ts.json.closedDays.map((d: any) => d.branch_id)).toEqual(["B-VTC"]);
     expect((await call(admin, "GET", "/closed-days?from=bad")).status).toBe(400);
   });
 
@@ -67,7 +67,7 @@ describe("closed days", () => {
     await call(admin, "POST", "/closed-days", { branchId: "all", date: "2026-12-25", reason: "x" });
     expect((await call(await asStaff("B-MM"), "DELETE", "/closed-days?branchId=B-MM&date=2026-12-25")).status).toBe(403);
     const m = await asManager("B-MM");
-    expect((await call(m, "DELETE", "/closed-days?branchId=B-TS&date=2026-12-25")).status).toBe(403);
+    expect((await call(m, "DELETE", "/closed-days?branchId=B-VTC&date=2026-12-25")).status).toBe(403);
     expect((await call(m, "DELETE", "/closed-days?branchId=B-MM&date=2026-12-25")).status).toBe(200);
     expect((await call(m, "DELETE", "/closed-days?branchId=B-MM&date=2026-12-25")).status).toBe(404);
     expect((await call(m, "GET", "/closed-days")).json.closedDays).toHaveLength(0);

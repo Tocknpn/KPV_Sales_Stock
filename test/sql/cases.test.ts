@@ -28,12 +28,12 @@ beforeEach(async () => {
   await asActor(db, null, { jwtRole: 'postgres' });
   admin = await account(null, 'Owner', 'admin');
   mgrMM = await account('B-MM', 'Mgr MM', 'manager');
-  mgrTS = await account('B-TS', 'Mgr TS', 'manager');
+  mgrTS = await account('B-VTC', 'Mgr TS', 'manager');
   noy = await account('B-MM', 'Noy', 'staff');
   ann = await account('B-MM', 'Ann', 'staff');
-  tom = await account('B-TS', 'Tom', 'staff');
+  tom = await account('B-VTC', 'Tom', 'staff');
   await db.exec(`insert into desks (desk_id, branch_id, display_name) values
-    ('MM-D01','B-MM','A'), ('MM-D02','B-MM','B'), ('TS-D01','B-TS','A')`);
+    ('MM-D01','B-MM','A'), ('MM-D02','B-MM','B'), ('VTC-D01','B-VTC','A')`);
 });
 
 describe('desk_assignment', () => {
@@ -105,11 +105,11 @@ describe('desk_assignment', () => {
     await asActor(db, mgrMM);
     await assign('MM-D01', ann);
     await expectPgError(assign('MM-D01', tom), 'ASSIGN_OTHER_BRANCH');
-    await expectPgError(assign('TS-D01', tom), 'ROLE_DENIED'); // another branch's manager
+    await expectPgError(assign('VTC-D01', tom), 'ROLE_DENIED'); // another branch's manager
     await asActor(db, admin);
-    await expectPgError(assign('TS-D01', noy), 'ASSIGN_OTHER_BRANCH');
+    await expectPgError(assign('VTC-D01', noy), 'ASSIGN_OTHER_BRANCH');
     await asActor(db, mgrTS);
-    await assign('TS-D01', tom);
+    await assign('VTC-D01', tom);
   });
 
   it('inactive staff cannot be assigned', async () => {
@@ -134,7 +134,7 @@ describe('desk_assignment', () => {
     await asActor(db, mgrMM);
     await assign('MM-D01', noy);
     await asActor(db, admin);
-    await db.query(`update staff_accounts set branch_id = 'B-TS' where id = $1`, [noy]);
+    await db.query(`update staff_accounts set branch_id = 'B-VTC' where id = $1`, [noy]);
     expect(await active('MM-D01')).toEqual([]);
   });
 
@@ -161,9 +161,9 @@ describe('branch_closed_day', () => {
     await expectPgError(add('B-MM'), 'ROLE_DENIED');
     await asActor(db, mgrMM);
     await add('B-MM');
-    await expectPgError(add('B-TS'), 'ROLE_DENIED');
+    await expectPgError(add('B-VTC'), 'ROLE_DENIED');
     await asActor(db, admin);
-    await add('B-TS');
+    await add('B-VTC');
   });
 
   it('is unique per branch and date, audited, and created_by defaults to the actor', async () => {

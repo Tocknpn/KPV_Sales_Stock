@@ -33,7 +33,7 @@ describe("document print (case-sheet layout)", () => {
 
   it("another branch cannot print it", async () => {
     const admin = await asAdmin();
-    const created = await call(admin, "POST", "/documents", { branchId: "B-TS", title: "x", rows: [] });
+    const created = await call(admin, "POST", "/documents", { branchId: "B-VTC", title: "x", rows: [] });
     const staff = await asStaff("B-MM");
     expect((await call(staff, "GET", `/documents/${created.json.id}/print`)).status).toBe(403);
     expect((await call(admin, "GET", `/documents/${created.json.id}/print`)).text).toContain("—");

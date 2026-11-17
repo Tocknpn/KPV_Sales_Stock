@@ -30,7 +30,7 @@ describe("GET /replenishment", () => {
     expect((await call(await asAdmin(), "GET", "/replenishment")).json.code).toBe("BRANCH_REQUIRED");
     expect((await call(await asAdmin(), "GET", "/replenishment?branchId=nope")).status).toBe(404);
     const staff = await asStaff("B-MM");
-    expect((await call(staff, "GET", "/replenishment?branchId=B-TS")).json.branchId).toBe("B-MM");
+    expect((await call(staff, "GET", "/replenishment?branchId=B-VTC")).json.branchId).toBe("B-MM");
   });
 
   it("rows are sorted critical, warning, ok, no data", async () => {
@@ -52,11 +52,11 @@ describe("GET /replenishment", () => {
     expect(after.onHand).toBe(before.onHand + 5);
     expect(after.position).toBe(before.position + 5);
 
-    // 3 pieces on a truck to Talat Sao: out of Morning Market now, inbound at Talat Sao.
-    const ts0 = rowFor(await rowsOf(admin, "B-TS"), "GB-001");
+    // 3 pieces on a truck to Vientiane Center: out of Morning Market now, inbound at Vientiane Center.
+    const ts0 = rowFor(await rowsOf(admin, "B-VTC"), "GB-001");
     expect(ts0).toBeUndefined();
-    expect((await call(admin, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "TS-D01", skuId: "GB-001", qty: 3 })).status).toBe(200);
-    const ts = rowFor(await rowsOf(admin, "B-TS"), "GB-001");
+    expect((await call(admin, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "VTC-D01", skuId: "GB-001", qty: 3 })).status).toBe(200);
+    const ts = rowFor(await rowsOf(admin, "B-VTC"), "GB-001");
     expect(ts).toMatchObject({ onHand: 0, inbound: 3, position: 3 });
     expect(rowFor(await rowsOf(admin, "B-MM"), "GB-001").position).toBe(after.position - 3);
   });
@@ -64,7 +64,7 @@ describe("GET /replenishment", () => {
 
 describe("rules", () => {
   it("lists one branch's rules and the defaults; staff get their own branch", async () => {
-    const res = await call(await asStaff("B-MM"), "GET", "/replenishment/rules?branchId=B-TS");
+    const res = await call(await asStaff("B-MM"), "GET", "/replenishment/rules?branchId=B-VTC");
     expect(res.status).toBe(200);
     expect(res.json.branchId).toBe("B-MM");
     expect(res.json.config).toMatchObject({ defaultLeadTimeDays: 7, warningMarginDays: 3 });
@@ -125,7 +125,7 @@ describe("rules", () => {
     const admin = await asAdmin();
     expect((await putRule(admin, { branchId: undefined, allBranches: true, avgDailySell: 7 })).status).toBe(200);
     const rules = (await getStore({} as any).rules()).filter((r) => r.scope === "sku" && r.scope_key === "GB-001");
-    expect(rules.map((r) => r.branch_id).sort()).toEqual(["B-IT", "B-MM", "B-TS", "B-VT"]);
+    expect(rules.map((r) => r.branch_id).sort()).toEqual(["B-IT", "B-MM", "B-VT", "B-VTC"]);
     expect(rules.every((r) => r.avg_daily_sell === 7)).toBe(true);
   });
 
@@ -242,20 +242,20 @@ describe("desk cards and dashboard", () => {
 
   it("an inbound-only SKU appears in the dashboard watchlist", async () => {
     const admin = await asAdmin();
-    expect((await call(admin, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "TS-D01", skuId: "GB-001", qty: 3 })).status).toBe(200);
-    await putRule(admin, { branchId: "B-TS", avgDailySell: 100, leadTimeDays: 7 });
-    const dash = (await call(admin, "GET", "/dashboard?branchId=B-TS")).json;
+    expect((await call(admin, "POST", "/transfers", { date: TODAY, fromDeskId: "MM-D01", toDeskId: "VTC-D01", skuId: "GB-001", qty: 3 })).status).toBe(200);
+    await putRule(admin, { branchId: "B-VTC", avgDailySell: 100, leadTimeDays: 7 });
+    const dash = (await call(admin, "GET", "/dashboard?branchId=B-VTC")).json;
     const item = dash.watchlist.topLow.find((i: any) => i.sku_id === "GB-001");
-    expect(item).toMatchObject({ branch_id: "B-TS", status: "critical", closing: 3, desk_id: "TS-D01" });
+    expect(item).toMatchObject({ branch_id: "B-VTC", status: "critical", closing: 3, desk_id: "VTC-D01" });
   });
 
   it("no avg/day is no data: the old fixed reorder level no longer warns", async () => {
     const admin = await asAdmin();
-    // BR-021 at Talat Sao has no rules and too little history for an automatic avg.
+    // BR-021 at Vientiane Center has no rules and too little history for an automatic avg.
     await call(admin, "PATCH", "/skus/BR-021", { reorder_level: 500 });
-    const row = rowFor(await rowsOf(admin, "B-TS"), "BR-021");
+    const row = rowFor(await rowsOf(admin, "B-VTC"), "BR-021");
     expect(row.status).toBe("no_data");
-    const dash = (await call(admin, "GET", "/dashboard?branchId=B-TS")).json;
+    const dash = (await call(admin, "GET", "/dashboard?branchId=B-VTC")).json;
     expect(dash.watchlist.topLow.find((i: any) => i.sku_id === "BR-021")).toBeUndefined();
   });
 });

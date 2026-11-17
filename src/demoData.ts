@@ -48,7 +48,7 @@ export interface DemoData {
 export const DEMO_ADMIN_ID = "11111111-0000-0000-0000-000000000001";
 export const DEMO_STAFF = {
   "B-MM": "11111111-0000-0000-0000-000000000002",
-  "B-TS": "11111111-0000-0000-0000-000000000003",
+  "B-VTC": "11111111-0000-0000-0000-000000000003",
   "B-IT": "11111111-0000-0000-0000-000000000004",
   "B-VT": "11111111-0000-0000-0000-000000000005",
 } as const;
@@ -152,9 +152,9 @@ export function buildDemoData(today: string): DemoData {
   const startedAt = `${shiftDate(today, -30)}T01:00:00.000Z`;
 
   const branches: Branch[] = [
-    { branch_id: "B-MM", name_en: "Morning Market", name_lo: "ຕະຫຼາດເຊົ້າ", sort_order: 1 },
-    { branch_id: "B-TS", name_en: "Talat Sao", name_lo: "ຕະຫຼາດສາວ", sort_order: 2 },
-    { branch_id: "B-IT", name_en: "ITECC", name_lo: "ໄອເທັກ", sort_order: 3 },
+    { branch_id: "B-MM", name_en: "Morning Market", name_lo: "ຕະຫລາດເຊົ້າ", sort_order: 1 },
+    { branch_id: "B-VTC", name_en: "Vientiane Center", name_lo: "ວຽງຈັນເຊັນເຕີ", sort_order: 2 },
+    { branch_id: "B-IT", name_en: "ITECC", name_lo: "ໄອເຕັກ", sort_order: 3 },
     { branch_id: "B-VT", name_en: "Vangthong", name_lo: "ວັງທອງ", sort_order: 4 },
   ];
 
@@ -172,7 +172,7 @@ export function buildDemoData(today: string): DemoData {
   const staffAccounts: StaffAccount[] = [
     account(DEMO_ADMIN_ID, null, "Owner", "pbkdf2$100000$5a567e950cc5658058c5526ca2b2c529$fac4cf2f3f6f3b526ee8768176df34c642cd6994746bf8f8d8a9620126781dfe", startedAt),
     account(DEMO_STAFF["B-MM"], "B-MM", "Somchai S.", "pbkdf2$100000$f9a0b9935d5ed4f141b351308c396b6f$322d97255131fbbb277ca489bfbf0e7fcc8e6c1ac24e632256dc0ae5a8706edd", startedAt),
-    account(DEMO_STAFF["B-TS"], "B-TS", "Bounmy K.", "pbkdf2$100000$c7dbf04fcf343d0e37d4ed5eae7686a5$32d08f9b51e411c2888ca090837a53774162389bf23143e3d4e964d14d21ace5", startedAt),
+    account(DEMO_STAFF["B-VTC"], "B-VTC", "Bounmy K.", "pbkdf2$100000$c7dbf04fcf343d0e37d4ed5eae7686a5$32d08f9b51e411c2888ca090837a53774162389bf23143e3d4e964d14d21ace5", startedAt),
     account(DEMO_STAFF["B-IT"], "B-IT", "Vilayphone N.", "pbkdf2$100000$25cc26e71c8f12edb467d813fabcb081$91c5af05b41c76bcd563d587af00a4ce04b4fdf87c468333b1f812c7a391984a", startedAt),
     account(DEMO_STAFF["B-VT"], "B-VT", "Khamla P.", "pbkdf2$100000$fc5f0bc2c09393ef3814d8fbff21b477$7246099325f4a7e9d7003bbb43f2a351b4d6908e9f04fef2ced496dc309aee88", startedAt),
     account(DEMO_MANAGER["B-MM"], "B-MM", "Manivone M.", "pbkdf2$100000$a1b2c3d4e5f60718293a4b5c6d7e8f90$2efde50c6cbd8c79669882d0346318c69b15af97db7c12a05f6909d105efdfb6", startedAt, "manager"),
@@ -241,7 +241,7 @@ export function buildDemoData(today: string): DemoData {
     // Finished yesterday, not started today.
     { desk_id: "MM-D02", branch_id: "B-MM", stock: [["NK-011", 16], ["BR-020", 11], ["RG-031", 6]], days: ["done", "done", "done", null] },
     // Yesterday was left unfinished — today's check-in is blocked until it is closed.
-    { desk_id: "TS-D01", branch_id: "B-TS", stock: [["BR-021", 10], ["RG-030", 8], ["SP-903", 60]], days: ["done", "done", "check_in", null] },
+    { desk_id: "VTC-D01", branch_id: "B-VTC", stock: [["BR-021", 10], ["RG-030", 8], ["SP-903", 60]], days: ["done", "done", "check_in", null] },
     // Already counted and closed today.
     { desk_id: "IT-D01", branch_id: "B-IT", stock: [["GB-001", 9], ["RG-031", 7]], days: ["done", "done", "done", "done"] },
     // In final count today.
@@ -337,10 +337,10 @@ export function buildDemoData(today: string): DemoData {
     },
     {
       id: "a0000000-0000-0000-0000-000000000002",
-      doc_no: `DOC-TS-${year}-0001`,
+      doc_no: `DOC-VTC-${year}-0001`,
       title: "Wedding band batch weigh-in",
-      branch_id: "B-TS",
-      desk_id: "TS-D01",
+      branch_id: "B-VTC",
+      desk_id: "VTC-D01",
       created_by: "Bounmy K.",
       doc_date: d2,
       created_at: `${d2}T02:15:00.000Z`,
@@ -376,7 +376,7 @@ export function buildDemoData(today: string): DemoData {
     deskDays,
     ledger,
     documents,
-    docCounters: { [`B-MM/${year}`]: 2, [`B-TS/${year}`]: 1 },
+    docCounters: { [`B-MM/${year}`]: 2, [`B-VTC/${year}`]: 1 },
     config: { id: 1, safety_buffer_days: 2, spot_lak_per_baht: 32500000, usd_to_lak_rate: 20800, default_lead_time_days: 7, warning_margin_days: 3, velocity_window_days: 28, stock_out_mode: "dynamic", updated_at: startedAt },
     goldPrice: { price_baht_sell: 43230000, price_baht_buy: 42400000, updated_at: `${today}T02:00:04.000Z`, price_updated_at: null },
     goldHistory: [],

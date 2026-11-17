@@ -43,6 +43,7 @@ function regenerate(row: LedgerRow) {
 }
 import { actorHeaders, type Actor } from "./actor";
 import { auditEntry, reopenedDatesFrom, type AuditOp } from "./audit";
+import { branchAliases, deskAliases } from "./legacyCodes";
 
 export type NewDesk = { branch_id: string; display_name: string; created_by: string; initial_stock: InitialStock };
 
@@ -1123,8 +1124,10 @@ export class DemoStore implements Store {
   async auditLog(f: AuditFilter) {
     return this.db.audit
       .filter((e) => {
-        if (f.deskId && e.desk_id !== f.deskId && e.to_desk_id !== f.deskId) return false;
-        if (f.branchId && e.branch_id !== f.branchId && e.to_branch_id !== f.branchId) return false;
+        const desks = f.deskId ? deskAliases(f.deskId) : null;
+        const branches = f.branchId ? branchAliases(f.branchId) : null;
+        if (desks && !desks.includes(e.desk_id ?? "") && !desks.includes(e.to_desk_id ?? "")) return false;
+        if (branches && !branches.includes(e.branch_id ?? "") && !branches.includes(e.to_branch_id ?? "")) return false;
         if (f.actorId && e.actor_id !== f.actorId) return false;
         if (f.from && e.created_at < f.from) return false;
         if (f.to && e.created_at >= f.to) return false;
@@ -1613,7 +1616,7 @@ class SupabaseStore implements Store {
       "op=eq.UPDATE",
       "old_values->>status=eq.done",
       "new_values->>status=neq.done",
-      `desk_id=in.(${deskIds.map(enc).join(",")})`,
+      `desk_id=in.(${deskIds.flatMap(deskAliases).map(enc).join(",")})`,
       `created_at=gte.${enc(since)}`,
     ];
     try {
@@ -1629,8 +1632,15 @@ class SupabaseStore implements Store {
     // groups cannot share one query key, so they go inside and=(...).
     const groups: string[] = [];
     if (f.before) groups.push(`or(created_at.lt.${enc(f.before.createdAt)},and(created_at.eq.${enc(f.before.createdAt)},id.lt.${enc(f.before.id)}))`);
-    if (f.deskId) groups.push(`or(desk_id.eq.${enc(f.deskId)},to_desk_id.eq.${enc(f.deskId)})`);
-    if (f.branchId) groups.push(`or(branch_id.eq.${enc(f.branchId)},to_branch_id.eq.${enc(f.branchId)})`);
+    // A renamed branch / case also matches its old code (src/legacyCodes.ts).
+    if (f.deskId) {
+      const ids = deskAliases(f.deskId).map(enc).join(",");
+      groups.push(`or(desk_id.in.(${ids}),to_desk_id.in.(${ids}))`);
+    }
+    if (f.branchId) {
+      const ids = branchAliases(f.branchId).map(enc).join(",");
+      groups.push(`or(branch_id.in.(${ids}),to_branch_id.in.(${ids}))`);
+    }
     if (groups.length === 1) q.push(`or=${groups[0].slice(2)}`);
     else if (groups.length > 1) q.push(`and=(${groups.join(",")})`);
     if (f.actorId) q.push(`actor_id=eq.${enc(f.actorId)}`);
