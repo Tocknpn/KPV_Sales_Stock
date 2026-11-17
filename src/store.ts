@@ -45,7 +45,7 @@ import { auditEntry, reopenedDatesFrom, type AuditOp } from "./audit";
 
 export type NewDesk = { branch_id: string; display_name: string; created_by: string; initial_stock: InitialStock };
 
-export type StoreErrorCode = "DAY_LOCKED" | "CONFLICT" | "INVALID" | "UNAVAILABLE" | "NEGATIVE" | "AUDIT_ACTOR_MISSING" | "DENIED" | "IMMUTABLE";
+export type StoreErrorCode = "DAY_LOCKED" | "CONFLICT" | "INVALID" | "UNAVAILABLE" | "NEGATIVE" | "AUDIT_ACTOR_MISSING" | "DENIED" | "IMMUTABLE" | "SCHEMA";
 
 // Errors the routes can turn into a meaningful HTTP status.
 export class StoreError extends Error {
@@ -1163,6 +1163,9 @@ class SupabaseStore implements Store {
       if (/ASSIGN_(INACTIVE|OTHER_BRANCH)|DESK_NOT_FOUND/.test(body)) throw new StoreError("INVALID", body);
       if (body.includes("FUTURE_DATE")) throw new StoreError("INVALID", "That date is after today");
       const pgCode = /"code"\s*:\s*"([A-Za-z0-9]+)"/.exec(body)?.[1] ?? "";
+      // The database is missing a column or function this code needs: a
+      // migration has not been run (or PostgREST's schema cache is stale).
+      if (pgCode === "PGRST204" || pgCode === "PGRST202" || pgCode === "42703" || pgCode === "42883") throw new StoreError("SCHEMA", body);
       if (res.status === 409 || pgCode === "23505") throw new StoreError("CONFLICT", body);
       if (pgCode === "23514" || pgCode === "23503" || pgCode.startsWith("22")) throw new StoreError("INVALID", body);
       throw new Error(`Supabase ${path.split("?")[0]} failed (${res.status}): ${body}`);

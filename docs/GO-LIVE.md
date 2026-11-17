@@ -250,3 +250,22 @@ On the live project, in this order:
 
 Locked out with no admin password: `npm run db:admin -- "Owner" owner 'a-password'`
 prints an insert (with `password_plain`) to paste into the SQL editor.
+
+## 9. If saving fails with "The database needs an update"
+
+The Worker is newer than the database: a migration has not been run, or
+PostgREST has not reloaded its schema. The Worker log names the missing column
+or function. Check which columns are there:
+
+```sql
+select t.tbl, t.col, (c.column_name is not null) as present
+from (values ('desks','initial_stock'), ('desks','created_by'),
+             ('daily_stock_ledger','move_qty'), ('daily_stock_ledger','stock_out_single'),
+             ('desk_days','stock_out_mode'), ('staff_accounts','password_plain')) t(tbl, col)
+left join information_schema.columns c
+  on c.table_schema = 'public' and c.table_name = t.tbl and c.column_name = t.col;
+```
+
+For any row with `present = false`: run the missing migrations in name order
+(read sections 6–8 first for their pre-checks), then `supabase/users_roles.sql`,
+then `notify pgrst, 'reload schema';`. Run the query again: every row `true`.

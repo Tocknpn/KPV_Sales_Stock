@@ -1,5 +1,6 @@
 import { HttpError, newRouter } from "./app";
 import { StoreError } from "./store";
+import { storeErrorResponse } from "./storeErrors";
 import { requireAuth } from "./auth";
 import metaRoutes from "./routes/meta";
 import authRoutes from "./routes/auth";
@@ -32,36 +33,14 @@ app.route("/api", closedDayRoutes);
 app.route("/api", replenishmentRoutes);
 app.route("/api", auditRoutes);
 
-const STORE_STATUS = { DAY_LOCKED: 423, CONFLICT: 409, INVALID: 400, UNAVAILABLE: 503, NEGATIVE: 409, AUDIT_ACTOR_MISSING: 500, DENIED: 403, IMMUTABLE: 409 } as const;
-
 app.onError((err, c) => {
   if (err instanceof HttpError) {
     return c.json({ error: err.message, code: err.code ?? null, ...(err.extra ?? {}) }, err.status as 400);
   }
   if (err instanceof StoreError) {
-    const message =
-      err.code === "DAY_LOCKED"
-        ? "This day is Done and locked for this Desk"
-        : err.code === "UNAVAILABLE"
-        ? "The database cannot be reached. Try again."
-        : err.code === "NEGATIVE"
-        ? "This would make the stock negative"
-        : err.code === "DENIED"
-        ? "You are not allowed to do that"
-        : err.code === "IMMUTABLE"
-        ? "An assignment can only be ended, never rewritten"
-        : err.code === "CONFLICT"
-        ? "That already exists or was changed on another device"
-        : "The database rejected that value";
     console.error(`[store ${err.code}] ${err.message}`);
-    return c.json(
-      {
-        error: message,
-        code: err.code === "NEGATIVE" ? "NEGATIVE_CLOSING" : err.code === "DENIED" ? "ROLE_DENIED" : err.code === "IMMUTABLE" ? "ASSIGNMENT_IMMUTABLE" : err.code,
-        ...(err.code === "NEGATIVE" && err.available !== undefined ? { available: err.available } : {}),
-      },
-      STORE_STATUS[err.code]
-    );
+    const { status, body } = storeErrorResponse(err);
+    return c.json(body, status as 400);
   }
   console.error(err);
   return c.json({ error: "Something went wrong on the server", code: "SERVER_ERROR" }, 500);
