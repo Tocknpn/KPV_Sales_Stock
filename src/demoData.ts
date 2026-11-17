@@ -3,6 +3,7 @@
 // configured (local development and tests). Test data for a real Supabase project
 // is supabase/seed_mock_data.sql (hand-written, tagged is_seed).
 import type {
+  BranchSku,
   Branch,
   Desk,
   MasterSku,
@@ -41,6 +42,7 @@ export interface DemoData {
   closedDays: ClosedDay[];
   assignments: DeskAssignment[];
   rules: ReplenishmentRule[];
+  branchSkus: BranchSku[];
 }
 
 export const DEMO_ADMIN_ID = "11111111-0000-0000-0000-000000000001";
@@ -211,13 +213,13 @@ export function buildDemoData(today: string): DemoData {
     sku("SP-904", "Ceramic Mug", "ຈອກເຊລາມິກ", T.supplies, null, null, null, 0, 32000, 65000, 15, null, null, "mug"),
   ];
 
-  // Replenishment rules: the per-SKU numbers above as company-wide SKU rules (what the
-  // migration does for a live database), plus one Type rule for the necklaces.
-  const rule = (scope: ReplenishmentRule["scope"], scope_key: string, avg: number | null, lead: number | null): ReplenishmentRule => ({
+  // Replenishment rules: the per-SKU numbers above as SKU rules in every branch (what
+  // migration 15 does for a live database), plus one Type rule for the necklaces.
+  const rule = (scope: ReplenishmentRule["scope"], scope_key: string, branch_id: string, avg: number | null, lead: number | null): ReplenishmentRule => ({
     id: `00000000-0000-0000-0000-${String(1000 + ruleSeq++).padStart(12, "0")}`,
     scope,
     scope_key,
-    branch_id: null,
+    branch_id,
     avg_daily_sell: avg,
     lead_time_days: lead,
     updated_by: null,
@@ -225,10 +227,12 @@ export function buildDemoData(today: string): DemoData {
     is_seed: false,
   });
   let ruleSeq = 0;
-  const rules: ReplenishmentRule[] = [
-    ...skus.filter((s) => s.avg_daily_sales != null || s.order_lead_time_days != null).map((s) => rule("sku", s.sku_id, s.avg_daily_sales, s.order_lead_time_days)),
-    rule("type", T.necklaces.type_id, 1.5, 7),
-  ];
+  const rules: ReplenishmentRule[] = branches.flatMap((b) => [
+    ...skus.filter((s) => s.avg_daily_sales != null || s.order_lead_time_days != null).map((s) => rule("sku", s.sku_id, b.branch_id, s.avg_daily_sales, s.order_lead_time_days)),
+    rule("type", T.necklaces.type_id, b.branch_id, 1.5, 7),
+  ]);
+  // Every branch carries every SKU to start with.
+  const branchSkus: BranchSku[] = branches.flatMap((b) => skus.map((s) => ({ branch_id: b.branch_id, sku_id: s.sku_id, carried: true })));
 
   // Four demo days per desk, oldest first; the last one is today.
   const plans: DeskPlan[] = [
@@ -381,5 +385,6 @@ export function buildDemoData(today: string): DemoData {
     closedDays: [],
     assignments: [],
     rules,
+    branchSkus,
   };
 }

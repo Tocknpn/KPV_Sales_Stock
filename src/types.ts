@@ -87,6 +87,13 @@ export interface ReplenishmentRule {
   is_seed: boolean;
 }
 
+// Whether a branch carries a SKU (branch_sku, migration 15). No row = not carried.
+export interface BranchSku {
+  branch_id: string;
+  sku_id: string;
+  carried: boolean;
+}
+
 export type DeskStatus = "check_in" | "final_stock" | "done";
 // "not_started" = no desk_days row for that desk/date. Never stored.
 export type CardStatus = DeskStatus | "not_started";

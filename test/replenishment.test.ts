@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveParams, runwayStatus, needsReview, computeVelocity } from "../src/replenishment";
+import { resolveParams, runwayStatus, needsReview, computeVelocity, buildBranchRows, heldBySku } from "../src/replenishment";
 import type { DeskDay, LedgerRow, MasterSku, ReplenishmentRule, SystemConfig } from "../src/types";
 
 const config = { default_lead_time_days: 7, warning_margin_days: 3, velocity_window_days: 28 } as SystemConfig;
@@ -11,38 +11,69 @@ function rule(scope: ReplenishmentRule["scope"], key: string, branch: string | n
 }
 
 describe("resolveParams", () => {
-  it("company SKU rule beats company Type rule; group and branch rules are ignored", () => {
+  it("the branch SKU rule beats the branch Type rule; other branches and company rules are ignored", () => {
     const rules = [
-      rule("type", "NECKLACES", null, 1, null),
-      rule("sku", "S1", null, 5, null),
+      rule("type", "NECKLACES", "B1", 1, null),
+      rule("sku", "S1", "B1", 5, null),
     ];
-    expect(resolveParams(sku, rules, config, 9).avg).toEqual({ value: 5, source: "sku" });
-    expect(resolveParams(sku, rules.slice(0, 1), config, 9).avg).toEqual({ value: 1, source: "type" });
-    const ignored = [rule("group", "Snake", null, 3, 3), rule("sku", "S1", "B1", 6, 6), rule("type", "NECKLACES", "B1", 2, 2)];
-    const r = resolveParams(sku, ignored, config, null);
+    expect(resolveParams(sku, rules, config, 9, "B1").avg).toEqual({ value: 5, source: "sku" });
+    expect(resolveParams(sku, rules.slice(0, 1), config, 9, "B1").avg).toEqual({ value: 1, source: "type" });
+    const ignored = [rule("group", "Snake", "B1", 3, 3), rule("sku", "S1", "B2", 6, 6), rule("type", "NECKLACES", null, 2, 2), rule("sku", "S1", null, 4, 4)];
+    const r = resolveParams(sku, ignored, config, null, "B1");
     expect(r.avg).toEqual({ value: null, source: "none" });
     expect(r.lead).toEqual({ value: 7, source: "default" });
   });
 
+  it("uses only the branch asked for", () => {
+    const rules = [rule("sku", "S1", "B-MM", 2, null), rule("sku", "S1", "B-VT", 5, null)];
+    expect(resolveParams(sku, rules, config, null, "B-MM").avg).toEqual({ value: 2, source: "sku" });
+    expect(resolveParams(sku, rules, config, null, "B-VT").avg).toEqual({ value: 5, source: "sku" });
+    expect(resolveParams(sku, [rule("sku", "S1", null, 3, null)], config, 1, "B-MM").avg).toEqual({ value: 1, source: "auto" });
+  });
+
   it("avg and lead resolve independently", () => {
-    const rules = [rule("sku", "S1", null, 5, null), rule("type", "NECKLACES", null, 99, 10)];
-    const r = resolveParams(sku, rules, config, null);
+    const rules = [rule("sku", "S1", "B1", 5, null), rule("type", "NECKLACES", "B1", 99, 10)];
+    const r = resolveParams(sku, rules, config, null, "B1");
     expect(r.avg).toEqual({ value: 5, source: "sku" });
     expect(r.lead).toEqual({ value: 10, source: "type" });
   });
 
   it("no avg rule falls back to auto, no lead rule to the default", () => {
-    const r = resolveParams(sku, [], config, 4.5);
+    const r = resolveParams(sku, [], config, 4.5, "B1");
     expect(r.avg).toEqual({ value: 4.5, source: "auto" });
     expect(r.lead).toEqual({ value: 7, source: "default" });
   });
 
   it("no avg rule and no auto velocity is none", () => {
-    expect(resolveParams(sku, [], config, null).avg).toEqual({ value: null, source: "none" });
+    expect(resolveParams(sku, [], config, null, "B1").avg).toEqual({ value: null, source: "none" });
   });
 
   it("a manual 0 is a value, not 'unset'", () => {
-    expect(resolveParams(sku, [rule("sku", "S1", null, 0, null)], config, 5).avg).toEqual({ value: 0, source: "sku" });
+    expect(resolveParams(sku, [rule("sku", "S1", "B1", 0, null)], config, 5, "B1").avg).toEqual({ value: 0, source: "sku" });
+  });
+});
+
+describe("buildBranchRows and carried", () => {
+  const fullSku = { sku_id: "S1", type_id: "NECKLACES", name_en: "S1", name_lo: "S1", category: "Necklaces", active: true } as MasterSku;
+  const fullConfig = { ...config, warning_margin_days: 3 } as SystemConfig;
+  const desk = { desk_id: "D1", branch_id: "B1", active: true } as any;
+  const transfer = { status: "in_transit", to_branch_id: "B1", from_branch_id: "B2", sku_id: "S1", qty: 3 } as any;
+  const build = (carried: string[], inTransit: any[]) =>
+    buildBranchRows({ branchId: "B1", skus: [fullSku], rules: [], config: fullConfig, desks: [desk], latestDays: [], latestRows: [], inTransit, velocity: [], carried: new Set(carried) });
+
+  it("carried off but inbound still shows", () => {
+    const rows = build([], [transfer]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ sku_id: "S1", onHand: 0, inbound: 3 });
+  });
+
+  it("carried off and empty is hidden", () => {
+    expect(build([], [])).toHaveLength(0);
+  });
+
+  it("heldBySku sums on-hand and inbound for the branch", () => {
+    const held = heldBySku([], [], [desk], [transfer], "B1");
+    expect(held.get("S1")).toEqual({ onHand: 0, inbound: 3 });
   });
 });
 

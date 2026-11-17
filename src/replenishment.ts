@@ -23,16 +23,18 @@ function round1(n: number) {
 }
 
 // ---------------------------------------------------------------------------
-// Rule precedence (decided 2026-11-17): company-wide SKU rule, then company-wide
-// type rule. Average and lead time each take the first rule that has a value
-// for them; no average rule falls back to the automatic velocity, no lead time
-// to the configured default. Group and branch rules are no longer used.
+// Rule precedence (decided 2026-11-17, per branch since migration 15): the
+// branch's SKU rule, then the branch's type rule. Average and lead time each
+// take the first rule that has a value for them; no average rule falls back to
+// the automatic velocity, no lead time to the configured default. Company-wide
+// (branch_id null) and group rules are not used.
 // ---------------------------------------------------------------------------
 export function resolveParams(
   sku: Pick<MasterSku, "sku_id" | "type_id">,
   rules: ReplenishmentRule[],
   config: Pick<SystemConfig, "default_lead_time_days">,
-  autoAvg: number | null
+  autoAvg: number | null,
+  branchId: string
 ): { avg: { value: number | null; source: ParamSource }; lead: { value: number; source: ParamSource } } {
   const steps: { scope: ReplenishmentRule["scope"]; key: string | null; source: ParamSource }[] = [
     { scope: "sku", key: sku.sku_id, source: "sku" },
@@ -42,7 +44,7 @@ export function resolveParams(
   let lead: { value: number; source: ParamSource } | null = null;
   for (const step of steps) {
     if (step.key == null || step.key === "") continue;
-    const rule = rules.find((r) => r.scope === step.scope && r.scope_key === step.key && r.branch_id === null);
+    const rule = rules.find((r) => r.scope === step.scope && r.scope_key === step.key && r.branch_id === branchId);
     if (!rule) continue;
     if (!avg && rule.avg_daily_sell != null) avg = { value: rule.avg_daily_sell, source: step.source };
     if (!lead && rule.lead_time_days != null) lead = { value: rule.lead_time_days, source: step.source };
@@ -163,6 +165,34 @@ export interface ReplenishmentRow {
 
 const STATUS_ORDER: Record<RunwayStatus, number> = { critical: 0, warning: 1, ok: 2, no_data: 3 };
 
+// What a branch still holds of each SKU: on hand in its active cases (latest
+// day of each) and inbound on transfers from another branch.
+export function heldBySku(
+  latestRows: LedgerRow[],
+  latestDays: DeskDay[],
+  desks: Desk[],
+  inTransit: Transfer[],
+  branchId: string
+): Map<string, { onHand: number; inbound: number }> {
+  const activeDesks = new Set(desks.filter((d) => d.branch_id === branchId && d.active).map((d) => d.desk_id));
+  const statusByDesk = new Map(latestDays.map((d) => [d.desk_id, d.status]));
+  const out = new Map<string, { onHand: number; inbound: number }>();
+  const entry = (skuId: string) => {
+    let e = out.get(skuId);
+    if (!e) out.set(skuId, (e = { onHand: 0, inbound: 0 }));
+    return e;
+  };
+  for (const r of latestRows) {
+    if (r.excluded || r.branch_id !== branchId || !activeDesks.has(r.desk_id)) continue;
+    entry(r.sku_id).onHand += currentQty(r, statusByDesk.get(r.desk_id));
+  }
+  for (const t of inTransit) {
+    if (t.status !== "in_transit" || t.to_branch_id !== branchId || t.from_branch_id === branchId) continue;
+    entry(t.sku_id).inbound += t.qty;
+  }
+  return out;
+}
+
 export function buildBranchRows(input: {
   branchId: string;
   skus: MasterSku[];
@@ -173,34 +203,26 @@ export function buildBranchRows(input: {
   latestRows: LedgerRow[];
   inTransit: Transfer[];
   velocity: VelocityRow[];
+  // SKU ids the branch carries (branch_sku). One it does not carry is listed
+  // only while it still has stock or a transfer on the way.
+  carried: Set<string>;
 }): ReplenishmentRow[] {
   const { branchId, skus, rules, config } = input;
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
-  const activeDesks = new Set(input.desks.filter((d) => d.branch_id === branchId && d.active).map((d) => d.desk_id));
-  const statusByDesk = new Map(input.latestDays.map((d) => [d.desk_id, d.status]));
   const velocityBySku = new Map(input.velocity.map((v) => [v.sku_id, v]));
-
-  const onHand = new Map<string, number>();
-  for (const r of input.latestRows) {
-    if (r.excluded || r.branch_id !== branchId || !activeDesks.has(r.desk_id)) continue;
-    onHand.set(r.sku_id, (onHand.get(r.sku_id) ?? 0) + currentQty(r, statusByDesk.get(r.desk_id)));
-  }
-  const inbound = new Map<string, number>();
-  for (const t of input.inTransit) {
-    if (t.status !== "in_transit" || t.to_branch_id !== branchId || t.from_branch_id === branchId) continue;
-    inbound.set(t.sku_id, (inbound.get(t.sku_id) ?? 0) + t.qty);
-  }
+  const held = heldBySku(input.latestRows, input.latestDays, input.desks, input.inTransit, branchId);
 
   const rows: ReplenishmentRow[] = [];
-  for (const skuId of new Set([...onHand.keys(), ...inbound.keys()])) {
+  for (const [skuId, h] of held) {
     const sku = skuById.get(skuId);
     if (!sku || !sku.active) continue;
-    const hand = onHand.get(skuId) ?? 0;
-    const inc = inbound.get(skuId) ?? 0;
+    const hand = h.onHand;
+    const inc = h.inbound;
     const position = hand + inc;
+    if (!input.carried.has(skuId) && position <= 0) continue;
     const v = velocityBySku.get(skuId);
     const auto = v?.velocity ?? null;
-    const params = resolveParams(sku, rules, config, auto);
+    const params = resolveParams(sku, rules, config, auto, branchId);
     const run = runwayStatus({
       position,
       avg: params.avg.value,
@@ -234,13 +256,15 @@ export async function loadBranchRows(store: Store, branchId: string, today: stri
   const [skus, rules, config, desks] = shared
     ? [shared.skus, shared.rules, shared.config, shared.desks]
     : await Promise.all([store.skus(), store.rules(), store.config(), store.desks()]);
-  const [latestDays, latestRows, inTransit, velocity] = await Promise.all([
+  const [latestDays, latestRows, inTransit, velocity, branchSkus] = await Promise.all([
     store.latestDeskDays({ branchId }),
     store.ledgerLatest({ branchId }),
     store.transfers({ branchId, status: "in_transit" }),
     store.branchVelocity(branchId, today, config.velocity_window_days),
+    store.branchSkus({ branchId }),
   ]);
-  return buildBranchRows({ branchId, skus, rules, config, desks, latestDays, latestRows, inTransit, velocity });
+  const carried = new Set(branchSkus.filter((b) => b.carried).map((b) => b.sku_id));
+  return buildBranchRows({ branchId, skus, rules, config, desks, latestDays, latestRows, inTransit, velocity, carried });
 }
 
 // Status of every (branch, SKU) pair, for the desk cards and the dashboard.

@@ -4,6 +4,7 @@
 // only offers small, atomic primitives so both implementations stay equal.
 import type {
   Branch,
+  BranchSku,
   Desk,
   InitialStock,
   MasterSku,
@@ -248,11 +249,15 @@ export interface Store {
 
   // Replenishment rules. upsertRule writes one (scope, key, branch) rule; a null value
   // inherits, and a rule left with both values null is deleted. deleteRules returns how
-  // many rows it removed. Company-wide rules need an admin, branch rules an admin or that
-  // branch's manager (DENIED otherwise).
+  // many rows it removed. Company-wide rules need an admin, branch rules an admin or a
+  // staff / manager of that branch (DENIED otherwise).
   rules(): Promise<ReplenishmentRule[]>;
   upsertRule(input: RuleInput): Promise<ReplenishmentRule | null>;
   deleteRules(targets: RuleTarget[]): Promise<number>;
+  // Which SKUs each branch carries (branch_sku; no row = not carried). setCarried
+  // upserts on (branch_id, sku_id); an admin or a staff / manager of that branch.
+  branchSkus(filter?: { branchId?: string }): Promise<BranchSku[]>;
+  setCarried(rows: BranchSku[]): Promise<void>;
   // Automatic sales velocity per SKU for one branch (the branch_velocity RPC).
   branchVelocity(branchId: string, to: string, days: number): Promise<VelocityRow[]>;
 
@@ -969,8 +974,21 @@ export class DemoStore implements Store {
     if (!id) return;
     const me = this.db.staffAccounts.find((a) => a.id === id);
     if (me?.role === "admin") return;
-    if (branchId !== null && me?.role === "manager" && me.branch_id === branchId) return;
+    if (branchId !== null && me && me.branch_id === branchId) return;
     throw new StoreError("DENIED", "ROLE_DENIED");
+  }
+  async branchSkus(filter: { branchId?: string } = {}) {
+    return this.db.branchSkus.filter((b) => !filter.branchId || b.branch_id === filter.branchId);
+  }
+  async setCarried(rows: BranchSku[]) {
+    this.guard();
+    for (const r of rows) this.assertMayEditRule(r.branch_id);
+    for (const r of rows) {
+      const cur = this.db.branchSkus.find((b) => b.branch_id === r.branch_id && b.sku_id === r.sku_id);
+      // No row audit (as in the database): the routes write sku.carried / sku.import.
+      if (cur) cur.carried = r.carried;
+      else this.db.branchSkus.push({ branch_id: r.branch_id, sku_id: r.sku_id, carried: r.carried });
+    }
   }
   private sameRule(r: ReplenishmentRule, t: RuleTarget) {
     return r.scope === t.scope && r.scope_key === t.scope_key && r.branch_id === t.branch_id;
@@ -1551,6 +1569,19 @@ class SupabaseStore implements Store {
       removed += rows.length;
     }
     return removed;
+  }
+  async branchSkus(filter: { branchId?: string } = {}) {
+    const where = filter.branchId ? `&branch_id=eq.${enc(filter.branchId)}` : "";
+    return this.restAll<BranchSku>(`branch_sku?select=branch_id,sku_id,carried${where}&order=branch_id,sku_id`);
+  }
+  async setCarried(rows: BranchSku[]) {
+    if (rows.length === 0) return;
+    // One request = one transaction in PostgREST, so this is all-or-nothing.
+    await this.rest("branch_sku?on_conflict=branch_id,sku_id", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(rows.map((r) => ({ branch_id: r.branch_id, sku_id: r.sku_id, carried: r.carried }))),
+    });
   }
   async branchVelocity(branchId: string, to: string, days: number) {
     return this.rpc<VelocityRow[]>("branch_velocity", { p_branch: branchId, p_to: to, p_days: days });
