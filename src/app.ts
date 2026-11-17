@@ -39,6 +39,26 @@ export function scopeBranch(user: SessionUser, requestedBranchId: string | undef
   return user.role !== "admin" ? user.branchId ?? undefined : requestedBranchId;
 }
 
+// The branches a per-branch write goes to (reorder values, carries switch, import).
+// allBranches = every branch, admin only. Otherwise one branch: a staff or
+// manager gets their own (another one sent is refused); an admin must name one.
+export async function targetBranches(store: Store, user: SessionUser, branchId: unknown, allBranches?: unknown): Promise<string[]> {
+  const branches = await store.branches();
+  if (allBranches === true) {
+    if (user.role !== "admin") throw new HttpError(403, "Only an admin can change every branch", "ROLE_DENIED");
+    return branches.map((b) => b.branch_id);
+  }
+  const asked = branchId === undefined || branchId === null || branchId === "" ? undefined : String(branchId);
+  if (user.role !== "admin") {
+    if (asked !== undefined && asked !== user.branchId) throw new HttpError(403, "Branch access denied", "BRANCH_DENIED");
+    if (!user.branchId) throw new HttpError(400, "branchId is required", "BRANCH_REQUIRED");
+    return [user.branchId];
+  }
+  if (asked === undefined) throw new HttpError(400, "branchId is required", "BRANCH_REQUIRED");
+  if (!branches.some((b) => b.branch_id === asked)) throw new HttpError(404, "Branch not found", "BRANCH_NOT_FOUND");
+  return [asked];
+}
+
 // Loads a desk and enforces that the user may act on its branch.
 export async function requireDesk(store: Store, user: SessionUser, deskId: string | undefined): Promise<Desk> {
   const desk = deskId ? (await store.desks()).find((d) => d.desk_id === deskId) : undefined;
