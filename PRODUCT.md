@@ -9,7 +9,7 @@ web
 ## Users
 
 Primary: desk staff (Cashiers, Auditors, and desk Admins) physically stationed
-at one of KPV's four branches (Morning Market, Talat Sao, ITECC, Vangthong),
+at one of KPV's four branches (Morning Market, Vientiane Center, ITECC, Vangthong),
 each running 4 desks. They perform a morning check-in and an evening
 settlement for every desk, every day — entering stock-in, retail sale,
 wholesale, and transfer movements for physical gold jewelry and a handful of

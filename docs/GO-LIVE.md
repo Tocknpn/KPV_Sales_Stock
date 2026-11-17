@@ -16,7 +16,7 @@ skip to section 2.)
 
 1. In **SQL Editor**, run these files in this order:
    1. `supabase/schema.sql`
-   2. `supabase/migrations/20261112_01_foundation.sql` to `20261117_15_branch_sku.sql`, in name order
+   2. `supabase/migrations/20261112_01_foundation.sql` to `20261117_16_branch_vtc.sql`, in name order
    3. `supabase/users_roles.sql`
    4. `supabase/base.sql`
    5. `supabase/real_skus.sql` (the real product list; real rows, kept by the purge;
@@ -85,9 +85,9 @@ Do these in order, **before** the new code is deployed.
    ```
    Fix every row (correct the count or the entry in the old app). After v2 such
    a row can only be corrected, never pushed further down.
-3. Run `supabase/migrations/20261112_01_foundation.sql` to `20261117_15_branch_sku.sql`
+3. Run `supabase/migrations/20261112_01_foundation.sql` to `20261117_16_branch_vtc.sql`
    in name order, then `supabase/users_roles.sql`. All are safe to run twice, but
-   always re-run the **whole** sequence 01 to 15 and then `users_roles.sql`,
+   always re-run the **whole** sequence 01 to 16 and then `users_roles.sql`,
    never a single earlier file (migration 07 redefines a function that
    migration 01 also defines).
 
@@ -318,3 +318,45 @@ Between step 1 and step 3 the old Worker shows every SKU's avg/day as
 automatic. Between a new Worker and a missing step 1, SKU and reorder screens
 return errors. Re-running 01 to 15 later is safe: once migration 15 has run,
 06 and 14 no longer touch rules and 15 no longer re-seeds `branch_sku`.
+
+## Branch names, Vientiane Center and product-only SKU names (migration 16, 2026-11-17)
+
+Decided by the owner:
+
+| Code | Lao name | English name |
+|---|---|---|
+| B-MM | ຕະຫລາດເຊົ້າ | Morning Market |
+| **B-VTC** (was B-TS, Talat Sao) | ວຽງຈັນເຊັນເຕີ | Vientiane Center |
+| B-IT | ໄອເຕັກ | ITECC |
+| B-VT | ວັງທອງ | Vangthong |
+
+The cases of that branch become VTC-D01, VTC-D02, … (were TS-Dxx).
+
+Migration 16 moves B-TS / TS-Dxx to the new codes in every table, in one
+transaction, **except audit_log** (append-only): entries written before the
+move keep B-TS / TS-Dxx. History screens treat the old codes as the same
+branch and case (`src/legacyCodes.ts`), so the branch's history stays in one
+list. Document numbers already issued (DOC-TS-2026-…) keep their number; the
+next one is DOC-VTC-2026-<next>. One audit entry, `branch.rename`, records the
+move.
+
+SKU names are now the **product only** ("ຄຳແທ່ງ", not "ຄຳແທ່ງ 1 ສະຫຼຶງ"): the
+size is the SKU's weight, and the app shows it beside the name. `real_skus.sql`
+already has the short names. A size typed into a name (form or Excel import)
+is dropped when saved.
+
+On the live project, together and outside shop hours:
+
+1. In SQL Editor run `supabase/migrations/20261117_16_branch_vtc.sql` (safe to
+   re-run; it does nothing once B-VTC exists).
+2. Run `supabase/users_roles.sql` again.
+3. Deploy the new Worker (`npm run deploy`) to the owner's Cloudflare account.
+4. Ask Vientiane Center staff to reload the app once (it reloads their
+   account, now on B-VTC). Nobody needs to log in again.
+5. Check: the branch list reads ຕະຫລາດເຊົ້າ, ວຽງຈັນເຊັນເຕີ, ໄອເຕັກ, ວັງທອງ;
+   Vientiane Center's cases read VTC-D…; its History still shows entries from
+   before the move.
+6. If the real SKUs are not loaded yet, run `supabase/real_skus.sql` now. If an
+   older copy with long names was already run, running this one again
+   replaces the names (it updates existing SKUs).
+

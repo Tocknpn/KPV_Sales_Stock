@@ -13,7 +13,7 @@ The application runs as a responsive Web App hosted entirely via **Google Apps S
 
 ### Google Sheets Database Tabs:
 1. `Master_SKU`: SKU ID, Item Name (Lao/Eng), Category, Unit Purity (96.5% / 99.99%), Standard Gram Weight, Baht Weight, Unit Cost, Unit Price, Active Status.
-2. `Desks_Staff`: Desk ID (e.g. Desk 01–04), Branch Name (Morning Market, Talat Sao, ITECC, Vangthong), Assigned Staff/Cashier, Role (Admin, Cashier, Auditor).
+2. `Desks_Staff`: Desk ID (e.g. Desk 01–04), Branch Name (Morning Market, Vientiane Center, ITECC, Vangthong), Assigned Staff/Cashier, Role (Admin, Cashier, Auditor).
 3. `Daily_Stock_Ledger`: Date, Desk ID, Branch, SKU, Opening Qty, Stock In, Stock Out (Retail Sales, Wholesale, Transfers), Closing Qty, Closing Gram/Baht Weight, Audit Verified Status, Timestamp.
 4. `Orders_Requisitions`: PO/Requisition ID, Date, Branch, Requesting Staff/Desk, Item SKU, Order Qty, Status (Pending, Draft, Approved, Dispatched), PDF Export URL.
 5. `System_Config`: Refinery Order Lead Time (days), Average Daily Burn Rate (Baht/day), Safety Buffer Reserve (days), Sheet Auto-Sync interval.
@@ -67,7 +67,7 @@ The app is organized into 5 primary modules accessible via a persistent mobile b
 - **Category Donut / Pie Chart**:
   - Interactive SVG Donut chart displaying share by ornament type: Gold Bars (45%), Necklaces (28%), Bracelets (15%), Rings & Accessories (12%).
 - **Branch Stock vs. Safety Target Cluster Chart**:
-  - Clustered comparison bar chart across branches: Morning Market (94%), Talat Sao (82%), ITECC (68%), Vangthong (42%).
+  - Clustered comparison bar chart across branches: Morning Market (94%), Vientiane Center (82%), ITECC (68%), Vangthong (42%).
 - **Branch Operations Cards**:
   - Cards for each branch showing remaining Baht volume, health state (`Optimal`, `Restock Needed`, `Alert`), and direct `Review & Reorder Stock` action.
 
