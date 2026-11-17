@@ -5,7 +5,7 @@ import { t, productName } from "../../i18n.js";
 import { state } from "../../state.js";
 import { isAdmin } from "../../session.js";
 import { parseCsv, csvRowsToSkus, CSV_TEMPLATE } from "../../csv.js";
-import { groupSkusByType } from "../../sku-groups.js";
+import { groupSkusByType, skuSizeLabel } from "../../sku-groups.js";
 import { skeletonList } from "../../skeleton.js";
 
 // Staff can look at the master data; only an admin can change it.
@@ -362,7 +362,7 @@ function renderSkuList(body, skus, types, weights, activeTypes, activeWeights) {
 }
 
 function skuRow(s) {
-  const subtitle = [s.group_name, s.weight_name, s.purity, s.baht_weight > 0 ? `${s.baht_weight} Baht` : null].filter(Boolean).join(" · ") || s.sku_id;
+  const subtitle = [s.group_name, skuSizeLabel(s), s.purity].filter(Boolean).join(" · ") || s.sku_id;
   return `
     <div class="flex items-center gap-2.5 px-4 py-3">
       <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">${icon(s.icon, "h-4 w-4")}</span>

@@ -271,6 +271,9 @@ export function buildDeskDetail(
       category: sku?.category ?? "",
       weight_name: sku?.weight_id ? weightById.get(sku.weight_id)?.name_en ?? null : null,
       purity: sku?.purity ?? null,
+      // for the Lao size label (ບາດ / ສະລຶງ / ຫຸນ / ກລາມ)
+      baht_weight: sku?.baht_weight ?? null,
+      std_gram_weight: sku?.std_gram_weight ?? null,
       icon: sku?.icon ?? "ring",
       opening_qty: r.opening_qty,
       stock_in: r.stock_in,

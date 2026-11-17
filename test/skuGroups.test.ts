@@ -79,10 +79,32 @@ describe("toggleSelection", () => {
   });
 });
 
-describe("skuSizeLabel", () => {
-  it("prefers the weight name, then baht weight, else empty", () => {
-    expect(skuSizeLabel(sku("A", null, null, { weight_name: "1 Baht", baht_weight: 1 }))).toBe("1 Baht");
-    expect(skuSizeLabel(sku("A", null, null, { baht_weight: 0.25 }))).toBe("0.25 Baht");
-    expect(skuSizeLabel(sku("A", null, null))).toBe("");
+describe("skuSizeLabel (Lao units)", () => {
+  const w = (extra: Record<string, unknown>) => sku("A", null, null, extra);
+  it("whole baht", () => {
+    expect(skuSizeLabel(w({ weight_name: "1 Baht", baht_weight: 1 }))).toBe("1 ບາດ");
+    expect(skuSizeLabel(w({ baht_weight: 10 }))).toBe("10 ບາດ");
+  });
+  it("quarters of a baht are salueng, fortieths are hun", () => {
+    expect(skuSizeLabel(w({ weight_name: "0.25 Baht", baht_weight: 0.25 }))).toBe("1 ສະລຶງ");
+    expect(skuSizeLabel(w({ baht_weight: 0.5 }))).toBe("2 ສະລຶງ");
+    expect(skuSizeLabel(w({ baht_weight: 0.125 }))).toBe("5 ຫຸນ");
+    expect(skuSizeLabel(w({ baht_weight: 0.3 }))).toBe("1 ສະລຶງ 2 ຫຸນ");
+    expect(skuSizeLabel(w({ baht_weight: 0.025 }))).toBe("1 ຫຸນ");
+    expect(skuSizeLabel(w({ baht_weight: 8.5 }))).toBe("8 ບາດ 2 ສະລຶງ");
+  });
+  it("gram and kilogram sizes are shown in grams", () => {
+    expect(skuSizeLabel(w({ weight_name: "1kg", baht_weight: 66.6667 }))).toBe("1000 ກລາມ");
+    expect(skuSizeLabel(w({ weight_name: "1g", baht_weight: 0.0667 }))).toBe("1 ກລາມ");
+  });
+  it("an uneven baht weight falls back to grams, from the stored grams first", () => {
+    expect(skuSizeLabel(w({ baht_weight: 5.5047, std_gram_weight: 82.57 }))).toBe("82.57 ກລາມ");
+    expect(skuSizeLabel(w({ baht_weight: 0.31 }))).toBe("4.73 ກລາມ");
+  });
+  it("reads the baht from the weight name when baht_weight is missing", () => {
+    expect(skuSizeLabel(w({ weight_name: "0.5 Baht", baht_weight: undefined }))).toBe("2 ສະລຶງ");
+  });
+  it("nothing known gives an empty label", () => {
+    expect(skuSizeLabel(w({}))).toBe("");
   });
 });

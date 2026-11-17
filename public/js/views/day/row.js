@@ -10,6 +10,7 @@
 // becomes the Count input, with the expected closing above it (tap = matches).
 import { t, productName } from "../../i18n.js";
 import { escapeHtml, fmtRunway } from "../../util.js";
+import { skuSizeLabel } from "../../sku-groups.js";
 
 // Same formula as the database's generated closing_qty (migration 11).
 export const stockOutOf = (r) => r.retail_sale + r.wholesale + r.destock + (r.stock_out_single ?? 0);
@@ -163,7 +164,7 @@ export function renderRow(r, view) {
   const { readOnly, mode, problems } = view;
   const bad = Boolean(problems && problems.size > 0);
   const low = r.branch_status === "critical" || r.branch_status === "warning";
-  const sub = [r.weight_name, r.purity].filter(Boolean).join(" · ");
+  const sub = [skuSizeLabel(r), r.purity].filter(Boolean).join(" · ");
   const extras = extrasHtml(r, view);
   return `
   <div data-sku="${escapeHtml(r.sku_id)}" class="rounded-xl px-1 py-1 ${bad ? "bg-danger-bg ring-2 ring-danger" : ""}">
