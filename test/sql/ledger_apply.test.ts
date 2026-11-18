@@ -56,7 +56,7 @@ describe('ledger_apply', () => {
   });
 
   it('refuses a field outside the list', async () => {
-    await expectPgError(apply([{ field: 'opening_qty', from: 10, to: 99 }]), 'not allowed');
+    await expectPgError(apply([{ field: 'transfer_in', from: 10, to: 99 }]), 'not allowed');
     await expectPgError(apply([{ field: 'transfer_out', to: 1 }]), 'not allowed');
   });
 
