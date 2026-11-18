@@ -98,6 +98,37 @@ describe("check-in opening step", () => {
     expect(res.json).toMatchObject({ field: "opening_qty", status: "check_in" });
   });
 
+  it("two devices: adding a SKU with stock_in that the other device already added is refused, nothing written", async () => {
+    const a = await asStaff("B-MM");
+    const b = await asStaff("B-MM");
+    await checkin(a);
+    await confirm(a);
+    expect((await addSku(a, { sku_id: "SP-904" })).status).toBe(200);
+    // B still shows the old screen; its batch also holds a fresh SKU.
+    const res = await call(b, "POST", `/stock/desk/${DESK}/sku`, { date: TODAY, items: [{ sku_id: "SP-903", stock_in: 2 }, { sku_id: "SP-904", stock_in: 3 }] });
+    expect(res.status).toBe(409);
+    expect(res.json).toMatchObject({ code: "SKU_ALREADY_ON_DAY", sku_id: "SP-904" });
+    const detail = await detailOf(a);
+    expect(rowOf(detail, "SP-904").stock_in).toBe(0);
+    expect(rowOf(detail, "SP-903")).toBeUndefined();
+    // Without stock_in an existing SKU is still a harmless no-op.
+    expect((await addSku(b, { sku_id: "SP-904" })).json).toMatchObject({ ok: true, added: 0, restored: 0 });
+  });
+
+  it("a retry after the row was inserted but its stock_in not written is refused, not silently dropped", async () => {
+    const staff = await asStaff("B-MM");
+    await checkin(staff);
+    await confirm(staff);
+    // First attempt: the insert landed, the stock-in write did not (row has 0).
+    expect((await addSku(staff, { sku_id: "SP-904" })).status).toBe(200);
+    const retry = await addSku(staff, { sku_id: "SP-904", stock_in: 3 });
+    expect(retry.status).toBe(409);
+    expect(retry.json).toMatchObject({ code: "SKU_ALREADY_ON_DAY", sku_id: "SP-904" });
+    // The client reloads and types it into the row's Stock In cell.
+    expect((await change(staff, "SP-904", "stock_in", 3)).status).toBe(200);
+    expect(rowOf(await detailOf(staff), "SP-904").stock_in).toBe(3);
+  });
+
   it("adding a SKU after check-in: opening refused, stock_in accepted", async () => {
     const staff = await asStaff("B-MM");
     await checkin(staff);

@@ -720,12 +720,18 @@ r.post("/stock/desk/:deskId/sku", async (c) => {
     const locked = withOpening.find((id) => carried.has(id));
     if (locked) throw new HttpError(409, "This opening is carried from the previous day and cannot be changed", "OPENING_LOCKED", { sku_id: locked });
   }
-  if ([...wanted.values()].some((w) => w.stockIn > 0) && !stepFields(day.status, day.stock_out_mode ?? "dynamic").includes("stock_in")) {
-    throw new HttpError(409, `stock_in cannot be entered while the day is ${day.status}`, "FIELD_NOT_IN_STEP", { field: "stock_in", status: day.status });
+  const withStockIn = [...wanted].filter(([, w]) => w.stockIn > 0).map(([id]) => id);
+  if (withStockIn.length && !stepFields(day.status, day.stock_out_mode ?? "dynamic").includes("stock_in")) {
+    throw new HttpError(409, `stock_in cannot be entered while the day is ${day.status}`, "FIELD_NOT_IN_STEP", { sku_id: withStockIn[0], field: "stock_in", status: day.status });
   }
 
   const key = (sku_id: string) => ({ ledger_date: date, desk_id: desk.desk_id, sku_id, branch_id: desk.branch_id });
   const existing = new Map((await store.ledger({ date, deskId: desk.desk_id })).map((row) => [row.sku_id, row]));
+  // A SKU already on the day (another device added it, or a retry after the
+  // stock-in write failed) keeps its own Stock In cell: refuse before any write
+  // rather than drop or double-count the number. Without stock_in it is a no-op.
+  const onDay = withStockIn.find((id) => existing.has(id) && !existing.get(id)!.excluded);
+  if (onDay) throw new HttpError(409, "This item is already on the case today — type the stock-in in its row", "SKU_ALREADY_ON_DAY", { sku_id: onDay });
   const restore = [...wanted.keys()].filter((id) => existing.get(id)?.excluded);
   const fresh = [...wanted].filter(([id]) => !existing.has(id));
   // Insert first: it is the write most likely to be refused (another device
