@@ -214,6 +214,10 @@ export interface Store {
   // Atomic increment of one movement column. Returns the new value, or null
   // when the row does not exist.
   ledgerAdd(key: LedgerKey, field: "transfer_in" | "transfer_out" | "move", delta: number, actor: string | null): Promise<number | null>;
+  // Reopens a desk's day and every later day: status back to `opening`, done
+  // stamps and counts cleared, typed numbers kept. Returns the dates, ascending
+  // (the desk_reopen_from RPC).
+  reopenFrom(deskId: string, date: string): Promise<string[]>;
   // Atomic compare-and-set of several fields of one row (the ledger_apply RPC).
   applyLedgerChanges(key: LedgerKey, changes: LedgerChange[]): Promise<ApplyResult>;
 
@@ -547,6 +551,26 @@ export class DemoStore implements Store {
     Object.assign(row, patch, { updated_at: this.now() });
     this.log("desk_days", "UPDATE", before, row);
     return row;
+  }
+  async reopenFrom(deskId: string, date: string) {
+    this.guard();
+    const days = this.db.deskDays.filter((d) => d.desk_id === deskId && d.ledger_date >= date).sort((a, b) => a.ledger_date.localeCompare(b.ledger_date));
+    for (const row of days) {
+      const before = { ...row };
+      Object.assign(row, { status: "opening", done_by: null, done_at: null, updated_at: this.now() });
+      this.log("desk_days", "UPDATE", before, row);
+    }
+    const dates = new Set(days.map((d) => d.ledger_date));
+    for (const ledger of this.db.ledger) {
+      if (ledger.desk_id !== deskId || !dates.has(ledger.ledger_date)) continue;
+      if (ledger.counted_qty == null && ledger.counted_note == null) continue;
+      const before = { ...ledger };
+      ledger.counted_qty = null;
+      ledger.counted_note = null;
+      ledger.updated_at = this.now();
+      this.log("daily_stock_ledger", "UPDATE", before, ledger);
+    }
+    return days.map((d) => d.ledger_date);
   }
 
   async ledger(filter: LedgerFilter) {
@@ -1334,6 +1358,9 @@ class SupabaseStore implements Store {
     const q = [`desk_id=eq.${enc(deskId)}`, `ledger_date=eq.${date}`];
     if (expectedStatus) q.push(`status=eq.${expectedStatus}`);
     return this.patchOne<DeskDay>(`desk_days?${q.join("&")}`, patch);
+  }
+  async reopenFrom(deskId: string, date: string) {
+    return this.rpc<string[]>("desk_reopen_from", { p_desk: deskId, p_date: date });
   }
 
   async ledger(filter: LedgerFilter) {

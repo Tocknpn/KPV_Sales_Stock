@@ -314,23 +314,11 @@ describe("daily cycle", () => {
 });
 
 describe("admin reopen", () => {
-  // Demo Done days carry a physical count, and a count wins the carry. Count was
-  // dropped, so clear yesterday's counts and the corrected closing carries
-  // (Task 4's reopen clears them itself).
-  const clearCounts = (desk: string) => {
-    for (const row of (getStore({ DEMO_DATE: TODAY } as any) as any).db.ledger) {
-      if (row.desk_id === desk && row.ledger_date === YESTERDAY) row.counted_qty = null;
-    }
-  };
-
-  it("only the latest Done day reopens, with a reason, and the fix flows into the next day", async () => {
+  it("a Done day reopens with a reason and the redone chain carries the fix into today", async () => {
     const admin = await asAdmin();
     const staff = await asStaff("B-MM");
     const desk = "MM-D02";
-    const twoDaysAgo = "2026-11-10";
-    clearCounts(desk);
     expect((await call(admin, "POST", `/stock/desk/${desk}/reopen`, { date: YESTERDAY })).json.code).toBe("REASON_REQUIRED");
-    expect((await call(admin, "POST", `/stock/desk/${desk}/reopen`, { date: twoDaysAgo, reason: "wrong count" })).json.code).toBe("NOT_LATEST_DONE");
 
     // Today is already checked in when the mistake in yesterday is found.
     await call(staff, "POST", `/stock/desk/${desk}/checkin`, { date: TODAY });
@@ -338,14 +326,15 @@ describe("admin reopen", () => {
     const soldBefore = rowOf(await detailOf(staff, desk, YESTERDAY), "BR-020").retail_sale;
 
     expect((await call(admin, "POST", `/stock/desk/${desk}/reopen`, { date: YESTERDAY, reason: "wrong count" })).status).toBe(200);
-    expect((await detailOf(admin, desk, YESTERDAY)).status).toBe("check_in");
-    expect((await call(admin, "POST", `/stock/desk/${desk}/transition`, { date: YESTERDAY, toStatus: "final_stock" })).status).toBe(200);
+    expect((await detailOf(admin, desk, YESTERDAY)).status).toBe("opening");
+    expect((await detailOf(admin, desk, TODAY)).status).toBe("opening");
+    expect((await checkIn(admin, desk, YESTERDAY)).status).toBe(200);
     // Two more sales were missed yesterday.
     await call(admin, "POST", `/stock/desk/${desk}/entries`, {
       date: YESTERDAY,
       changes: [{ sku_id: "BR-020", field: "retail_sale", to: soldBefore + 2 }],
     });
-    expect((await call(admin, "POST", `/stock/desk/${desk}/transition`, { date: YESTERDAY, toStatus: "done" })).status).toBe(200);
+    expect((await closeDay(admin, desk, YESTERDAY)).status).toBe(200);
     expect(rowOf(await detailOf(staff, desk, TODAY), "BR-020").opening_qty).toBe(openingBefore - 2);
 
     const log = (await call(admin, "GET", "/audit")).json.entries;
@@ -356,10 +345,11 @@ describe("admin reopen", () => {
   // already sold that stock, the close must be refused whole, not left half done.
   const reopenAndLower = async (admin: any, desk: string, sku: string, by: number) => {
     expect((await call(admin, "POST", `/stock/desk/${desk}/reopen`, { date: YESTERDAY, reason: "wrong count" })).status).toBe(200);
+    expect((await checkIn(admin, desk, YESTERDAY)).status).toBe(200);
     const sold = rowOf(await detailOf(admin, desk, YESTERDAY), sku).retail_sale;
     const res = await call(admin, "POST", `/stock/desk/${desk}/entries`, { date: YESTERDAY, changes: [{ sku_id: sku, field: "retail_sale", to: sold + by }] });
     expect(res.status).toBe(200);
-    return call(admin, "POST", `/stock/desk/${desk}/close`, { date: YESTERDAY });
+    return closeDay(admin, desk, YESTERDAY);
   };
 
   it("refuses re-closing a day whose lower closing would push the next day negative, and writes nothing", async () => {
@@ -367,7 +357,6 @@ describe("admin reopen", () => {
     const staff = await asStaff("B-MM");
     const desk = "MM-D02";
     await checkIn(staff, desk, TODAY);
-    clearCounts(desk);
     const open = rowOf(await detailOf(staff, desk, TODAY), "BR-020");
     expect(open.opening_qty).toBeGreaterThanOrEqual(3);
     // Today sells everything it opened with.
@@ -386,7 +375,6 @@ describe("admin reopen", () => {
     const staff = await asStaff("B-MM");
     const desk = "MM-D02";
     await checkIn(staff, desk, TODAY);
-    clearCounts(desk);
     const open = rowOf(await detailOf(staff, desk, TODAY), "BR-020");
     await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "BR-020", field: "stock_in", to: 5 }] });
     await call(staff, "POST", `/stock/desk/${desk}/entries`, { date: TODAY, changes: [{ sku_id: "BR-020", field: "retail_sale", to: open.opening_qty }] });
@@ -756,12 +744,12 @@ describe("branch manager", () => {
     expect(meta.user.role).toBe("manager");
   });
 
-  it("reopens the latest Done day within 3 days with a reason", async () => {
+  it("reopens a Done day within 3 days with a reason", async () => {
     const manager = await asManager("B-MM");
     const desk = "MM-D02";
     expect((await call(manager, "POST", `/stock/desk/${desk}/reopen`, { date: YESTERDAY })).json.code).toBe("REASON_REQUIRED");
     expect((await call(manager, "POST", `/stock/desk/${desk}/reopen`, { date: YESTERDAY, reason: "wrong count" })).status).toBe(200);
-    expect((await detailOf(manager, desk, YESTERDAY)).status).toBe("check_in");
+    expect((await detailOf(manager, desk, YESTERDAY)).status).toBe("opening");
     const log = (await call(await asAdmin(), "GET", "/audit")).json.entries;
     expect(log.find((e: any) => e.action === "desk_day.reopen")).toMatchObject({ actor_name: "Manivone M." });
   });

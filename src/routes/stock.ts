@@ -397,7 +397,7 @@ async function historyMoves(store: Store, deskId: string, date: string, outgoing
 
 async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: string, date: string) {
   const desk = await requireDesk(store, user, deskId);
-  const [branches, skus, days, ledgerRows, staffAccounts, weights, config, earlier, laterDone, incoming, outgoing, allDesks, goldRow, types] = await Promise.all([
+  const [branches, skus, days, ledgerRows, staffAccounts, weights, config, earlier, incoming, outgoing, allDesks, goldRow, types] = await Promise.all([
     store.branches(),
     store.skus(),
     store.deskDays({ deskId, date, limit: 1 }),
@@ -406,7 +406,6 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
     store.skuWeights(),
     store.config(),
     store.deskDays({ deskId, before: date, limit: 1 }),
-    store.deskDays({ deskId, after: date, status: "done", limit: 1 }),
     store.transfers({ toDeskId: deskId, status: "in_transit" }),
     store.transfers({ fromDeskId: deskId, sentDate: date }),
     store.desks(),
@@ -436,7 +435,7 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
     today: businessDate(c.env),
     // The very first day of a desk: starting stock may still be typed in.
     isFirstDay: Boolean(day) && earlier.length === 0,
-    canReopen: mayReopen(user, desk.branch_id, date, businessDate(c.env)) && day?.status === "done" && laterDone.length === 0,
+    canReopen: mayReopen(user, desk.branch_id, date, businessDate(c.env)) && day?.status === "done",
     incoming: incoming
       .filter((t) => t.sent_date <= date)
       .map((t) => ({ id: t.id, kind: t.kind, sku_id: t.sku_id, name_en: skuName(t.sku_id), qty: t.qty, from: deskName(t.from_desk_id), sent_date: t.sent_date })),
@@ -649,7 +648,8 @@ r.post("/stock/desk/:deskId/close", async (c) => {
 });
 
 // Admin, or a manager of the desk's branch for a recent day: unlock the desk's
-// most recent Done day so it can be corrected. It goes back to check-in.
+// Done day and every later day so they can be redone in date order. They go
+// back to the opening step, typed numbers kept.
 r.post("/stock/desk/:deskId/reopen", requireManager, async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
@@ -664,15 +664,8 @@ r.post("/stock/desk/:deskId/reopen", requireManager, async (c) => {
   }
   const day = await getDay(store, desk.desk_id, date);
   if (!day || day.status !== "done") throw new HttpError(409, "Only a Done day can be reopened", "NOT_DONE");
-  const [laterDone] = await store.deskDays({ deskId: desk.desk_id, after: date, status: "done", limit: 1 });
-  if (laterDone) {
-    throw new HttpError(409, `Reopen ${laterDone.ledger_date} first — only the latest Done day can be reopened`, "NOT_LATEST_DONE", {
-      laterDate: laterDone.ledger_date,
-    });
-  }
-  const updated = await store.updateDeskDay(desk.desk_id, date, { status: "check_in", done_by: null, done_at: null }, "done");
-  if (!updated) throw new HttpError(409, "This desk was changed on another device — reload", "STALE");
-  await audit(store, user, "desk_day.reopen", `${desk.desk_id}/${date}`, { reason }, { branchId: desk.branch_id, deskId: desk.desk_id });
+  const dates = await store.reopenFrom(desk.desk_id, date);
+  await audit(store, user, "desk_day.reopen", `${desk.desk_id}/${date}`, { reason, dates }, { branchId: desk.branch_id, deskId: desk.desk_id });
   return c.json({ ok: true });
 });
 
