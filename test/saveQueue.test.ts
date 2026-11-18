@@ -96,4 +96,18 @@ describe("save queue status", () => {
     expect(states).not.toContain("saved");
     expect(last(states)).toBe("error");
   });
+
+  it("FIELD_NOT_IN_STEP is not retried and reverts the cell", async () => {
+    api.saveChanges.mockRejectedValue(new HttpFail(409, "FIELD_NOT_IN_STEP", { sku_id: "GB-001", field: "retail_sale", status: "opening" }));
+    const { queue, states, results, stored } = setup();
+    const reverted: any[] = [];
+    queue.set("GB-001", "retail_sale", 3, { kind: "typed", cb: (res: any) => (reverted.push(res), false) });
+    await queue.flushAll();
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(api.saveChanges).toHaveBeenCalledTimes(1);
+    expect(last(states)).toBe("error");
+    expect(results[0]).toMatchObject({ ok: false, code: "FIELD_NOT_IN_STEP", skuId: "GB-001", field: "retail_sale", final: true });
+    expect(stored.get("GB-001").retail_sale).toBe(0);
+    expect(queue.hasUnsaved()).toBe(false);
+  });
 });

@@ -180,7 +180,7 @@ export async function renderSkuPickerInto(container, { excludeSkuIds = [], onAdd
 // Opening-balance rows grouped by type: [{ sku, qty }] -> HTML. Each row has
 // data-opening-row="<sku_id>" and an input data-opening-input; with
 // removable, a data-remove-row button.
-export function openingRowsHtml(entries, types, weights, { removable = false } = {}) {
+export function openingRowsHtml(entries, types, weights, { removable = false, qtyLabel = t("stock.openingQtyLabel") } = {}) {
   const qtyOf = new Map(entries.map((e) => [e.sku.sku_id, e.qty]));
   return groupSkusByType(
     entries.map((e) => e.sku),
@@ -203,7 +203,7 @@ export function openingRowsHtml(entries, types, weights, { removable = false } =
                 ${size ? `<span class="block text-[10px] text-gray-500">${escapeHtml(size)}</span>` : ""}
               </span>
               <input data-opening-input type="number" min="0" step="1" inputmode="numeric" enterkeyhint="next" value="${qtyOf.get(s.sku_id) ?? 0}"
-                aria-label="${escapeHtml(skuLabel(s))} — ${t("stock.openingQtyLabel")}" class="w-16 shrink-0 rounded-lg border border-hairline py-1.5 text-center text-sm font-bold" />
+                aria-label="${escapeHtml(skuLabel(s))} — ${escapeHtml(qtyLabel)}" class="w-16 shrink-0 rounded-lg border border-hairline py-1.5 text-center text-sm font-bold" />
               ${removable ? `<button data-remove-row aria-label="${t("documents.delete")}" class="tap-target shrink-0 text-gray-400 hover:text-danger">×</button>` : ""}
             </div>`;
             })

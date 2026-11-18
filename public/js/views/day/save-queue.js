@@ -7,11 +7,16 @@
 //      ROW_CHANGED + stepper  -> re-based once: to = current + (to - from)
 //      ROW_CHANGED + typed    -> the caller is asked "keep yours?"
 //      NEGATIVE_CLOSING       -> the caller is told how many are available
+//      FIELD_NOT_IN_STEP /
+//      OPENING_LOCKED         -> final: the cell is reverted, never retried
 import { api } from "../../api.js";
 
 export const MAX_QTY = 99999;
 export const STEPPER_BUFFER_MS = 600;
 const TEXT_FIELDS = new Set(["destock_note", "counted_note"]);
+// The day's step does not take this field (another device moved the day on):
+// sending it again cannot succeed, so the cell goes back to the saved value.
+const FINAL_CODES = new Set(["FIELD_NOT_IN_STEP", "OPENING_LOCKED"]);
 
 export function clampQty(n) {
   const v = Math.floor(Number(n));
@@ -155,6 +160,10 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
         entries.forEach(([field, e]) =>
           report(e.cb, { ok: false, code: "NEGATIVE_CLOSING", skuId, field, available: Number(err.data?.available ?? 0) })
         );
+      } else if (FINAL_CODES.has(err.code)) {
+        failed = true;
+        onStored(skuId, getStored(skuId));
+        entries.forEach(([field, e]) => report(e.cb, { ok: false, code: err.code, skuId, field, message: err.message, final: true }));
       } else {
         failed = true;
         onStored(skuId, getStored(skuId));

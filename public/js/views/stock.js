@@ -402,20 +402,22 @@ async function reloadDeskDetail(deskCard) {
 }
 
 
-// Opening balances for SKUs added on a case's first day. Resolves to a
-// Map sku_id -> qty, or null when the sheet is closed without confirming.
-function askOpeningQtys(skus, { types, weights }) {
+// A quantity per newly added SKU: the opening while the day is in its opening
+// step, or `label` (e.g. "Stock-in qty") after check-in. Resolves to a Map
+// sku_id -> qty, or null when the sheet is closed without confirming.
+function askOpeningQtys(skus, { types, weights }, { label } = {}) {
   return new Promise((resolve) => {
     let answered = false;
     const qty = new Map(skus.map((s) => [s.sku_id, 0]));
+    const qtyLabel = label ?? t("stock.openingQtyLabel");
     openSheet(
       `
-      <p class="mb-3 text-xs text-gray-600">${t("stock.firstDayOpeningHint")}</p>
-      <div id="opening-rows">${openingRowsHtml(skus.map((sku) => ({ sku, qty: 0 })), types, weights)}</div>
+      ${label ? "" : `<p class="mb-3 text-xs text-gray-600">${t("stock.firstDayOpeningHint")}</p>`}
+      <div id="opening-rows">${openingRowsHtml(skus.map((sku) => ({ sku, qty: 0 })), types, weights, { qtyLabel })}</div>
       <button id="opening-ok" class="btn-primary mt-3 mb-2 w-full">${tf("picker.addN", { n: fmtInt(skus.length) })}</button>
     `,
       {
-        title: t("picker.openingTitle"),
+        title: label ? escapeHtml(label) : t("picker.openingTitle"),
         onMount: (body) => {
           bindOpeningInputs(body, (id, q) => qty.set(id, q));
           body.querySelector("[data-opening-input]")?.focus();

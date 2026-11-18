@@ -4,7 +4,6 @@ import { api } from "../../api.js";
 import { toast, openSheet, closeSheet, openActionSheet } from "../../ui.js";
 import { fmtDate, fmtLaosFull, fmtInt, fmtBaht, escapeHtml } from "../../util.js";
 import { t } from "../../i18n.js";
-import { closingOf } from "./row.js";
 import { skuLabel } from "../../sku-groups.js";
 
 // t() with {placeholders}.
@@ -51,7 +50,7 @@ function showConflict(body, ctx, res, refresh) {
   el.querySelector("[data-theirs]").addEventListener("click", () => showMessage(body, ""));
 }
 
-// A conflict on a field with no sheet open (a count typed on the card).
+// A conflict on a field with no sheet open (a number typed on the grid).
 export function openConflictSheet(ctx, res) {
   const row = ctx.row(res.skuId);
   openSheet(`${messageSlot()}`, {
@@ -62,70 +61,6 @@ export function openConflictSheet(ctx, res) {
       body.querySelectorAll("[data-keep], [data-theirs]").forEach((b) => b.addEventListener("click", closeSheet));
     },
   });
-}
-
-// --- count note -----------------------------------------------------------
-
-export function openCountNoteSheet(ctx, skuId) {
-  const row = ctx.row(skuId);
-  const variance = (row.counted_qty ?? 0) - closingOf(row);
-  openSheet(
-    `
-    <p class="mb-3 rounded-lg bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
-      ${t("day.closing")} <b class="tabular-nums">${closingOf(row)}</b> · ${t("day.count")} <b class="tabular-nums">${row.counted_qty ?? "—"}</b> · ${t("day.diff")} <b class="tabular-nums text-danger">${variance > 0 ? "+" : variance < 0 ? "−" : ""}${Math.abs(variance)}</b>
-    </p>
-    ${messageSlot()}
-    <label for="count-note" class="mb-1.5 block text-sm font-bold text-gray-700">${t("day.countNoteHint")}</label>
-    <textarea id="count-note" rows="3" maxlength="200" class="input-filled text-base">${escapeHtml(row.counted_note ?? "")}</textarea>
-    <button type="button" data-save class="btn-primary mt-4 w-full">${t("day.save")}</button>
-  `,
-    {
-      title: `${escapeHtml(skuLabel(row))} · ${t("day.countNoteTitle")}`,
-      onMount: (body) => {
-        body.querySelector("[data-save]").addEventListener("click", () => {
-          const to = body.querySelector("#count-note").value.trim() || null;
-          if (to !== (row.counted_note ?? null)) {
-            row.counted_note = to;
-            ctx.rowChanged(skuId);
-            ctx.queue.set(skuId, "counted_note", to, { kind: "typed" });
-          }
-          closeSheet();
-        });
-        setTimeout(() => body.querySelector("#count-note")?.focus(), 0);
-      },
-    }
-  );
-}
-
-// --- destock reason (dynamic days) ------------------------------------------
-
-export function openDestockNoteSheet(ctx, skuId) {
-  const row = ctx.row(skuId);
-  openSheet(
-    `
-    <p class="mb-3 rounded-lg bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
-      ${t("day.destock")} <b class="tabular-nums text-danger">${row.destock}</b>
-    </p>
-    <label for="destock-note" class="mb-1.5 block text-sm font-bold text-gray-700">${t("day.destockReason")}</label>
-    <textarea id="destock-note" rows="3" maxlength="200" class="input-filled text-base">${escapeHtml(row.destock_note ?? "")}</textarea>
-    <button type="button" data-save class="btn-primary mt-4 w-full">${t("day.save")}</button>
-  `,
-    {
-      title: `${escapeHtml(skuLabel(row))} · ${t("day.destock")}`,
-      onMount: (body) => {
-        body.querySelector("[data-save]").addEventListener("click", () => {
-          const to = body.querySelector("#destock-note").value.trim() || null;
-          if (to !== (row.destock_note ?? null)) {
-            row.destock_note = to;
-            ctx.rowChanged(skuId);
-            ctx.queue.set(skuId, "destock_note", to, { kind: "typed" });
-          }
-          closeSheet();
-        });
-        setTimeout(() => body.querySelector("#destock-note")?.focus(), 0);
-      },
-    }
-  );
 }
 
 // --- safe drop note -------------------------------------------------------

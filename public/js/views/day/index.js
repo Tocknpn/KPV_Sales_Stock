@@ -4,23 +4,23 @@
 //   sticky totals    pcs · Baht · low count · save state
 //   stock grid       sticky column header, slim group labels, one row per SKU
 //                    (row.js); numbers are typed straight into the cells
-//   sticky footer    [Start count] [✓ Close day]   (Done: [Reopen])
+//   sticky footer    opening step:  [+ Add SKU] [✓ Confirm check-in]
+//                    check-in step: [+ Add SKU] [✓ Close day]
+//                    Done:          [Reopen]
 //
 // The single-mode grid fits a phone; the dynamic one (retail / wholesale /
-// destock) scrolls sideways with the SKU column pinned.
+// return / withdraw) scrolls sideways with the SKU column pinned.
 //
 // stock.js owns the case cards and opens this with mountDay(deskCard, date, hooks).
 import { api } from "../../api.js";
 import { state } from "../../state.js";
-import { toast, openActionSheet } from "../../ui.js";
+import { toast, openActionSheet, openSheet, closeSheet } from "../../ui.js";
 import { fmtBaht, fmtInt, fmtDate, escapeHtml, statusPillClasses } from "../../util.js";
 import { t } from "../../i18n.js";
 import { closingOf, groupKeyOf, renderRow, patchRow, headerHtml, gridTemplate, gridMinWidth, skuName } from "./row.js";
-import { createSaveQueue, clampQty, clampSigned } from "./save-queue.js";
+import { createSaveQueue, clampQty } from "./save-queue.js";
 import {
   tf,
-  openCountNoteSheet,
-  openDestockNoteSheet,
   openSafeDropSheet,
   openCaseInfoSheet,
   openReopenSheet,
@@ -45,6 +45,7 @@ const SYNC_FIELDS = [
   "wholesale",
   "transfer_out",
   "destock",
+  "withdraw",
   "destock_note",
   "move",
   "stock_out_single",
@@ -66,19 +67,16 @@ function laosClock(iso) {
   return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
 }
 
-/** Same rules the server enforces on close, so staff see what to fix first. */
+/** Same rule the server enforces on close (no count needed), so staff see what to fix first. */
 export function findProblems(rows) {
   const problems = new Map();
-  const add = (sku, rule) => problems.set(sku, (problems.get(sku) ?? new Set()).add(rule));
-  for (const r of rows) {
-    const closing = closingOf(r);
-    if (closing < 0) add(r.sku_id, "negative_closing");
-    if (r.destock > 0 && !r.destock_note?.trim()) add(r.sku_id, "destock_note_missing");
-    if (r.counted_qty == null) add(r.sku_id, "count_missing");
-    else if (r.counted_qty !== closing && !r.counted_note?.trim()) add(r.sku_id, "variance_note_missing");
-  }
+  for (const r of rows) if (closingOf(r) < 0) problems.set(r.sku_id, new Set(["negative_closing"]));
   return problems;
 }
+
+// The steps in which the grid takes input (the rest is read-only).
+const isEntryStep = (status) => status === "opening" || status === "check_in" || status === "final_stock";
+const canClose = (status) => status === "check_in" || status === "final_stock";
 
 // ---------------------------------------------------------------------------
 // Screen state (one day screen at a time)
@@ -100,15 +98,17 @@ export async function mountDay(deskCard, date, hooks = {}, opts = {}) {
     hooks,
     rows,
     stored: new Map(rows.map((r) => [r.sku_id, { ...r }])),
-    readOnly: detail.status === "done",
-    countMode: rows.some((r) => r.counted_qty != null),
+    status: detail.status,
+    readOnly: !isEntryStep(detail.status),
     // The mode the day was opened in (the company setting at that moment).
     mode: detail.stock_out_mode === "single" ? "single" : "dynamic",
     tab: resumeTab ?? "stock",
     problems: new Map(),
     saveState: "",
     closing: false,
-    // Task 6: the home card's "② Close day" opens the screen with this set; start the close flow here, then clear it.
+    busy: false,
+    // The home card's "② Close day" opens the screen with step=close: the close
+    // sheet opens once the day has loaded (see consumeAutoClose).
     autoClose: opts.step === "close",
     queue: null,
     ctx: null,
@@ -141,6 +141,10 @@ export async function mountDay(deskCard, date, hooks = {}, opts = {}) {
       if (res.code === "NEGATIVE_CLOSING") {
         toast(tf("day.onlyAvailable", { n: res.available }), "error");
         refreshRow(res.skuId, { force: true });
+      } else if (res.final) {
+        // The step does not take this field (the day moved on elsewhere): show the saved value.
+        toast(res.message || t(`err.${res.code}`), "error");
+        refreshRow(res.skuId, { force: true });
       }
       else if (res.code === "ROW_CHANGED") openConflictSheet(screen.ctx, res);
       else toast(res.message || t("err.SERVER_ERROR"), "error");
@@ -166,6 +170,16 @@ export async function mountDay(deskCard, date, hooks = {}, opts = {}) {
   renderTopbar();
   renderScreen();
   renderFooter();
+  consumeAutoClose();
+}
+
+// step=close from the home card: open the close sheet once, then drop the flag
+// and the URL parameter so a reload does not open it again.
+function consumeAutoClose() {
+  if (!S?.autoClose) return;
+  S.autoClose = false;
+  replaceQuery({ step: null });
+  if (canClose(S.status)) closeDay();
 }
 
 export async function unmountDay() {
@@ -202,7 +216,7 @@ function totals() {
 
 function renderTopbar() {
   const { deskCard, date, detail } = S;
-  const done = S.readOnly;
+  const done = S.status === "done";
   $("#topbar-slot").innerHTML = `
     <div class="flex items-center gap-2">
       <button id="day-back" aria-label="${t("login.back")}" class="focus-ring tap-target -ml-1.5 flex shrink-0 items-center justify-center rounded-full text-gray-600 active:bg-gray-100">
@@ -211,7 +225,7 @@ function renderTopbar() {
       <div class="min-w-0 flex-1">
         <h1 class="truncate text-base font-extrabold text-gray-900">${escapeHtml(deskCard.display_name)} · ${fmtDate(date)}</h1>
         <div class="flex min-w-0 items-center gap-2 text-xs text-gray-600">
-          <span class="status-pill shrink-0 px-2 py-0.5 ${statusPillClasses(done ? "done" : "check_in")}">${done ? t("stock.statusDone") : t("day.statusOpen")}</span>
+          <span class="status-pill shrink-0 px-2 py-0.5 ${statusPillClasses(done ? "done" : S.status === "opening" ? "opening" : "check_in")}">${done ? t("stock.statusDone") : S.status === "opening" ? t("stock.statusOpening") : t("day.statusOpen")}</span>
           ${detail.lastActorName ? `<span class="min-w-0 truncate">👤 ${escapeHtml(detail.lastActorName)}</span>` : ""}
         </div>
       </div>
@@ -259,7 +273,6 @@ function renderScreen() {
 
   const screen = $("#day-screen");
   screen.addEventListener("click", onClick);
-  screen.addEventListener("pointerdown", onPointerDown);
   screen.addEventListener("change", onChange);
   screen.addEventListener("input", onInput);
   screen.addEventListener("keydown", onKeyDown);
@@ -301,7 +314,10 @@ function renderNotices() {
   const { detail } = S;
   const parts = [];
 
-  if (S.readOnly) {
+  if (S.status === "opening") {
+    parts.push(`<p class="mb-3 rounded-lg bg-brand-50 px-3 py-2.5 text-sm font-semibold text-brand-700">${t("day.openingHint")}</p>`);
+  }
+  if (S.status === "done") {
     parts.push(`
       <p class="mb-3 rounded-lg bg-success-bg px-3 py-2.5 text-center text-sm font-bold text-success">
         ${
@@ -350,7 +366,7 @@ function groupMeta(list) {
 }
 
 function rowView(r) {
-  return { readOnly: S.readOnly, countMode: S.countMode, mode: S.mode, problems: S.problems.get(r.sku_id) };
+  return { status: S.status, mode: S.mode, problems: S.problems.get(r.sku_id) };
 }
 
 function rowHtml(r) {
@@ -386,7 +402,7 @@ function renderList() {
     <div class="card px-1.5 pb-2">
       <div id="grid-head-wrap" class="sticky -top-4 z-[2] -mx-1.5 overflow-hidden rounded-t-2xl border-b border-hairline bg-white px-1.5">
         <div class="grid items-end gap-1.5 px-1 pb-1.5 pt-2.5 text-center text-[11px] font-bold leading-tight text-gray-600" style="grid-template-columns:${cols};${width}">
-          ${headerHtml(S.mode, { countMode: S.countMode && !S.readOnly })}
+          ${headerHtml(S.mode)}
         </div>
       </div>
       <div id="grid-body" class="overflow-x-auto overscroll-x-contain">
@@ -416,16 +432,22 @@ function renderFooter() {
   }
   // Sit directly above the bottom nav, whatever its height on this device.
   host.style.bottom = `${document.getElementById("bottom-nav")?.offsetHeight ?? 0}px`;
-  host.innerHTML = S.readOnly
-    ? S.detail.canReopen
+  const busy = S.closing || S.busy ? "disabled" : "";
+  const bar = (primary) => `<div class="flex gap-2.5 border-t border-hairline bg-white/95 px-4 py-2 backdrop-blur">
+         <button data-act="add-sku" class="btn-secondary min-w-0 flex-1 px-2" ${busy}>${t("stock.addSku")}</button>
+         ${primary}
+       </div>`;
+  if (S.status === "opening") {
+    host.innerHTML = bar(`<button data-act="confirm-check-in" class="btn-primary min-w-0 flex-1 px-2" ${busy}>${t("day.confirmCheckIn")}</button>`);
+  } else if (canClose(S.status)) {
+    host.innerHTML = bar(`<button data-act="close" class="btn-primary min-w-0 flex-1 px-2" ${busy}>${t("day.closeDay")}</button>`);
+  } else {
+    host.innerHTML = S.detail.canReopen
       ? `<div class="border-t border-hairline bg-white/95 px-4 py-2 backdrop-blur">
            <button id="day-reopen" data-act="reopen" class="btn-secondary w-full border-danger/30 text-danger">${t("stock.reopen")}</button>
          </div>`
-      : ""
-    : `<div class="flex gap-2.5 border-t border-hairline bg-white/95 px-4 py-2 backdrop-blur">
-         <button data-act="count-mode" aria-pressed="${S.countMode}" class="btn-secondary min-w-0 flex-1 px-2">${S.countMode ? t("day.stopCount") : t("day.startCount")}</button>
-         <button data-act="close" class="btn-primary min-w-0 flex-1 px-2" ${S.closing ? "disabled" : ""}>${t("day.closeDay")}</button>
-       </div>`;
+      : "";
+  }
   host.onclick = (e) => {
     const btn = e.target.closest("[data-act]");
     if (btn) onAction(btn.dataset.act, btn);
@@ -439,77 +461,21 @@ function onClick(e) {
   const tab = e.target.closest("[data-tab]");
   if (tab) return setTab(tab.dataset.tab);
   const btn = e.target.closest("[data-act]");
-  if (!btn) return;
-  // "✓ matches" runs on pointerdown (see onPointerDown); only a keyboard
-  // activation (click with no pointer, detail 0) comes through here.
-  if (btn.dataset.act === "match" && e.detail !== 0) return;
-  onAction(btn.dataset.act, btn);
+  if (btn) onAction(btn.dataset.act);
 }
 
-// A focused count input fires change on blur, which re-renders the card and
-// would swallow the click. Acting on pointerdown, without moving focus, keeps
-// the first tap.
-function onPointerDown(e) {
-  const btn = e.target.closest('[data-act="match"]');
-  if (!btn || btn.disabled) return;
-  e.preventDefault();
-  onAction("match", btn);
-}
-
-function onAction(act, btn) {
+function onAction(act) {
   if (!S) return;
-  const sku = btn.closest("[data-sku]")?.dataset.sku;
   switch (act) {
-    case "note":
-      return openCountNoteSheet(S.ctx, sku);
-    case "destock-note":
-      return openDestockNoteSheet(S.ctx, sku);
-    case "match": {
-      const row = S.ctx.row(sku);
-      const to = closingOf(row);
-      row.counted_qty = to;
-      S.ctx.rowChanged(sku);
-      S.queue.set(sku, "counted_qty", to, { kind: "typed" });
-      return;
-    }
-    case "sign":
-      return flipMoveSign(sku, btn);
-    case "count-mode":
-      S.countMode = !S.countMode;
-      renderList();
-      return renderFooter();
     case "reopen":
       return openReopenSheet(S.ctx);
     case "close":
       return closeDay();
+    case "confirm-check-in":
+      return confirmCheckIn();
+    case "add-sku":
+      return addSkus();
   }
-}
-
-// Move in/out: ± flips the sign of what is there. With nothing typed yet, the
-// direction is remembered for the number typed next.
-function flipMoveSign(sku, btn) {
-  const row = S.ctx.row(sku);
-  const strip = btn.closest("[data-move-strip]");
-  const input = btn.closest("[data-move-cell]")?.querySelector('[data-field="move_qty"]');
-  const current = row.move_qty ?? 0;
-  const size = Math.abs(current) || Math.abs(clampSigned(parseSigned(input?.value)));
-  const neg = !(current < 0 || strip?.dataset.pendingNeg === "1");
-  if (!size) {
-    if (strip) strip.dataset.pendingNeg = neg ? "1" : "";
-    refreshRow(sku);
-    input?.focus();
-    return;
-  }
-  if (strip) strip.dataset.pendingNeg = "";
-  saveField(sku, "move_qty", neg ? -size : size);
-}
-
-// "-5", "−5", "5", "-" or "" as a number (blank or a lone minus = 0).
-function parseSigned(raw) {
-  const v = String(raw ?? "").trim().replace(/[−–]/g, "-");
-  if (v === "" || v === "-") return 0;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
 }
 
 // One typed value: check it locally (closing may not drop below zero), show it,
@@ -521,7 +487,7 @@ function saveField(sku, field, to) {
   const after = closingOf({ ...row, [field]: to });
   if (after < 0 && after < before) {
     // How much this cell could take out at most, given everything else on the row.
-    const available = field === "move_qty" ? before - (row.move_qty ?? 0) : field === "stock_in" ? before : before + (row[field] ?? 0);
+    const available = field === "stock_in" || field === "opening_qty" ? before : before + (row[field] ?? 0);
     toast(tf("day.onlyAvailable", { n: Math.max(available, 0) }), "error");
     return refreshRow(sku, { force: true });
   }
@@ -534,48 +500,21 @@ function onChange(e) {
   if (!S) return;
   const input = e.target;
   const sku = input.closest("[data-sku]")?.dataset.sku;
-  if (!sku) return;
-  const raw = input.value.trim();
-  if (input.matches("[data-count]")) {
-    const row = S.ctx.row(sku);
-    const to = raw === "" ? null : clampQty(raw);
-    if (to === row.counted_qty) return refreshRow(sku);
-    row.counted_qty = to;
-    S.ctx.rowChanged(sku);
-    S.queue.set(sku, "counted_qty", to, { kind: "typed" });
-    return;
-  }
   const field = input.dataset.field;
-  if (!field) return;
-  if (field === "move_qty") {
-    // The sign typed decides the direction; ± pressed before typing a plain number makes it an out.
-    const strip = input.closest("[data-move-cell]")?.querySelector("[data-move-strip]");
-    const pendingNeg = strip?.dataset.pendingNeg === "1";
-    if (strip) strip.dataset.pendingNeg = "";
-    let to = clampSigned(parseSigned(raw));
-    if (pendingNeg && to > 0 && !/^\s*[-−–]/.test(raw)) to = -to;
-    return saveField(sku, field, to);
-  }
-  saveField(sku, field, clampQty(raw || 0));
+  if (!sku || !field) return;
+  saveField(sku, field, clampQty(input.value.trim() || 0));
 }
 
 function onInput(e) {
   if (!S) return;
-  if (e.target.matches('[data-field="move_qty"]')) {
-    // Signed: one leading minus (any dash counts), then up to 5 digits.
-    const v = e.target.value.replace(/[−–]/g, "-");
-    const neg = v.trimStart().startsWith("-");
-    e.target.value = (neg ? "-" : "") + v.replace(/\D/g, "").slice(0, 5);
-  } else if (e.target.matches("[data-count], [data-field]")) {
-    e.target.value = e.target.value.replace(/\D/g, "").slice(0, 5);
-  }
+  if (e.target.matches("[data-field]")) e.target.value = e.target.value.replace(/\D/g, "").slice(0, 5);
 }
 
 // Enter / "next" on the keypad moves on to the next cell, row by row.
 function onKeyDown(e) {
-  if (e.key !== "Enter" || !e.target.matches("[data-count], [data-field]")) return;
+  if (e.key !== "Enter" || !e.target.matches("[data-field]")) return;
   e.preventDefault();
-  const cells = [...document.querySelectorAll("#day-list [data-count], #day-list [data-field]")];
+  const cells = [...document.querySelectorAll("#day-list [data-field]")];
   const next = cells[cells.indexOf(e.target) + 1];
   if (next) next.focus();
   else e.target.blur();
@@ -583,7 +522,7 @@ function onKeyDown(e) {
 
 // Select the whole number on focus so typing replaces it.
 function onFocusIn(e) {
-  if (!e.target.matches("[data-count], [data-field]")) return;
+  if (!e.target.matches("[data-field]")) return;
   const el = e.target;
   setTimeout(() => el.select?.(), 0);
 }
@@ -591,7 +530,7 @@ function onFocusIn(e) {
 function openMenu() {
   const info = { label: t("day.caseInfo"), value: "info" };
   // A Done day is read-only: only Case info is offered there.
-  const options = S?.detail?.status === "done"
+  const options = S?.readOnly
     ? [info]
     : [info, { label: t("stock.addSku"), value: "add" }, { label: t("day.removeItem"), value: "remove" }, { label: t("day.safeDrop"), value: "safe" }];
   openActionSheet(t("day.menu"), options, async (opt) => {
@@ -599,38 +538,137 @@ function openMenu() {
     if (opt.value === "info") return openCaseInfoSheet(S.ctx);
     if (opt.value === "safe") return openSafeDropSheet(S.ctx);
     if (opt.value === "remove") return openRemoveItemSheet(S.ctx);
-    await S.queue.flushAll();
-    const { deskCard, date, detail, hooks } = S;
-    hooks.openSkuPicker?.(
-      S.rows.map((r) => r.sku_id),
-      async (skus, meta) => {
-        // On a desk's very first day the starting stock can be typed in.
-        const openings = detail.isFirstDay ? await hooks.askOpeningQtys(skus, meta) : new Map();
-        if (openings === null) return;
-        try {
-          await api.addDeskSkus(deskCard.desk_id, { date, items: skus.map((s) => ({ sku_id: s.sku_id, opening_qty: openings.get(s.sku_id) ?? 0 })) });
-          toast(tf("picker.addedN", { n: skus.length }), "success");
-        } finally {
-          // Even after an error, show what was saved.
-          await hooks.reload?.();
-        }
-      }
-    );
+    if (opt.value === "add") return addSkus();
   });
 }
 
+// + Add SKU: in the opening step each new item takes its opening; after
+// check-in it takes a stock-in quantity instead.
+async function addSkus() {
+  if (!S || S.readOnly) return;
+  const screen = S;
+  await screen.queue.flushAll();
+  const { deskCard, date, hooks } = screen;
+  const opening = screen.status === "opening";
+  hooks.openSkuPicker?.(
+    screen.rows.map((r) => r.sku_id),
+    async (skus, meta) => {
+      const qtys = await hooks.askOpeningQtys(skus, meta, opening ? {} : { label: t("day.stockInQty") });
+      if (qtys === null) return;
+      const field = opening ? "opening_qty" : "stock_in";
+      try {
+        await api.addDeskSkus(deskCard.desk_id, { date, items: skus.map((s) => ({ sku_id: s.sku_id, [field]: qtys.get(s.sku_id) ?? 0 })) });
+        toast(tf("picker.addedN", { n: skus.length }), "success");
+      } catch (err) {
+        // Another device added it first (SKU_ALREADY_ON_DAY), or the day moved
+        // on: say why, then show what is saved.
+        toast(err.message || t("err.SERVER_ERROR"), "error");
+      } finally {
+        await hooks.reload?.();
+      }
+    }
+  );
+}
+
+// ✓ Confirm check-in: the opening review is done; selling may start.
+async function confirmCheckIn() {
+  if (!S || S.busy || S.status !== "opening") return;
+  const screen = S;
+  screen.busy = true;
+  renderFooter();
+  try {
+    await screen.queue.flushAll();
+    if (screen.queue.hasUnsaved()) return toast(t("day.unsaved"), "error");
+    try {
+      await api.transitionDesk(screen.deskCard.desk_id, { date: screen.date, toStatus: "check_in" });
+      toast(t("stock.checkedInToast"), "success");
+    } catch (err) {
+      toast(err.message || t("err.SERVER_ERROR"), "error");
+    }
+    await screen.hooks.reload?.();
+  } finally {
+    screen.busy = false;
+    if (S === screen) renderFooter();
+  }
+}
+
+// Day totals for the close sheet, in pieces.
+export function dayTotals(rows) {
+  const sum = (f) => rows.reduce((n, r) => n + (r[f] ?? 0), 0);
+  return {
+    stock_in: sum("stock_in"),
+    retail_sale: sum("retail_sale"),
+    wholesale: sum("wholesale"),
+    destock: sum("destock"),
+    withdraw: sum("withdraw"),
+    stock_out_single: sum("stock_out_single"),
+    closing: rows.reduce((n, r) => n + closingOf(r), 0),
+  };
+}
+
+// ✓ Close day: save everything, check for negative closings, then confirm
+// with the day's totals before the server marks it Done. No count is needed.
 async function closeDay() {
-  if (S.closing) return;
+  if (!S || S.closing || !canClose(S.status)) return;
   const screen = S;
   screen.closing = true;
   renderFooter();
   try {
     await screen.queue.flushAll();
-    const problems = findProblems(screen.rows);
     if (screen.queue.hasUnsaved()) return toast(t("day.unsaved"), "error");
+    const problems = findProblems(screen.rows);
     if (problems.size) return showProblems(problems);
-    const closingToday = screen.date === state.meta.today;
-    if (closingToday && isBeforeStockCutoff() && !window.confirm(t("stock.earlySubmitConfirm"))) return;
+    openCloseSheet(screen);
+  } finally {
+    screen.closing = false;
+    if (S === screen) renderFooter();
+  }
+}
+
+const TOTAL_LABEL = {
+  stock_in: "grid.in",
+  retail_sale: "grid.retail",
+  wholesale: "grid.wholesale",
+  destock: "grid.destock",
+  withdraw: "grid.withdraw",
+  stock_out_single: "grid.out",
+};
+
+function openCloseSheet(screen) {
+  const tot = dayTotals(screen.rows);
+  const outs = screen.mode === "single" ? ["stock_out_single"] : ["retail_sale", "wholesale", "destock", "withdraw"];
+  const line = (label, n, cls) =>
+    `<div class="flex justify-between gap-4 py-2"><dt class="text-gray-600">${label}</dt><dd class="font-extrabold tabular-nums ${cls}">${fmtInt(n)}</dd></div>`;
+  const early = screen.date === state.meta.today && isBeforeStockCutoff();
+  openSheet(
+    `
+    ${early ? `<p class="mb-3 rounded-lg bg-warning-bg px-3 py-2.5 text-sm font-semibold text-warning">${t("stock.earlySubmitConfirm")}</p>` : ""}
+    <p class="mb-1 text-xs font-bold text-gray-500">${t("day.closeTotalsHint")}</p>
+    <dl class="divide-y divide-hairline text-sm">
+      ${line(t(TOTAL_LABEL.stock_in), tot.stock_in, "text-success")}
+      ${outs.map((f) => line(t(TOTAL_LABEL[f]), tot[f], "text-danger")).join("")}
+      ${line(t("grid.closing"), tot.closing, "text-brand-700")}
+    </dl>
+    <button type="button" data-confirm class="btn-primary mt-4 w-full">${t("day.closeConfirm")}</button>
+  `,
+    {
+      title: `${t("day.closeDay")} · ${escapeHtml(screen.deskCard.display_name)} · ${fmtDate(screen.date)}`,
+      onMount: (body) => {
+        body.querySelector("[data-confirm]").addEventListener("click", (e) => {
+          e.currentTarget.disabled = true;
+          closeSheet();
+          submitClose(screen);
+        });
+      },
+    }
+  );
+}
+
+async function submitClose(screen) {
+  if (screen.closing) return;
+  screen.closing = true;
+  if (S === screen) renderFooter();
+  try {
     try {
       await api.closeDay(screen.deskCard.desk_id, { date: screen.date });
     } catch (err) {
@@ -638,7 +676,8 @@ async function closeDay() {
       if (err.code === "DAY_INCOMPLETE") {
         const failed = new Map();
         for (const f of err.data?.failures ?? []) failed.set(f.sku_id, (failed.get(f.sku_id) ?? new Set()).add(f.rule));
-        return showProblems(failed);
+        if (S === screen) showProblems(failed);
+        return;
       }
       throw err;
     }
@@ -652,8 +691,6 @@ async function closeDay() {
 
 function showProblems(problems) {
   S.problems = problems;
-  // A missing count or note is fixed in count mode.
-  if ([...problems.values()].some((rules) => rules.has("count_missing") || rules.has("variance_note_missing"))) S.countMode = true;
   renderNotices();
   renderList();
   renderFooter();

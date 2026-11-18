@@ -1,23 +1,26 @@
 // One SKU on the day screen: one row of the stock grid.
 //
-//   single mode   SKU | Opening | Stock-in | Stock-out | Move in/out | Closing
-//   dynamic mode  SKU | Opening | Stock-in | Retail | Wholesale | Destock | Move in/out | Closing
+//   single mode   SKU | Opening | Stock-in | Stock-out | Closing          (legacy)
+//   dynamic mode  SKU | Opening | Stock-in | Retail | Wholesale | Return | Withdraw | Closing
 //
-// Editable cells are plain inputs (numeric keypad) holding the DAY'S TOTAL for
-// that field: typing replaces it and it saves on change. Move in/out is signed:
-// type -5 for 5 moved out, 5 for 5 moved in; the strip under it shows the
-// direction, and its ± button flips the sign (the iPhone number pad has no minus). In count mode the Closing column
-// becomes the Count input, with the expected closing above it (tap = matches).
+// Which cells take input follows the day's step (editableFor, mirroring the
+// server's stepFields): the opening review step takes stock-in (and the
+// opening of a newly added item); after check-in, stock-in and the four outs.
+// Every other cell is a grey read-only box. Typing replaces the day's total
+// for that field and it saves on change. Old days may still carry a linked
+// move (shown as "⇄ −3" under Closing) and a count (shown as a note).
 import { t, productName } from "../../i18n.js";
 import { escapeHtml, fmtRunway } from "../../util.js";
 import { skuSizeLabel, skuLabel } from "../../sku-groups.js";
 
-// Same formula as the database's generated closing_qty (migration 11).
-export const stockOutOf = (r) => r.retail_sale + r.wholesale + r.destock + (r.stock_out_single ?? 0);
+// Same formula as the database's generated closing_qty.
+export const stockOutOf = (r) =>
+  r.retail_sale + r.wholesale + r.destock + (r.withdraw ?? 0) + (r.stock_out_single ?? 0);
 export const closingOf = (r) =>
   r.opening_qty + r.stock_in + r.transfer_in - r.transfer_out - r.move - stockOutOf(r) + (r.move_qty ?? 0);
-// Old linked moves/transfers still on a row (past days): transfer_in − transfer_out − move.
-export const linkedMoveOf = (r) => r.transfer_in - r.transfer_out - r.move;
+// Old moves/transfers still on a row (past days): the server's legacy_move.
+export const legacyMoveOf = (r) =>
+  r.legacy_move ?? (r.transfer_in ?? 0) - (r.transfer_out ?? 0) - (r.move ?? 0) + (r.move_qty ?? 0);
 
 export const signed = (n) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : "0");
 
@@ -30,30 +33,42 @@ export function groupKeyOf(r) {
   return (r.type_label || r.category || "").trim();
 }
 
-/** The editable quantity columns for a stock-out mode, in screen order. */
+/** The quantity columns between Opening and Closing for a stock-out mode, in screen order. */
 export function columnsFor(mode) {
   return mode === "single"
-    ? ["stock_in", "stock_out_single", "move_qty"]
-    : ["stock_in", "retail_sale", "wholesale", "destock", "move_qty"];
+    ? ["stock_in", "stock_out_single"]
+    : ["stock_in", "retail_sale", "wholesale", "destock", "withdraw"];
+}
+
+/**
+ * The fields this row takes input for in this step. Mirrors the server's
+ * stepFields: opening -> stock_in (+ opening_qty on a newly added row);
+ * check_in / final_stock -> the mode's columns; anything else -> none.
+ */
+export function editableFor(status, mode, row) {
+  if (status === "opening") return new Set(row?.opening_editable ? ["stock_in", "opening_qty"] : ["stock_in"]);
+  if (status === "check_in" || status === "final_stock") return new Set(columnsFor(mode));
+  return new Set();
 }
 
 const LABEL = {
+  opening_qty: "grid.open",
   stock_in: "grid.in",
   stock_out_single: "grid.out",
   retail_sale: "grid.retail",
   wholesale: "grid.wholesale",
   destock: "grid.destock",
-  move_qty: "grid.move",
+  withdraw: "grid.withdraw",
 };
-const OUT_FIELDS = new Set(["stock_out_single", "retail_sale", "wholesale", "destock"]);
+const OUT_FIELDS = new Set(["stock_out_single", "retail_sale", "wholesale", "destock", "withdraw"]);
 
-// Name column + Opening + editable columns + Closing. Single mode fits a phone;
+// Name column + Opening + quantity columns + Closing. Single mode fits a phone;
 // dynamic mode has a minimum width and scrolls sideways with the name pinned.
 export function gridTemplate(mode) {
   const n = columnsFor(mode).length + 2;
   return mode === "single"
     ? `minmax(0,1.7fr) repeat(${n},minmax(0,1fr))`
-    : `minmax(92px,1.6fr) repeat(${n},minmax(54px,1fr))`;
+    : `minmax(92px,1.6fr) repeat(${n},minmax(50px,1fr))`;
 }
 export const gridMinWidth = (mode) => (mode === "single" ? 0 : 520);
 
@@ -62,77 +77,48 @@ const NUM = "w-full min-w-0 bg-transparent text-center text-lg font-extrabold ta
 // The first column stays put while the numbers scroll sideways.
 export const STICKY = "sticky left-0 z-[1] bg-white";
 
-export function headerHtml(mode, { countMode }) {
+export function headerHtml(mode) {
   const cols = [
     `<div class="${STICKY} px-1 text-left">${t("grid.sku")}</div>`,
     `<div>${t("grid.open")}</div>`,
     ...columnsFor(mode).map((f) => `<div class="${OUT_FIELDS.has(f) ? "text-danger" : f === "stock_in" ? "text-success" : ""}">${t(LABEL[f])}</div>`),
-    `<div class="text-brand-700">${t(countMode ? "grid.count" : "grid.closing")}</div>`,
+    `<div class="text-brand-700">${t("grid.closing")}</div>`,
   ];
   return cols.join("");
 }
 
-function toneOf(field, value) {
+function toneOf(field) {
   if (field === "stock_in") return "text-success";
   if (OUT_FIELDS.has(field)) return "text-danger";
-  if (field === "move_qty") return value > 0 ? "text-success" : value < 0 ? "text-danger" : "text-gray-900";
+  if (field === "opening_qty") return "text-gray-700";
   return "text-gray-900";
 }
 
 const label = (r, field) => `${skuLabel(r)} · ${t(LABEL[field])}`;
 
-// The direction strip under Move in/out: a label that follows the sign, and ±.
-export function moveStripHtml(v, pendingNeg = false) {
-  const neg = v < 0 || (v === 0 && pendingNeg);
-  return `<span data-move-label class="min-w-0 flex-1 truncate py-0.5 text-center">${neg ? t("grid.moveOut") : t("grid.moveIn")}</span>
-      <button type="button" data-act="sign" aria-pressed="${neg}" aria-label="${t("grid.signToggle")}"
-        class="shrink-0 border-l border-black/10 px-1.5 py-0.5">±</button>`;
-}
-
-function moveCell(r, readOnly) {
-  const v = r.move_qty ?? 0;
-  const linked = linkedMoveOf(r);
-  const legacy = linked ? `<span class="block text-[10px] font-semibold leading-none text-gray-500">⇄ ${signed(linked)}</span>` : "";
-  if (readOnly) {
-    return `<div class="${BOX}"><span class="${NUM} ${toneOf("move_qty", v)}">${signed(v)}</span>${legacy}</div>`;
-  }
-  const neg = v < 0;
-  return `
-    <div class="${BOX} overflow-hidden" data-move-cell>
-      <input data-field="move_qty" type="text" inputmode="text" pattern="-?[0-9]*" maxlength="6" enterkeyhint="next" autocomplete="off" autocorrect="off" spellcheck="false"
-        value="${v}" aria-label="${escapeHtml(label(r, "move_qty"))}"
-        class="${NUM} focus-ring pt-1 ${toneOf("move_qty", v)}" />
-      <div data-move-strip class="flex w-full shrink-0 items-stretch text-[10px] font-extrabold leading-tight ${neg ? "bg-danger-bg text-danger" : "bg-success-bg text-success"}">${moveStripHtml(v)}</div>
-      ${legacy}
-    </div>`;
-}
-
-function qtyCell(r, field, readOnly) {
+function qtyCell(r, field, editable, boxClass = BOX) {
   const v = r[field] ?? 0;
-  if (readOnly) return `<div class="${BOX}"><span class="${NUM} ${toneOf(field, v)}">${v}</span></div>`;
+  if (!editable) return `<div class="${boxClass}"><span class="${NUM} ${toneOf(field)}">${v}</span></div>`;
   return `
-    <label class="${BOX} focus-within:border-brand-500 focus-within:bg-white">
+    <label class="${BOX} border-brand-200 bg-white focus-within:border-brand-500">
       <input data-field="${field}" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" enterkeyhint="next" autocomplete="off"
-        value="${v}" aria-label="${escapeHtml(label(r, field))}" class="${NUM} focus-ring ${toneOf(field, v)}" />
+        value="${v}" aria-label="${escapeHtml(label(r, field))}" class="${NUM} focus-ring ${toneOf(field)}" />
     </label>`;
 }
 
-function closingCell(r, { readOnly, countMode }) {
-  const closing = closingOf(r);
-  if (countMode && !readOnly) {
-    return `
-      <div class="${BOX} border-brand-200 bg-brand-50 focus-within:border-brand-500">
-        <button type="button" data-act="match" aria-label="${escapeHtml(`${t("day.matches")} ${closing}`)}"
-          class="w-full text-[10px] font-bold leading-tight text-gray-600"><span data-expected class="tabular-nums">${closing}</span> ✓</button>
-        <input data-count type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" enterkeyhint="next" autocomplete="off"
-          value="${r.counted_qty ?? ""}" placeholder="—" aria-label="${escapeHtml(`${skuLabel(r)} · ${t("day.count")}`)}"
-          class="${NUM} focus-ring text-brand-700" />
-      </div>`;
+// What sits under the closing number: an old day's linked move, and an old count that differed.
+function closingNotes(r) {
+  const parts = [];
+  const legacy = legacyMoveOf(r);
+  if (legacy) parts.push(`<span class="block text-[10px] font-semibold leading-none text-gray-500">⇄ ${signed(legacy)}</span>`);
+  if (r.counted_qty != null && r.counted_qty !== closingOf(r)) {
+    parts.push(`<span class="block text-[10px] font-bold leading-none text-danger">${t("day.count")} ${r.counted_qty}</span>`);
   }
-  const counted = readOnly && r.counted_qty != null && r.counted_qty !== closing
-    ? `<span class="block text-[10px] font-bold leading-none text-danger">${t("day.count")} ${r.counted_qty}</span>`
-    : "";
-  return `<div class="${BOX} border-brand-200 bg-brand-50"><span data-closing class="${NUM} text-brand-700">${closing}</span>${counted}</div>`;
+  return parts.join("");
+}
+
+function closingCell(r) {
+  return `<div class="${BOX} border-brand-200 bg-brand-50"><span data-closing class="${NUM} text-brand-700">${closingOf(r)}</span><span data-closing-notes>${closingNotes(r)}</span></div>`;
 }
 
 // Critical / Warning rows: status in words plus the branch-wide runway ("Critical ≈ 3.5 d").
@@ -144,22 +130,16 @@ function runwayChip(r) {
 
 const RULE_TEXT = (rule) => t(`stock.rule.${rule}`);
 
-// The line under a row: variance and its note, the destock reason, rule problems.
-export function extrasHtml(r, { readOnly, countMode, mode, problems }) {
+// The line under a row: an old day's count note and destock reason, rule problems.
+export function extrasHtml(r, { problems }) {
   const parts = [];
-  const closing = closingOf(r);
-  const variance = r.counted_qty == null ? 0 : r.counted_qty - closing;
-  if (variance && (countMode || readOnly)) {
-    const note = readOnly
-      ? r.counted_note ? `<span class="min-w-0 truncate text-gray-700">${escapeHtml(r.counted_note)}</span>` : ""
-      : `<button type="button" data-act="note" class="focus-ring min-w-0 truncate underline ${r.counted_note ? "text-gray-800" : "font-bold text-danger"}">${r.counted_note ? escapeHtml(r.counted_note) : t("day.addNote")}</button>`;
+  const variance = r.counted_qty == null ? 0 : r.counted_qty - closingOf(r);
+  if (variance) {
+    const note = r.counted_note ? `<span class="min-w-0 truncate text-gray-700">${escapeHtml(r.counted_note)}</span>` : "";
     parts.push(`<span class="flex min-w-0 items-center gap-1.5"><b class="shrink-0 text-danger">${t("day.diff")} ${signed(variance)}</b>${note}</span>`);
   }
-  if (mode !== "single" && r.destock > 0) {
-    const note = readOnly
-      ? `<span class="min-w-0 truncate text-gray-700">${escapeHtml(r.destock_note ?? "—")}</span>`
-      : `<button type="button" data-act="destock-note" class="focus-ring min-w-0 truncate underline ${r.destock_note ? "text-gray-800" : "font-bold text-danger"}">${r.destock_note ? escapeHtml(r.destock_note) : t("grid.addDestockReason")}</button>`;
-    parts.push(`<span class="flex min-w-0 items-center gap-1.5"><b class="shrink-0 text-gray-600">${t("grid.destock")}:</b>${note}</span>`);
+  if (r.destock_note) {
+    parts.push(`<span class="flex min-w-0 items-center gap-1.5"><b class="shrink-0 text-gray-600">${t("grid.destock")}:</b><span class="min-w-0 truncate text-gray-700">${escapeHtml(r.destock_note)}</span></span>`);
   }
   if (problems && problems.size) {
     parts.push(`<span role="alert" class="font-bold text-danger">${[...problems].map(RULE_TEXT).join(" · ")}</span>`);
@@ -167,9 +147,10 @@ export function extrasHtml(r, { readOnly, countMode, mode, problems }) {
   return parts.join("");
 }
 
-/** @param {{readOnly:boolean, countMode:boolean, mode:"single"|"dynamic", problems?:Set<string>}} view */
+/** @param {{status:string, mode:"single"|"dynamic", problems?:Set<string>}} view */
 export function renderRow(r, view) {
-  const { readOnly, mode, problems } = view;
+  const { status, mode, problems } = view;
+  const editable = editableFor(status, mode, r);
   const bad = Boolean(problems && problems.size > 0);
   const low = r.branch_status === "critical" || r.branch_status === "warning";
   const sub = skuSizeLabel(r);
@@ -182,11 +163,11 @@ export function renderRow(r, view) {
         <span class="truncate text-[10px] leading-tight text-gray-600">${escapeHtml(sub || r.sku_id)}</span>
         ${low ? runwayChip(r) : ""}
       </div>
-      <div class="${BOX} bg-gray-50"><span class="${NUM} text-gray-700">${r.opening_qty}</span></div>
+      ${qtyCell(r, "opening_qty", editable.has("opening_qty"), `${BOX} bg-gray-50`)}
       ${columnsFor(mode)
-        .map((f) => (f === "move_qty" ? moveCell(r, readOnly) : qtyCell(r, f, readOnly)))
+        .map((f) => qtyCell(r, f, editable.has(f)))
         .join("")}
-      ${closingCell(r, view)}
+      ${closingCell(r)}
     </div>
     <div data-extra class="${extras ? "" : "hidden"} ${STICKY} mt-1 flex max-w-[calc(100vw-3rem)] flex-wrap items-center gap-x-3 gap-y-0.5 bg-transparent px-1 text-xs">${extras}</div>
   </div>`;
@@ -200,32 +181,12 @@ export function patchRow(el, r, view, { force = false } = {}) {
   // force: also reset the focused input (a value that was just refused).
   const active = force ? null : document.activeElement;
   el.querySelectorAll("[data-field]").forEach((input) => {
-    const field = input.dataset.field;
-    const v = r[field] ?? 0;
-    if (input !== active) input.value = v;
-    if (field === "move_qty") {
-      input.classList.remove("text-success", "text-danger", "text-gray-900");
-      input.classList.add(toneOf("move_qty", v));
-    }
+    if (input !== active) input.value = r[input.dataset.field] ?? 0;
   });
-  const strip = el.querySelector("[data-move-strip]");
-  if (strip) {
-    const v = r.move_qty ?? 0;
-    const pending = strip.dataset.pendingNeg === "1";
-    const neg = v < 0 || (v === 0 && pending);
-    strip.innerHTML = moveStripHtml(v, pending);
-    strip.classList.toggle("bg-danger-bg", neg);
-    strip.classList.toggle("text-danger", neg);
-    strip.classList.toggle("bg-success-bg", !neg);
-    strip.classList.toggle("text-success", !neg);
-  }
-  const closing = closingOf(r);
   const closingEl = el.querySelector("[data-closing]");
-  if (closingEl) closingEl.textContent = closing;
-  const expected = el.querySelector("[data-expected]");
-  if (expected) expected.textContent = closing;
-  const count = el.querySelector("[data-count]");
-  if (count && count !== active) count.value = r.counted_qty ?? "";
+  if (closingEl) closingEl.textContent = closingOf(r);
+  const notes = el.querySelector("[data-closing-notes]");
+  if (notes) notes.innerHTML = closingNotes(r);
   // Boolean: classList.toggle(cls, undefined) would flip the class instead.
   const bad = Boolean(view.problems && view.problems.size > 0);
   el.classList.toggle("bg-danger-bg", bad);
