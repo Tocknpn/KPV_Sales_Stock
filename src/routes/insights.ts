@@ -8,7 +8,7 @@ import { resolveGoldPrice, priceOn } from "../goldPrice";
 import { loadBranchStatuses } from "../replenishment";
 import { buildCaseHistory, buildIssueGrid } from "../caseHistory";
 import type { CaseDayRow } from "../caseHistory";
-import type { Desk, DeskDay, LedgerRow, SessionUser } from "../types";
+import type { Desk, DeskDay, SessionUser } from "../types";
 
 const r = newRouter();
 
@@ -19,21 +19,6 @@ function scopeDesk(user: SessionUser, desks: Desk[], deskId: string | undefined)
   if (!desk) throw new HttpError(404, "Desk not found", "DESK_NOT_FOUND");
   if (!assertBranchAccess(user, desk.branch_id)) throw new HttpError(403, "Branch access denied", "BRANCH_DENIED");
   return desk.desk_id;
-}
-
-// Dates (newest first) in the last MOVE_IMBALANCE_DAYS whose Move in/out does
-// not add up to 0 across the company.
-const MOVE_IMBALANCE_DAYS = 7;
-export function moveImbalanceOf(rows: LedgerRow[]) {
-  const net = new Map<string, number>();
-  for (const row of rows) {
-    if (row.excluded || !row.move_qty) continue;
-    net.set(row.ledger_date, (net.get(row.ledger_date) ?? 0) + row.move_qty);
-  }
-  return [...net.entries()]
-    .filter(([, n]) => n !== 0)
-    .map(([date, n]) => ({ date, net: n }))
-    .sort((a, b) => b.date.localeCompare(a.date));
 }
 
 r.get("/dashboard", async (c) => {
@@ -62,13 +47,7 @@ r.get("/dashboard", async (c) => {
   ]);
   const gold = resolveGoldPrice(goldRow, config, today);
   const statuses = await loadBranchStatuses(store, branchId ? [branchId] : branches.map((b) => b.branch_id), today);
-  // Move in/out is not linked case to case, so a −8 here should have a +8
-  // somewhere else. Company-wide, whatever the filter: a move may cross branches.
-  const imbalanceFrom = addDays(today, -(MOVE_IMBALANCE_DAYS - 1));
-  const companyRows = branchId || deskId ? await store.ledger({ from: imbalanceFrom, to: today }) : windowRows;
-  const moveImbalance = moveImbalanceOf(companyRows.filter((row) => row.ledger_date >= imbalanceFrom));
   return c.json({
-    moveImbalance,
     ...buildDashboard({
       today,
       skus,

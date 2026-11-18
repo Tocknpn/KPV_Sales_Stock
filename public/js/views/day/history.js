@@ -178,11 +178,11 @@ function dayRow(r) {
 
 function skuTable(rows) {
   const body = rows
-    .filter((r) => r.opening_qty || r.stock_in || r.transfer_in || r.closing_qty || r.counted_qty != null || r.retail_sale || r.wholesale || r.transfer_out || r.stock_out_single || r.move_qty || r.destock || r.move)
+    .filter((r) => r.opening_qty || r.stock_in || r.transfer_in || r.closing_qty || r.counted_qty != null || r.retail_sale || r.wholesale || r.withdraw || r.transfer_out || r.stock_out_single || r.move_qty || r.destock || r.move)
     .map((r) => {
       const moveQ = r.move_qty ?? 0;
       const inQ = (r.stock_in ?? 0) + (r.transfer_in ?? 0) + Math.max(moveQ, 0);
-      const outQ = (r.retail_sale ?? 0) + (r.wholesale ?? 0) + (r.stock_out_single ?? 0) + (r.transfer_out ?? 0) + (r.destock ?? 0) + (r.move ?? 0) + Math.max(-moveQ, 0);
+      const outQ = (r.retail_sale ?? 0) + (r.wholesale ?? 0) + (r.withdraw ?? 0) + (r.stock_out_single ?? 0) + (r.transfer_out ?? 0) + (r.destock ?? 0) + (r.move ?? 0) + Math.max(-moveQ, 0);
       const off = r.counted_qty != null && r.counted_qty !== r.closing_qty;
       return `<tr>
         <td class="px-2 py-1.5 text-left font-semibold text-gray-800">${escapeHtml(skuLabel(r))}</td>

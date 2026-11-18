@@ -16,7 +16,7 @@ skip to section 2.)
 
 1. In **SQL Editor**, run these files in this order:
    1. `supabase/schema.sql`
-   2. `supabase/migrations/20261112_01_foundation.sql` to `20261117_16_branch_vtc.sql`, in name order
+   2. `supabase/migrations/20261112_01_foundation.sql` to `20261118_17_sop_steps.sql`, in name order
    3. `supabase/users_roles.sql`
    4. `supabase/base.sql`
    5. `supabase/real_skus.sql` (the real product list; real rows, kept by the purge;
@@ -85,9 +85,9 @@ Do these in order, **before** the new code is deployed.
    ```
    Fix every row (correct the count or the entry in the old app). After v2 such
    a row can only be corrected, never pushed further down.
-3. Run `supabase/migrations/20261112_01_foundation.sql` to `20261117_16_branch_vtc.sql`
+3. Run `supabase/migrations/20261112_01_foundation.sql` to `20261118_17_sop_steps.sql`
    in name order, then `supabase/users_roles.sql`. All are safe to run twice, but
-   always re-run the **whole** sequence 01 to 16 and then `users_roles.sql`,
+   always re-run the **whole** sequence 01 to 17 and then `users_roles.sql`,
    never a single earlier file (migration 07 redefines a function that
    migration 01 also defines).
 
@@ -359,4 +359,33 @@ On the live project, together and outside shop hours:
 6. If the real SKUs are not loaded yet, run `supabase/real_skus.sql` now. If an
    older copy with long names was already run, running this one again
    replaces the names (it updates existing SKUs).
+
+## Day steps: Opening, Check in, Close, Withdraw (migration 17, 2026-11-18)
+
+Run the migration **before** pushing the code. The Worker deploys from main
+through Workers Builds, so the new code goes live a minute after the push and
+needs the new column and status.
+
+1. In Supabase **SQL Editor** run `supabase/migrations/20261118_17_sop_steps.sql`
+   (outside shop hours).
+2. Then push to main and wait for the Workers Builds deploy.
+3. Ask staff to reload the app once.
+
+What changes for staff:
+
+- A day now has steps: **Opening** (review yesterday's closing as today's
+  opening, add a SKU with its opening, enter the first stock-in, then confirm
+  check-in), **Check in** (stock-in, retail, wholesale, Return, Withdraw),
+  **Close** (no physical count), then Done. Home cards show
+  [1 Check in] [2 Close day] and a status icon.
+- Columns: **Return** is the old destock, now without a note. **Withdraw**
+  (ຖອນ) is gold taken out of the Easy Gold app as physical gold; it counts as
+  sold for reorder velocity, Return does not. Move in/out and Count are no
+  longer shown (old days keep their values).
+- Reopen: a manager can reopen a day up to 3 days back (admin any day). That
+  day and every later day of the case go back to Opening; staff redo them in
+  date order, because a day cannot be worked while an earlier day is not Done.
+- The dashboard warning "moves do not add up" is removed (it was for Move in/out).
+- Check: open a case, the day starts at Opening; do a Withdraw of 1, close; the
+  History row shows Opening + In - Out = Closing.
 

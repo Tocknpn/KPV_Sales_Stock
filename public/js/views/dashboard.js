@@ -2,7 +2,7 @@ import { api } from "../api.js";
 import { state, branchName, deskById } from "../state.js";
 import { renderDonut, renderCapacityBar, categoryColor } from "../charts.js";
 import { openActionSheet } from "../ui.js";
-import { fmtBaht, fmtInt, fmtLak, fmtLakSigned, fmtUsd, escapeHtml, fmtRunway, fmtDate } from "../util.js";
+import { fmtBaht, fmtInt, fmtLak, fmtLakSigned, fmtUsd, escapeHtml, fmtRunway } from "../util.js";
 import { t, tf, productName } from "../i18n.js";
 import { skuLabel } from "../sku-groups.js";
 import { isAdmin } from "../session.js";
@@ -317,13 +317,7 @@ function transitRow(item) {
 function render(root, data) {
   const { portfolio, transit, capacity, donut, branchCards, movement, watchlist, aging } = data;
   const allDone = portfolio.desksTotal > 0 && portfolio.desksDoneToday === portfolio.desksTotal;
-  // Move in/out is typed per case, unlinked: a −8 should have a +8 somewhere. Warns, never blocks.
-  const imbalance = (data.moveImbalance ?? [])
-    .map((m) => `<li>${escapeHtml(tf("dashboard.moveImbalance", { date: fmtDate(m.date), net: m.net > 0 ? `+${m.net}` : `−${-m.net}` }))}</li>`)
-    .join("");
-
   root.innerHTML = `
-    ${imbalance ? `<ul role="alert" class="mb-4 list-none rounded-xl bg-warning-bg px-3.5 py-3 text-xs font-bold text-warning">${imbalance}</ul>` : ""}
     <div class="card bg-gradient-to-br from-brand-600 to-brand-800 p-5 text-white shadow-pop">
       <div class="flex items-center justify-between gap-2">
         <span class="text-[11px] font-semibold uppercase tracking-wide text-white/70">${t("dashboard.totalGold")}</span>

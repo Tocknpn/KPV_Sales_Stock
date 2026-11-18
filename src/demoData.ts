@@ -278,7 +278,9 @@ export function buildDemoData(today: string): DemoData {
         const active = status !== "check_in" || i < plan.days.length - 1 || k % 2 === 0;
         const stock_in = active && (i + k) % 4 === 1 ? 2 : 0;
         const retail_sale = active ? Math.min(opening + stock_in, (i + k) % 3) : 0;
-        const closing = opening + stock_in - retail_sale;
+        // A few Done-day rows show Withdraw (Easy Gold app -> physical gold).
+        const withdraw = status === "done" && opening + stock_in - retail_sale >= 1 && (i + k) % 7 === 3 ? 1 : 0;
+        const closing = opening + stock_in - retail_sale - withdraw;
         const counted = status === "check_in" ? null : closing;
         seq++;
         ledger.push({
@@ -295,10 +297,10 @@ export function buildDemoData(today: string): DemoData {
           transfer_out: 0,
           destock: 0,
           destock_note: null,
-          withdraw: 0,
+          withdraw,
           move: 0,
           stock_out_single: 0,
-          stock_out: retail_sale,
+          stock_out: retail_sale + withdraw,
           move_qty: 0,
           closing_qty: closing,
           counted_qty: counted,

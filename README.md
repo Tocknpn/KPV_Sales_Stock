@@ -142,16 +142,25 @@ through triggers keyed on the acting staff member (the Worker sends
   passwords need 6+ characters; old 4-digit PINs keep working until reset.
   5 wrong passwords lock the account for 15 minutes. Resetting a password,
   moving a branch or deactivating ends that person's sessions.
-- **Desk day** (a "case"): not started, check-in, final stock, done, forward
-  only. Check-in is refused while an earlier day of that case is not Done. The
-  next opening is the physical count of the last Done day. Done needs every row
-  counted, a note on every difference and a reason on every destock. A Done day
-  is locked in the database; reopening is limited as in the table above and is
-  written to the audit log.
+- **Desk day** (a "case"): Opening (review), Check in, Close, Done, forward
+  only (migration 17 renamed the old states; a new day starts as `opening`).
+  1. *Opening*: shows yesterday's closing as today's opening; staff can add a
+     SKU with an opening quantity and enter the first stock-in, then confirm
+     check-in. A day cannot be worked while an earlier day of that case is not
+     Done.
+  2. *Check in*: columns Stock-in (running total), Retail, Wholesale, Return
+     (= destock, no note) and Withdraw (Easy Gold app to physical gold).
+  3. *Close*: no physical count; closing = opening + in - out. Done is locked
+     in the database.
+  `stock_out` = retail + wholesale + destock (Return) + withdraw + single stock-out.
+  Move in/out and Count are gone from the UI (the DB columns are kept for old
+  days). Reorder velocity counts retail + wholesale + withdraw + single
+  stock-out as sold; Return is not a sale. Manager reopen (up to 3 days back;
+  admin any) reopens that day and every later day to `opening`; staff redo them
+  in date order. Reopening is written to the audit log.
 - **Dates** are Laos dates (UTC+7). The server decides "today"; a phone's clock
   cannot shift a day. Nobody records the future.
-- **Moves** inside a branch are instant, with an Undo for a few seconds.
-  **Transfers** to another branch are *in transit* until the receiving case
+- **Transfers** to another branch are *in transit* until the receiving case
   confirms; the gold stays in the company total meanwhile.
 - **Quantities** are whole pieces, 0 to 99 999. Stock can never go negative.
 - **Replenishment.** Avg/day and lead time come from each branch's own rules

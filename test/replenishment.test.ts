@@ -181,4 +181,12 @@ describe("computeVelocity (twin of branch_velocity)", () => {
     const [v] = computeVelocity(rows, days, [], TO, 28);
     expect(v).toMatchObject({ in_stock_days: 7, sold: 0, velocity: 0 });
   });
+
+  it("velocity counts withdraw as sold but not return", () => {
+    const ds = dates(10, 7);
+    const days = ds.map((d) => day("D1", d));
+    const rows = ds.map((d, i) => row("D1", d, { withdraw: i === 0 ? 2 : 0, destock: i === 1 ? 5 : 0 } as Partial<LedgerRow>));
+    const [v] = computeVelocity(rows, days, [], TO, 28);
+    expect(v).toMatchObject({ in_stock_days: 7, sold: 2 });
+  });
 });
