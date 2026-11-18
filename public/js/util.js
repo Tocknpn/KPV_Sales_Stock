@@ -66,6 +66,17 @@ export function fmtRunway(days) {
 
 const oneDecimal = (n) => String(Math.round(n * 10) / 10);
 
+// The report table's avg sell/day, lead time and runway cells for one row's
+// velocity (or "—" when unknown); avg and runway to 1 decimal like the runway line.
+export function velocityCells(v) {
+  const dash = "—";
+  return {
+    avg: v?.avg_daily_sell != null ? oneDecimal(v.avg_daily_sell) : dash,
+    lead: v?.lead_time_days != null ? String(v.lead_time_days) : dash,
+    runway: v?.runway_days != null ? oneDecimal(v.runway_days) : dash,
+  };
+}
+
 // "2.5/day · order 7 d · lasts ≈12 d"; null unless the avg and the runway are both known.
 export function fmtRunwayLine(avg, lead, days) {
   if (avg == null || days == null) return null;

@@ -5,6 +5,7 @@
 //           (NK-011, BR-020, RG-031)
 import { beforeEach, describe, expect, it } from "vitest";
 import { TODAY, YESTERDAY, freshApp, call, asStaff, asManager } from "./helpers";
+import { getStore } from "../src/store";
 
 beforeEach(freshApp);
 
@@ -181,6 +182,53 @@ describe("check-in opening step", () => {
     expect(detail.status).toBe("opening");
     // The first day has no previous day: every row's opening is editable.
     expect(rowOf(detail, "GB-001").opening_editable).toBe(true);
+  });
+
+  describe("restoring a removed SKU the day carried", () => {
+    const ledgerRow = (date: string, sku: string) =>
+      (getStore({ DEMO_DATE: TODAY } as any) as any).db.ledger.find((r: any) => r.desk_id === DESK && r.ledger_date === date && r.sku_id === sku);
+    const remove = (s: any, sku: string) => call(s, "DELETE", `/stock/desk/${DESK}/sku/${sku}?date=${TODAY}`);
+
+    // RG-031 ended yesterday at 0, so today carries it with opening 0 and it can be removed.
+    async function carriedEmpty() {
+      const staff = await asStaff("B-MM");
+      const y = ledgerRow(YESTERDAY, "RG-031");
+      y.retail_sale += y.closing_qty;
+      y.closing_qty = 0;
+      y.counted_qty = null;
+      await checkin(staff);
+      expect(rowOf(await detailOf(staff), "RG-031").opening_qty).toBe(0);
+      expect((await remove(staff, "RG-031")).status).toBe(200);
+      return staff;
+    }
+
+    it("the detail lists the carried SKUs in the opening step, removed ones included", async () => {
+      const staff = await carriedEmpty();
+      const detail = await detailOf(staff);
+      expect(rowOf(detail, "RG-031")).toBeUndefined();
+      expect(detail.carriedSkus).toEqual(expect.arrayContaining(["NK-011", "BR-020", "RG-031"]));
+    });
+
+    it("it is restored with opening 0 (no opening asked); a typed opening is refused", async () => {
+      const staff = await carriedEmpty();
+      const refused = await addSku(staff, { sku_id: "RG-031", opening_qty: 3 });
+      expect(refused.status).toBe(409);
+      expect(refused.json.code).toBe("OPENING_LOCKED");
+      const ok = await addSku(staff, { sku_id: "RG-031", opening_qty: 0 });
+      expect(ok.json).toMatchObject({ ok: true, restored: 1 });
+      const row = rowOf(await detailOf(staff), "RG-031");
+      expect(row.opening_qty).toBe(0);
+      expect(row.opening_editable).toBe(false);
+    });
+
+    it("a restored carried row keeps the opening carried onto it", async () => {
+      const staff = await carriedEmpty();
+      // A later carry (an earlier day reopened and closed again) set its opening while removed.
+      ledgerRow(TODAY, "RG-031").opening_qty = 2;
+      ledgerRow(TODAY, "RG-031").closing_qty = 2;
+      expect((await addSku(staff, { sku_id: "RG-031" })).status).toBe(200);
+      expect(rowOf(await detailOf(staff), "RG-031").opening_qty).toBe(2);
+    });
   });
 
   it("a day cannot be written while an earlier day is not Done", async () => {

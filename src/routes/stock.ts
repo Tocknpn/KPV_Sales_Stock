@@ -98,6 +98,11 @@ async function closeDeskDay(store: Store, user: SessionUser, desk: Desk, date: s
   if (failures.length > 0) {
     throw new HttpError(422, "This desk cannot be closed yet", "DAY_INCOMPLETE", { failures });
   }
+  // A count typed under the old app on a day still open would otherwise become
+  // the next day's opening (carryQty prefers it), though the screen can no
+  // longer show or change it. Clear it first, so both the negative pre-check
+  // below and the carry use the calculated closing.
+  await store.clearLedgerCounts(desk.desk_id, date);
   // If the following day is already open (this day was reopened and closed
   // again), its opening balances follow the corrected count. Check that the new
   // openings keep that day non-negative BEFORE marking this day Done, so a
@@ -435,6 +440,10 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
     today: businessDate(c.env),
     // The very first day of a desk: starting stock may still be typed in.
     isFirstDay: Boolean(day) && earlier.length === 0,
+    // In the opening step: the SKUs the day carries from its previous day. Their
+    // opening is locked, so the add flow restores a removed one without asking
+    // for an opening.
+    carriedSkus: carried ? [...carried] : [],
     canReopen: mayReopen(user, desk.branch_id, date, businessDate(c.env)) && day?.status === "done",
     incoming: incoming
       .filter((t) => t.sent_date <= date)
@@ -667,7 +676,7 @@ r.post("/stock/desk/:deskId/reopen", requireManager, async (c) => {
   const dates = await store.reopenFrom(desk.desk_id, date);
   if (dates.length === 0) throw new HttpError(409, "This desk was changed on another device — reload", "STALE");
   await audit(store, user, "desk_day.reopen", `${desk.desk_id}/${date}`, { reason, dates }, { branchId: desk.branch_id, deskId: desk.desk_id });
-  return c.json({ ok: true });
+  return c.json({ ok: true, dates });
 });
 
 // ---------------------------------------------------------------------------
@@ -731,8 +740,20 @@ r.post("/stock/desk/:deskId/sku", async (c) => {
   // Insert first: it is the write most likely to be refused (another device
   // added the same SKU), and then nothing has been restored yet.
   if (fresh.length) await store.insertLedgerRows(fresh.map(([id, w]) => ({ ...key(id), opening_qty: w.opening, performed_by: user.accountId })));
-  // A removed row had no activity, so its opening was 0; it takes the one typed now.
-  if (restore.length) await store.patchLedgerRows(restore.map((id) => ({ ...key(id), excluded: false, opening_qty: wanted.get(id)!.opening, performed_by: user.accountId })));
+  // A removed row the day did not carry had no activity, so its opening was 0;
+  // it takes the one typed now. A carried row keeps its carried opening (the
+  // typed one is 0, or was refused above).
+  const carriedRestore = restore.length ? await carriedSkus(store, desk.desk_id, date) : new Set<string>();
+  if (restore.length) {
+    await store.patchLedgerRows(
+      restore.map((id) => ({
+        ...key(id),
+        excluded: false,
+        ...(carriedRestore.has(id) ? {} : { opening_qty: wanted.get(id)!.opening }),
+        performed_by: user.accountId,
+      }))
+    );
+  }
   // Stock-in goes through the same compare-and-set path as the grid.
   for (const id of [...fresh.map(([id]) => id), ...restore]) {
     const stockIn = wanted.get(id)!.stockIn;

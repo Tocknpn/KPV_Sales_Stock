@@ -55,3 +55,23 @@ describe("missing-migration errors", () => {
     });
   });
 });
+
+describe("Supabase clearLedgerCounts", () => {
+  it("PATCHes counted_qty/counted_note to null on the day's rows that hold a count", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(null, { status: 204 });
+    }) as any;
+    const store = getStore({ SUPABASE_URL: "https://x.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "k" } as any, { id: "u1" });
+    await store.clearLedgerCounts("MM-D02", "2026-11-12");
+    expect(calls).toHaveLength(1);
+    const { url, init } = calls[0];
+    expect(init.method).toBe("PATCH");
+    expect(url).toContain("/rest/v1/daily_stock_ledger?");
+    expect(url).toContain("desk_id=eq.MM-D02");
+    expect(url).toContain("ledger_date=eq.2026-11-12");
+    expect(url).toContain("or=(counted_qty.not.is.null,counted_note.not.is.null)");
+    expect(JSON.parse(String(init.body))).toEqual({ counted_qty: null, counted_note: null });
+  });
+});

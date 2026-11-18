@@ -1,7 +1,7 @@
 import { api } from "../api.js";
 import { state, branchName, deskById } from "../state.js";
 import { openActionSheet } from "../ui.js";
-import { fmtInt, fmtLak, fmtLakSigned, fmtBaht, icon, escapeHtml, debounce, fmtRunwayLine } from "../util.js";
+import { fmtInt, fmtLak, fmtLakSigned, fmtBaht, icon, escapeHtml, debounce, fmtRunwayLine, velocityCells } from "../util.js";
 import { renderFillBar } from "../charts.js";
 import { t } from "../i18n.js";
 import { skuLabel } from "../sku-groups.js";
@@ -304,8 +304,9 @@ function render(root, data) {
         </thead>
         <tbody class="divide-y divide-hairline">
           ${ledgerRows
-            .map(
-              (r) => `
+            .map((r) => {
+              const v = velocityCells(avgOf(r));
+              return `
             <tr>
               <td class="whitespace-nowrap px-3 py-2 text-gray-500">${r.ledger_date.slice(5)}</td>
               <td class="px-3 py-2 text-gray-500">${r.desk_id}</td>
@@ -315,11 +316,11 @@ function render(root, data) {
               <td class="px-3 py-2 text-right text-warning">-${(r.stock_out ?? r.retail_sale + r.wholesale + r.destock) + r.transfer_out + r.move + Math.max(-(r.move_qty ?? 0), 0)}</td>
               <td class="px-3 py-2 text-right font-bold text-gray-900">${r.closing_qty}</td>
               <td class="px-3 py-2 text-right ${r.counted_qty != null && r.counted_qty !== r.closing_qty ? "font-bold text-danger" : "text-gray-500"}">${r.counted_qty ?? "—"}</td>
-              <td class="px-3 py-2 text-right text-gray-500">${avgOf(r)?.avg_daily_sell ?? "—"}</td>
-              <td class="px-3 py-2 text-right text-gray-500">${avgOf(r)?.lead_time_days ?? "—"}</td>
-              <td class="px-3 py-2 text-right text-gray-500">${avgOf(r)?.runway_days != null ? Math.round(avgOf(r).runway_days * 10) / 10 : "—"}</td>
-            </tr>`
-            )
+              <td class="px-3 py-2 text-right text-gray-500">${v.avg}</td>
+              <td class="px-3 py-2 text-right text-gray-500">${v.lead}</td>
+              <td class="px-3 py-2 text-right text-gray-500">${v.runway}</td>
+            </tr>`;
+            })
             .join("")}
         </tbody>
       </table>`;

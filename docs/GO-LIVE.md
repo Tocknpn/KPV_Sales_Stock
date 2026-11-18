@@ -115,9 +115,15 @@ Do these in order, **before** the new code is deployed.
 
    `wrangler.jsonc` sets `keep_vars`, so a deploy does not wipe variables you
    typed into the dashboard.
-2. Deploy with `npm run deploy` (builds the CSS, then `wrangler deploy`), or
-   connect the GitHub repo under **Settings, Builds**: build command
-   `npm ci && npm run build:css`, deploy command `npx wrangler deploy`.
+2. The live Worker deploys **by pushing to `main`**: the GitHub repo is
+   connected under **Settings, Builds** (Cloudflare Workers Builds on the
+   owner's account; build command `npm ci && npm run build:css`, deploy command
+   `npx wrangler deploy`). `npm run deploy` from a developer machine deploys to
+   whatever account that machine's wrangler is logged in to, which is **not**
+   the owner's account, so it does **not** update the live site. Where a
+   section below says "Deploy the Worker (`npm run deploy`) to the owner's
+   Cloudflare account", that now means: push to `main` and wait for the
+   Workers Builds deploy.
 3. Secrets can also be set from a terminal: `npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY`,
    `npx wrangler secret put AUTH_SECRET`.
 
@@ -362,14 +368,70 @@ On the live project, together and outside shop hours:
 
 ## Day steps: Opening, Check in, Close, Withdraw (migration 17, 2026-11-18)
 
-Run the migration **before** pushing the code. The Worker deploys from main
-through Workers Builds, so the new code goes live a minute after the push and
-needs the new column and status.
+Run the migration **before** pushing the code. There is one deploy path: the
+live Worker deploys by pushing to `main` (Cloudflare Workers Builds on the
+owner's account), so the new code goes live a minute after the push and needs
+the new column and status. `npm run deploy` from this machine does **not**
+update the live site (its wrangler is logged in to a different account).
 
-1. In Supabase **SQL Editor** run `supabase/migrations/20261118_17_sop_steps.sql`
-   (outside shop hours).
-2. Then push to main and wait for the Workers Builds deploy.
-3. Ask staff to reload the app once.
+1. **Pre-checks** (Supabase **SQL Editor**, read-only). Run both and keep the
+   lists:
+
+   (i) Days not Done that still hold an old physical count. The new app no
+   longer shows counts; when such a day is closed, its counts are cleared and
+   the next day opens with the calculated closing (not the count). Tell the
+   staff of these cases, so a count that differs from the calculated closing
+   is fixed as a sale, stock-in or Return before closing:
+
+   ```sql
+   select l.desk_id, l.ledger_date, d.status, l.sku_id,
+          l.closing_qty, l.counted_qty, l.counted_note
+     from daily_stock_ledger l
+     join desk_days d on d.desk_id = l.desk_id and d.ledger_date = l.ledger_date
+    where d.status <> 'done'
+      and (l.counted_qty is not null or l.counted_note is not null)
+    order by l.desk_id, l.ledger_date, l.sku_id;
+   ```
+
+   (ii) Cases with a day that is not Done before a later day of the same case.
+   The new app refuses to work the later day (`EARLIER_DAY_OPEN`, "an earlier
+   day is not Done — close it first") until the earlier one is closed, so close
+   the listed days first, in date order:
+
+   ```sql
+   select d.desk_id, d.ledger_date as open_day, d.status,
+          (select min(x.ledger_date) from desk_days x
+            where x.desk_id = d.desk_id and x.ledger_date > d.ledger_date) as later_day
+     from desk_days d
+    where d.status <> 'done'
+      and exists (select 1 from desk_days x
+                   where x.desk_id = d.desk_id and x.ledger_date > d.ledger_date)
+    order by d.desk_id, d.ledger_date;
+   ```
+2. In Supabase **SQL Editor** run `supabase/migrations/20261118_17_sop_steps.sql`
+   (outside shop hours). It is safe to run twice.
+3. Re-run `supabase/users_roles.sql` (the rule in section 2: re-run it after
+   every migration, so every table and function stays locked down).
+4. Then push to `main` and wait for the Workers Builds deploy.
+5. Ask staff to reload the app once.
+
+Days that are open at deploy time:
+
+- A day already in `check_in` stays in Check in (its opening review is
+  skipped); staff carry on and close it.
+- An existing `final_stock` day keeps working like Check in: the same columns
+  can be typed and it closes with ② Close day.
+
+Rollback: if the Worker is rolled back to the previous version, first run
+
+```sql
+update desk_days set status = 'check_in' where status = 'opening';
+```
+
+because the old Worker cannot handle the `opening` status (such days would be
+stuck). The migration itself can stay: the old Worker ignores the `withdraw`
+column (a Withdraw already typed still counts in the closing, but the old
+screen does not show it).
 
 What changes for staff:
 

@@ -5,6 +5,7 @@ import { toast, openSheet, closeSheet, openActionSheet } from "../../ui.js";
 import { fmtDate, fmtLaosFull, fmtInt, fmtBaht, escapeHtml } from "../../util.js";
 import { t } from "../../i18n.js";
 import { skuLabel } from "../../sku-groups.js";
+import { reopenRange } from "./day-rules.js";
 
 // t() with {placeholders}.
 export function tf(key, vars) {
@@ -130,10 +131,19 @@ export function openCaseInfoSheet(ctx) {
 
 // --- reopen a Done day ----------------------------------------------------
 
+// Reopening a day also reopens every later day of the case (back to "not
+// checked in"); the warning names that range, the toast the dates the server reopened.
+function reopenWarning(ctx) {
+  const range = reopenRange(ctx.date, ctx.detail.today);
+  return range.to === range.from
+    ? tf("stock.reopenWarningOne", { date: fmtDate(range.from) })
+    : tf("stock.reopenWarning", { from: fmtDate(range.from), to: fmtDate(range.to) });
+}
+
 export function openReopenSheet(ctx) {
   openSheet(
     `
-    <p class="mb-3 rounded-lg bg-warning-bg px-3 py-2.5 text-sm font-semibold text-warning">${t("stock.reopenWarning")}</p>
+    <p class="mb-3 rounded-lg bg-warning-bg px-3 py-2.5 text-sm font-semibold text-warning">${escapeHtml(reopenWarning(ctx))}</p>
     <label for="reopen-reason" class="mb-1.5 block text-sm font-bold text-gray-700">${t("stock.reopenReason")}</label>
     <textarea id="reopen-reason" rows="3" maxlength="300" class="input-filled text-base"></textarea>
     <button type="button" data-confirm class="btn-primary mt-4 w-full">${t("stock.reopen")}</button>
@@ -144,15 +154,19 @@ export function openReopenSheet(ctx) {
         body.querySelector("[data-confirm]").addEventListener("click", async (e) => {
           const reason = body.querySelector("#reopen-reason").value.trim();
           if (reason.length < 3) return toast(t("stock.reopenReasonNeeded"), "error");
-          e.currentTarget.disabled = true;
+          // currentTarget is gone after the await below; keep the button.
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          let res;
           try {
-            await api.reopenDesk(ctx.deskCard.desk_id, { date: ctx.date, reason });
+            res = await api.reopenDesk(ctx.deskCard.desk_id, { date: ctx.date, reason });
           } catch (err) {
-            e.currentTarget.disabled = false;
+            btn.disabled = false;
             throw err;
           }
           closeSheet();
-          toast(t("stock.reopenedToast"), "success");
+          const dates = Array.isArray(res?.dates) ? res.dates : [];
+          toast(dates.length ? tf("stock.reopenedToastDates", { dates: dates.map((d) => fmtDate(d)).join(", ") }) : t("stock.reopenedToast"), "success");
           await ctx.hooks.reload?.();
         });
         setTimeout(() => body.querySelector("#reopen-reason")?.focus(), 0);

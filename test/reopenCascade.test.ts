@@ -3,7 +3,7 @@
 // date order and each close carries into the next day's opening.
 //   MM-D02  done on 11-09, 11-10, 11-11; today (11-12) not started
 import { beforeEach, describe, expect, it } from "vitest";
-import { TODAY, YESTERDAY, freshApp, call, asStaff, asManager, asAdmin, on, checkIn, closeDay } from "./helpers";
+import { TODAY, YESTERDAY, TOMORROW, freshApp, call, asStaff, asManager, asAdmin, on, checkIn, closeDay } from "./helpers";
 import { getStore } from "../src/store";
 
 beforeEach(freshApp);
@@ -114,6 +114,42 @@ describe("reopen cascade", () => {
     expect(res.json.code).toBe("NEXT_DAY_NEGATIVE");
     expect(res.json).toMatchObject({ sku_id: SKU, date: D2 });
     expect((await detailOf(staff, D3)).status).toBe("check_in");
+  });
+
+  it("reopen answers with the reopened dates", async () => {
+    await startToday();
+    const res = await reopen(await asManager("B-MM"), D3);
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ ok: true, dates: [D3, D2, D1, TODAY] });
+  });
+
+  // A count typed under the old app on a day still open at deploy time: the new
+  // screen cannot show or clear it, so closing clears it and carries the
+  // calculated closing.
+  it("closing a day that holds an old count carries the calculated closing, not the count", async () => {
+    const staff = await startToday();
+    const row = ledgerRow(TODAY);
+    row.counted_qty = row.closing_qty + 5;
+    row.counted_note = "old app count";
+    expect((await closeDay(staff, DESK, TODAY)).status).toBe(200);
+    expect(ledgerRow(TODAY).counted_qty).toBeNull();
+    expect(ledgerRow(TODAY).counted_note).toBeNull();
+    const tomorrow = on(staff, TOMORROW);
+    expect((await call(tomorrow, "POST", `/stock/desk/${DESK}/checkin`, { date: TOMORROW })).status).toBe(200);
+    expect(rowOf(await detailOf(tomorrow, TOMORROW), SKU).opening_qty).toBe(ledgerRow(TODAY).closing_qty);
+  });
+
+  it("closing a reopened day that holds an old count updates the next day's opening with the calculated closing", async () => {
+    const staff = await asStaff("B-MM");
+    await reopen(await asManager("B-MM"), D3);
+    await checkIn(staff, DESK, D3);
+    // A stale count left on the open day (as from the old app).
+    ledgerRow(D3).counted_qty = ledgerRow(D3).closing_qty + 4;
+    const sold = rowOf(await detailOf(staff, D3), SKU).retail_sale;
+    await retail(staff, D3, sold + 1);
+    expect((await closeDay(staff, DESK, D3)).status).toBe(200);
+    expect(ledgerRow(D3).counted_qty).toBeNull();
+    expect(rowOf(await detailOf(staff, D2), SKU).opening_qty).toBe(ledgerRow(D3).closing_qty);
   });
 
   it("reopen is audited once with every reopened date", async () => {

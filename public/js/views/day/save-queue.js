@@ -1,7 +1,7 @@
 // Saves day-screen edits as compare-and-set changes, one SKU per request.
 //
 //  - Stepper taps are buffered for STEPPER_BUFFER_MS and sent as one change.
-//  - Typed values (and notes) are sent straight away.
+//  - Typed values are sent straight away.
 //  - Every change carries `from` (the last value the server confirmed), so a
 //    second tablet's edit is never silently overwritten:
 //      ROW_CHANGED + stepper  -> re-based once: to = current + (to - from)
@@ -13,7 +13,6 @@ import { api } from "../../api.js";
 
 export const MAX_QTY = 99999;
 export const STEPPER_BUFFER_MS = 600;
-const TEXT_FIELDS = new Set(["destock_note", "counted_note"]);
 // The day's step does not take this field (another device moved the day on):
 // sending it again cannot succeed, so the cell goes back to the saved value.
 const FINAL_CODES = new Set(["FIELD_NOT_IN_STEP", "OPENING_LOCKED"]);
@@ -22,15 +21,6 @@ export function clampQty(n) {
   const v = Math.floor(Number(n));
   return Number.isFinite(v) ? Math.min(MAX_QTY, Math.max(0, v)) : 0;
 }
-
-// Move in/out is signed: −MAX_QTY..MAX_QTY.
-export function clampSigned(n) {
-  const v = Math.trunc(Number(n));
-  return Number.isFinite(v) ? Math.min(MAX_QTY, Math.max(-MAX_QTY, v)) : 0;
-}
-
-const SIGNED_FIELDS = new Set(["move_qty"]);
-const clampFor = (field, n) => (SIGNED_FIELDS.has(field) ? clampSigned(n) : clampQty(n));
 
 /**
  * @param {object} opts
@@ -128,12 +118,12 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
       if (err.code === "ROW_CHANGED" && err.data?.row) {
         const cur = err.data.row;
         onStored(skuId, cur);
-        const steppers = entries.filter(([field, e]) => e.kind === "step" && !TEXT_FIELDS.has(field));
-        const typed = entries.filter(([field, e]) => e.kind !== "step" || TEXT_FIELDS.has(field));
+        const steppers = entries.filter(([, e]) => e.kind === "step");
+        const typed = entries.filter(([, e]) => e.kind !== "step");
         if (steppers.length && !rebased) {
           const rebasedEntries = steppers.map(([field, e]) => [
             field,
-            { ...e, from: cur[field], to: clampFor(field, cur[field] + (e.to - e.from)) },
+            { ...e, from: cur[field], to: clampQty(cur[field] + (e.to - e.from)) },
           ]);
           await attempt(skuId, rebasedEntries, true);
         } else {
@@ -233,7 +223,7 @@ export function createSaveQueue({ deskId, date, getStored, onStored, onResult, o
       }
       const existing = entry.fields.get(field);
       const from = existing ? existing.from : stored[field];
-      const effectiveKind = TEXT_FIELDS.has(field) ? "typed" : existing?.kind === "typed" ? "typed" : kind;
+      const effectiveKind = existing?.kind === "typed" ? "typed" : kind;
       if (to === from) {
         // Tapped back to where the server already is: nothing to send.
         entry.fields.delete(field);

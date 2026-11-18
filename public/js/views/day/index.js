@@ -28,6 +28,7 @@ import {
   openRemoveItemSheet,
 } from "./sheets.js";
 import { renderHistory } from "./history.js";
+import { addPlan, addItems, STEP_CHANGED_CODES, nextDayNegativeText } from "./day-rules.js";
 import { replaceQuery } from "../../router.js";
 import { skeletonTable } from "../../skeleton.js";
 
@@ -82,6 +83,13 @@ const canClose = (status) => status === "check_in" || status === "final_stock";
 // Screen state (one day screen at a time)
 // ---------------------------------------------------------------------------
 let S = null;
+
+// Reloads the day once (several cells may fail with the same code at once).
+function reloadForStep(screen) {
+  if (S !== screen || screen.reloading) return;
+  screen.reloading = true;
+  Promise.resolve(screen.hooks.reload?.()).catch(() => {});
+}
 
 export async function mountDay(deskCard, date, hooks = {}, opts = {}) {
   await unmountDay();
@@ -148,6 +156,8 @@ export async function mountDay(deskCard, date, hooks = {}, opts = {}) {
       }
       else if (res.code === "ROW_CHANGED") openConflictSheet(screen.ctx, res);
       else toast(res.message || t("err.SERVER_ERROR"), "error");
+      // The day moved on (or back) on another device: show its real step.
+      if (STEP_CHANGED_CODES.has(res.code)) reloadForStep(screen);
     },
   });
 
@@ -553,11 +563,13 @@ async function addSkus() {
   hooks.openSkuPicker?.(
     screen.rows.map((r) => r.sku_id),
     async (skus, meta) => {
-      const qtys = await hooks.askOpeningQtys(skus, meta, opening ? {} : { label: t("day.stockInQty") });
+      // A SKU the day carried (removed earlier today) keeps its carried opening:
+      // it is restored without asking for one.
+      const { ask, field } = addPlan(skus, opening, screen.detail.carriedSkus);
+      const qtys = ask.length ? await hooks.askOpeningQtys(ask, meta, opening ? {} : { label: t("day.stockInQty") }) : new Map();
       if (qtys === null) return;
-      const field = opening ? "opening_qty" : "stock_in";
       try {
-        await api.addDeskSkus(deskCard.desk_id, { date, items: skus.map((s) => ({ sku_id: s.sku_id, [field]: qtys.get(s.sku_id) ?? 0 })) });
+        await api.addDeskSkus(deskCard.desk_id, { date, items: addItems(skus, field, qtys) });
         toast(tf("picker.addedN", { n: skus.length }), "success");
       } catch (err) {
         // Another device added it first (SKU_ALREADY_ON_DAY), or the day moved
@@ -580,6 +592,7 @@ async function confirmCheckIn() {
     await screen.queue.flushAll();
     if (screen.queue.hasUnsaved()) return toast(t("day.unsaved"), "error");
     try {
+      // Any refusal (EARLIER_DAY_OPEN, BAD_TRANSITION ...) is followed by the reload below.
       await api.transitionDesk(screen.deskCard.desk_id, { date: screen.date, toStatus: "check_in" });
       toast(t("stock.checkedInToast"), "success");
     } catch (err) {
@@ -678,6 +691,12 @@ async function submitClose(screen) {
         for (const f of err.data?.failures ?? []) failed.set(f.sku_id, (failed.get(f.sku_id) ?? new Set()).add(f.rule));
         if (S === screen) showProblems(failed);
         return;
+      }
+      // Which item would go below zero on which later day.
+      if (err.code === "NEXT_DAY_NEGATIVE") return toast(nextDayNegativeText(err.data, screen.rows, fmtDate), "error");
+      if (STEP_CHANGED_CODES.has(err.code)) {
+        toast(err.message || t(`err.${err.code}`), "error");
+        return reloadForStep(screen);
       }
       throw err;
     }

@@ -143,7 +143,8 @@ through triggers keyed on the acting staff member (the Worker sends
   5 wrong passwords lock the account for 15 minutes. Resetting a password,
   moving a branch or deactivating ends that person's sessions.
 - **Desk day** (a "case"): Opening (review), Check in, Close, Done, forward
-  only (migration 17 renamed the old states; a new day starts as `opening`).
+  only (migration 17 added the `opening` status, where a new day now starts;
+  the old `check_in` / `final_stock` / `done` states are unchanged).
   1. *Opening*: shows yesterday's closing as today's opening; staff can add a
      SKU with an opening quantity and enter the first stock-in, then confirm
      check-in. A day cannot be worked while an earlier day of that case is not

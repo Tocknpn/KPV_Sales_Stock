@@ -219,6 +219,11 @@ export interface Store {
   // (the desk_reopen_from RPC). Compare-and-set: empty, changing nothing, when the
   // day at `date` is not Done.
   reopenFrom(deskId: string, date: string): Promise<string[]>;
+  // Clears an open day's old physical counts (counted_qty / counted_note) on
+  // every row of the desk's day, so the carry uses the calculated closing. The
+  // UI no longer shows or takes counts; a count typed under the old app on a
+  // day still open would otherwise silently become the next day's opening.
+  clearLedgerCounts(deskId: string, date: string): Promise<void>;
   // Atomic compare-and-set of several fields of one row (the ledger_apply RPC).
   applyLedgerChanges(key: LedgerKey, changes: LedgerChange[]): Promise<ApplyResult>;
 
@@ -574,6 +579,19 @@ export class DemoStore implements Store {
       this.log("daily_stock_ledger", "UPDATE", before, ledger);
     }
     return days.map((d) => d.ledger_date);
+  }
+  async clearLedgerCounts(deskId: string, date: string) {
+    this.guard();
+    for (const ledger of this.db.ledger) {
+      if (ledger.desk_id !== deskId || ledger.ledger_date !== date) continue;
+      if (ledger.counted_qty == null && ledger.counted_note == null) continue;
+      this.assertUnlocked(deskId, date);
+      const before = { ...ledger };
+      ledger.counted_qty = null;
+      ledger.counted_note = null;
+      ledger.updated_at = this.now();
+      this.log("daily_stock_ledger", "UPDATE", before, ledger);
+    }
   }
 
   async ledger(filter: LedgerFilter) {
@@ -1364,6 +1382,13 @@ class SupabaseStore implements Store {
   }
   async reopenFrom(deskId: string, date: string) {
     return this.rpc<string[]>("desk_reopen_from", { p_desk: deskId, p_date: date });
+  }
+  async clearLedgerCounts(deskId: string, date: string) {
+    // Only rows that hold a count, so a day without old counts writes nothing.
+    await this.rest<LedgerRow[]>(
+      `daily_stock_ledger?desk_id=eq.${enc(deskId)}&ledger_date=eq.${date}&or=(counted_qty.not.is.null,counted_note.not.is.null)`,
+      { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ counted_qty: null, counted_note: null }) }
+    );
   }
 
   async ledger(filter: LedgerFilter) {
