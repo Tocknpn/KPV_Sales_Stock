@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeClosing, stockOutOf, soldOf, netMoveOf, parseSignedQty, carryQty, currentQty, reorderPoint, valueLak, parseQty, validateDeskDay, buildCalendarMonth } from "../src/logic";
+import { computeClosing, stockOutOf, soldOf, netMoveOf, parseSignedQty, carryQty, currentQty, reorderPoint, valueLak, parseQty, validateDeskDay, buildCalendarMonth, stepFields } from "../src/logic";
 import { laosDate, monthRange, isValidDate, addDays } from "../src/time";
 import type { LedgerRow } from "../src/types";
 
@@ -19,6 +19,7 @@ function row(patch: Partial<LedgerRow> = {}): LedgerRow {
     destock: 0,
     destock_note: null,
     move: 0,
+    withdraw: 0,
     stock_out_single: 0,
     stock_out: 0,
     move_qty: 0,
@@ -110,23 +111,22 @@ describe("quantity input", () => {
 });
 
 describe("rules before a day can be Done", () => {
-  it("passes a fully counted, explained day", () => {
-    expect(validateDeskDay([row({ retail_sale: 2, counted_qty: 8 })])).toEqual([]);
-  });
-  it("requires a count on every row", () => {
-    expect(validateDeskDay([row()])).toEqual([{ sku_id: "GB-001", rule: "count_missing" }]);
-  });
-  it("requires a note when the count differs from the closing", () => {
-    expect(validateDeskDay([row({ counted_qty: 9 })])).toEqual([{ sku_id: "GB-001", rule: "variance_note_missing" }]);
-    expect(validateDeskDay([row({ counted_qty: 9, counted_note: "one found damaged" })])).toEqual([]);
-  });
-  it("requires a reason for destock", () => {
-    expect(validateDeskDay([row({ destock: 1, counted_qty: 9 })])).toEqual([{ sku_id: "GB-001", rule: "destock_note_missing" }]);
-    expect(validateDeskDay([row({ destock: 1, destock_note: "  ", counted_qty: 9 })])).toHaveLength(1);
-  });
+  it("closing subtracts withdraw and return", () =>
+    expect(computeClosing(row({ opening_qty: 10, stock_in: 2, retail_sale: 1, wholesale: 1, destock: 1, withdraw: 3 }))).toBe(6));
+  it("soldOf counts withdraw but not return", () =>
+    expect(soldOf(row({ retail_sale: 1, wholesale: 2, withdraw: 3, destock: 4 }))).toBe(6));
+  it("stepFields: opening allows stock_in and opening only", () =>
+    expect(stepFields("opening", "dynamic")).toEqual(["stock_in", "opening_qty"]));
+  it("stepFields: check_in allows stock_in and the four outs", () =>
+    expect(stepFields("check_in", "dynamic")).toEqual(["stock_in", "retail_sale", "wholesale", "destock", "withdraw"]));
+  it("stepFields: single mode check_in", () =>
+    expect(stepFields("check_in", "single")).toEqual(["stock_in", "stock_out_single"]));
+  it("stepFields: done allows nothing", () => expect(stepFields("done", "dynamic")).toEqual([]));
+  it("validateDeskDay needs no count or return note", () =>
+    expect(validateDeskDay([row({ opening_qty: 5, destock: 1, counted_qty: null, destock_note: null })])).toEqual([]));
   it("rejects a negative closing", () => {
-    const failures = validateDeskDay([row({ retail_sale: 11, counted_qty: 0, counted_note: "x" })]);
-    expect(failures.map((f) => f.rule)).toContain("negative_closing");
+    const failures = validateDeskDay([row({ retail_sale: 11 })]);
+    expect(failures).toEqual([{ sku_id: "GB-001", rule: "negative_closing" }]);
   });
   it("ignores rows removed from the day", () => {
     expect(validateDeskDay([row({ excluded: true })])).toEqual([]);

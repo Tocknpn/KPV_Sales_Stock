@@ -497,7 +497,7 @@ r.post("/stock/desk/:deskId/checkin", async (c) => {
 // is signed; stock-out is typed as retail / wholesale / destock on a dynamic
 // day and as one total (stock_out_single) on a single-mode day.
 // ---------------------------------------------------------------------------
-const DYNAMIC_OUT_FIELDS: readonly LedgerChangeField[] = ["retail_sale", "wholesale", "destock", "destock_note"];
+const DYNAMIC_OUT_FIELDS: readonly LedgerChangeField[] = ["retail_sale", "wholesale", "destock", "withdraw"];
 const parseCount = (v: unknown) => (v === null || v === "" ? null : parseQty(v));
 
 // One compare-and-set change: {sku_id, field, from?, to}. `from` omitted means
@@ -508,10 +508,8 @@ function parseChange(item: Record<string, any>): { sku_id: string; change: Ledge
   if (!LEDGER_CHANGE_FIELDS.includes(field)) throw new HttpError(400, `Field ${String(item?.field)} cannot be changed here`, "BAD_FIELD", { sku_id, field: item?.field });
   const value = (v: unknown): number | string | null => {
     if (TEXT_CHANGE_FIELDS.includes(field)) return v === null || v === undefined || v === "" ? null : String(v).slice(0, 200);
-    const qty = field === "counted_qty" ? parseCount(v) : field === "move_qty" ? parseSignedQty(v) : parseQty(v);
-    if (qty === null && !(field === "counted_qty" && (v === null || v === ""))) {
-      throw new HttpError(400, field === "move_qty" ? "move_qty must be a whole number" : `${field} must be a whole number, 0 or more`, "BAD_QTY", { sku_id, field });
-    }
+    const qty = parseQty(v);
+    if (qty === null) throw new HttpError(400, `${field} must be a whole number, 0 or more`, "BAD_QTY", { sku_id, field });
     return qty;
   };
   const change: LedgerChange = { field, to: value(item.to) };

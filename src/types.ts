@@ -94,7 +94,7 @@ export interface BranchSku {
   carried: boolean;
 }
 
-export type DeskStatus = "check_in" | "final_stock" | "done";
+export type DeskStatus = "opening" | "check_in" | "final_stock" | "done";
 // "not_started" = no desk_days row for that desk/date. Never stored.
 export type CardStatus = DeskStatus | "not_started";
 
@@ -133,9 +133,11 @@ export interface LedgerRow {
   destock: number;
   destock_note: string | null;
   move: number;
+  // Stock taken out of the case for an order/other reason; counts as sold.
+  withdraw: number;
   // Stock-out typed as one total on a single-mode day (0 on dynamic days).
   stock_out_single: number;
-  // Generated: retail_sale + wholesale + destock + stock_out_single.
+  // Generated: retail_sale + wholesale + destock + withdraw + stock_out_single.
   stock_out: number;
   // Signed Move in/out typed by staff (−8 out of this case, +8 into it).
   move_qty: number;
@@ -152,7 +154,7 @@ export interface LedgerRow {
 // Fields a route may change on a ledger row. transfer_in / transfer_out / move
 // are absent on purpose: they only change through Store.ledgerAdd.
 export type LedgerEntryPatch = Partial<
-  Pick<LedgerRow, "stock_in" | "retail_sale" | "wholesale" | "destock" | "destock_note" | "stock_out_single" | "move_qty" | "counted_qty" | "counted_note" | "performed_by" | "excluded" | "opening_qty">
+  Pick<LedgerRow, "stock_in" | "retail_sale" | "wholesale" | "destock" | "withdraw" | "stock_out_single" | "performed_by" | "excluded" | "opening_qty">
 >;
 
 export type StaffRole = "staff" | "manager" | "admin";

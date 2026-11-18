@@ -62,23 +62,19 @@ export type LedgerChangeField =
   | "retail_sale"
   | "wholesale"
   | "destock"
-  | "destock_note"
+  | "withdraw"
   | "stock_out_single"
-  | "move_qty"
-  | "counted_qty"
-  | "counted_note";
+  | "opening_qty";
 export const LEDGER_CHANGE_FIELDS: readonly LedgerChangeField[] = [
   "stock_in",
   "retail_sale",
   "wholesale",
   "destock",
-  "destock_note",
+  "withdraw",
   "stock_out_single",
-  "move_qty",
-  "counted_qty",
-  "counted_note",
+  "opening_qty",
 ];
-export const TEXT_CHANGE_FIELDS: readonly LedgerChangeField[] = ["destock_note", "counted_note"];
+export const TEXT_CHANGE_FIELDS: readonly LedgerChangeField[] = [];
 // Compare-and-set: when `from` is present the change applies only if the stored
 // value is still `from` (or already `to`, which makes a retry harmless).
 export type LedgerChange = { field: LedgerChangeField; from?: number | string | null; to: number | string | null };
@@ -600,6 +596,7 @@ export class DemoStore implements Store {
         transfer_out: 0,
         destock: 0,
         destock_note: null,
+        withdraw: 0,
         move: 0,
         stock_out_single: 0,
         stock_out: 0,
@@ -871,6 +868,7 @@ export class DemoStore implements Store {
           transfer_out: 0,
           destock: 0,
           destock_note: null,
+          withdraw: 0,
           move: 0,
           stock_out_single: 0,
           stock_out: 0,

@@ -295,6 +295,7 @@ export function buildDemoData(today: string): DemoData {
           transfer_out: 0,
           destock: 0,
           destock_note: null,
+          withdraw: 0,
           move: 0,
           stock_out_single: 0,
           stock_out: retail_sale,

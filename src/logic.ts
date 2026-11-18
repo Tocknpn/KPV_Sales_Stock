@@ -17,7 +17,10 @@ import type {
   CardStatus,
   StaffAccount,
   Transfer,
+  DeskStatus,
+  StockOutMode,
 } from "./types";
+import type { LedgerChangeField } from "./store";
 
 // A SKU holding more than this many times its reorder point is "overstocked".
 const OVERSTOCK_MULTIPLIER = 3;
@@ -30,7 +33,7 @@ export const MAX_QTY = 99999;
 type ClosingInput = Pick<
   LedgerRow,
   "opening_qty" | "stock_in" | "transfer_in" | "retail_sale" | "wholesale" | "transfer_out" | "destock" | "move"
-> & { stock_out_single?: number; move_qty?: number };
+> & { stock_out_single?: number; move_qty?: number; withdraw?: number };
 
 // Same formula as the generated closing_qty column (migration 11).
 export function computeClosing(row: ClosingInput) {
@@ -41,14 +44,14 @@ export function computeClosing(row: ClosingInput) {
 }
 
 // The day's stock-out in either mode (= the generated stock_out column).
-export function stockOutOf(row: Pick<LedgerRow, "retail_sale" | "wholesale" | "destock"> & { stock_out_single?: number }) {
-  return row.retail_sale + row.wholesale + row.destock + (row.stock_out_single ?? 0);
+export function stockOutOf(row: Pick<LedgerRow, "retail_sale" | "wholesale" | "destock"> & { stock_out_single?: number; withdraw?: number }) {
+  return row.retail_sale + row.wholesale + row.destock + (row.withdraw ?? 0) + (row.stock_out_single ?? 0);
 }
 
 // Units sold: retail + wholesale on a dynamic day; on a single-mode day the
 // typed total, which cannot be split.
-export function soldOf(row: Pick<LedgerRow, "retail_sale" | "wholesale"> & { stock_out_single?: number }) {
-  return row.retail_sale + row.wholesale + (row.stock_out_single ?? 0);
+export function soldOf(row: Pick<LedgerRow, "retail_sale" | "wholesale"> & { stock_out_single?: number; withdraw?: number }) {
+  return row.retail_sale + row.wholesale + (row.withdraw ?? 0) + (row.stock_out_single ?? 0);
 }
 
 // Signed net of every move column: old linked moves/transfers and Move in/out.
@@ -61,7 +64,7 @@ export function movementIn(row: Pick<LedgerRow, "stock_in" | "transfer_in"> & { 
 }
 
 export function movementOut(
-  row: Pick<LedgerRow, "retail_sale" | "wholesale" | "transfer_out" | "destock" | "move"> & { stock_out_single?: number; move_qty?: number }
+  row: Pick<LedgerRow, "retail_sale" | "wholesale" | "transfer_out" | "destock" | "move"> & { stock_out_single?: number; move_qty?: number; withdraw?: number }
 ) {
   return stockOutOf(row) + row.transfer_out + row.move + Math.max(-(row.move_qty ?? 0), 0);
 }
@@ -131,15 +134,20 @@ export function parseSignedQty(value: unknown): number | null {
   return value;
 }
 
-export type DayRule = "negative_closing" | "destock_note_missing" | "count_missing" | "variance_note_missing";
+export type DayRule = "negative_closing";
 
 export interface DayFailure {
   sku_id: string;
   rule: DayRule;
 }
 
-function hasText(s: string | null | undefined) {
-  return Boolean(s && s.trim());
+// Fields staff may change in each step of the day (single mode swaps the four outs for one total).
+export function stepFields(status: DeskStatus, mode: StockOutMode): readonly LedgerChangeField[] {
+  if (status === "opening") return ["stock_in", "opening_qty"];
+  if (status === "check_in" || status === "final_stock") {
+    return mode === "single" ? ["stock_in", "stock_out_single"] : ["stock_in", "retail_sale", "wholesale", "destock", "withdraw"];
+  }
+  return [];
 }
 
 // Everything that must be true before a desk day may be marked Done.
@@ -149,9 +157,6 @@ export function validateDeskDay(rows: LedgerRow[]): DayFailure[] {
     if (r.excluded) continue;
     const closing = computeClosing(r);
     if (closing < 0) failures.push({ sku_id: r.sku_id, rule: "negative_closing" });
-    if (r.destock > 0 && !hasText(r.destock_note)) failures.push({ sku_id: r.sku_id, rule: "destock_note_missing" });
-    if (r.counted_qty == null) failures.push({ sku_id: r.sku_id, rule: "count_missing" });
-    else if (r.counted_qty !== closing && !hasText(r.counted_note)) failures.push({ sku_id: r.sku_id, rule: "variance_note_missing" });
   }
   return failures;
 }
@@ -287,11 +292,12 @@ export function buildDeskDetail(
       wholesale: r.wholesale,
       transfer_out: r.transfer_out,
       destock: r.destock,
-      destock_note: r.destock_note,
+      withdraw: r.withdraw ?? 0,
       move: r.move,
       stock_out_single: r.stock_out_single ?? 0,
       stock_out: stockOutOf(r),
       move_qty: r.move_qty ?? 0,
+      legacy_move: netMoveOf(r),
       closing_qty: closing,
       closing_baht: round4(bahtOf(sku, closing)),
       closing_gram: round3(gramOf(sku, closing)),
