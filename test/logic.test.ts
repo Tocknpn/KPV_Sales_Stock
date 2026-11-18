@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeClosing, stockOutOf, soldOf, netMoveOf, parseSignedQty, carryQty, currentQty, reorderPoint, valueLak, parseQty, validateDeskDay, buildCalendarMonth, stepFields } from "../src/logic";
+import { computeClosing, stockOutOf, soldOf, netMoveOf, parseSignedQty, carryQty, currentQty, reorderPoint, valueLak, parseQty, validateDeskDay, buildCalendarMonth, stepFields, buildReport } from "../src/logic";
 import { laosDate, monthRange, isValidDate, addDays } from "../src/time";
 import type { LedgerRow } from "../src/types";
 
@@ -169,5 +169,30 @@ describe("calendar", () => {
     expect(buildCalendarMonth(["2026-11-12"], desks, [])[0].pct).toBe(0);
     expect(buildCalendarMonth(["2026-11-12"], desks, [day("D1", "done"), day("D2", "check_in")])[0].pct).toBe(75);
     expect(buildCalendarMonth(["2026-11-12"], desks, [day("D1", "done"), day("D2", "done")])[0].pct).toBe(100);
+  });
+});
+
+describe("report: avg/lead/runway and the out split", () => {
+  const sku = (id: string) => ({ sku_id: id, name_en: id, name_lo: id, category: "", icon: "ring", baht_weight: 1, std_gram_weight: null, active: true }) as any;
+  const cfg = {} as any;
+  const run = (rows: LedgerRow[], statuses?: any) => buildReport(rows, [], [sku("GB-001")], {}, cfg, 0, statuses);
+
+  it("report items carry the branch's avg/day, lead time, runway and status", () => {
+    const statuses = new Map([["B-MM|GB-001", { status: "critical", position: 5, onHand: 5, avg: { value: 2 }, lead: { value: 5 }, runwayDays: 3, suggestedQty: 7 }]]) as any;
+    const it = run([row({ closing_qty: 5 })], statuses).items[0];
+    expect(it).toMatchObject({ avg_daily_sell: 2, lead_time_days: 5, runway_days: 3, branch_status: "critical", suggested_qty: 7 });
+  });
+
+  it("report item with no rule and no history shows no_data and null avg", () => {
+    const it = run([row()]).items[0];
+    expect(it).toMatchObject({ avg_daily_sell: null, lead_time_days: null, runway_days: null, branch_status: "no_data", suggested_qty: 0 });
+  });
+
+  it("report splits stock-out into retail, wholesale, return and withdraw", () => {
+    const r = row({ retail_sale: 1, wholesale: 2, destock: 3, withdraw: 4, stock_out: 10, closing_qty: 0 });
+    const rep = run([r]);
+    expect([rep.kpi.retail.pcs, rep.kpi.wholesale.pcs, rep.kpi.returned.pcs, rep.kpi.withdrawn.pcs]).toEqual([1, 2, 3, 4]);
+    expect(rep.kpi.out.pcs).toBe(10);
+    expect(rep.items[0]).toMatchObject({ retail: 1, wholesale: 2, returned: 3, withdrawn: 4 });
   });
 });

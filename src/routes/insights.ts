@@ -86,7 +86,8 @@ r.get("/report", async (c) => {
   // A month is valued at the price in force on its last day (or today, if the month is still running).
   const gold = resolveGoldPrice(goldRow, config, today);
   const lakPerBaht = priceOn(to < today ? to : today, goldHistory, gold.lakPerBaht);
-  return c.json({ period, ...buildReport(rows, days, skus, { q: c.req.query("q") || undefined }, config, lakPerBaht) });
+  const statuses = await loadBranchStatuses(store, [...new Set(rows.map((r) => r.branch_id))], today);
+  return c.json({ period, ...buildReport(rows, days, skus, { q: c.req.query("q") || undefined }, config, lakPerBaht, statuses) });
 });
 
 // Month grid of issues: one row per active case of a branch, one cell per day.

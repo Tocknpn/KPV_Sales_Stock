@@ -540,7 +540,8 @@ const planInputs = (prefix, avg, lead, placeholders) => `
         <label for="${prefix}-lead" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.leadTimeLabel")}</label>
         <input id="${prefix}-lead" type="number" min="0" step="any" inputmode="decimal" value="${lead ?? ""}" placeholder="${escapeHtml(placeholders.lead)}" class="input-filled" />
       </div>
-    </div>`;
+    </div>
+    <p class="mt-1 text-[11px] leading-snug text-gray-500">${t("settings.avgAutoHint")}</p>`;
 
 // One Type: the values typed apply to every SKU in it (each SKU's own value of
 // that field is replaced). A field left blank is not changed.

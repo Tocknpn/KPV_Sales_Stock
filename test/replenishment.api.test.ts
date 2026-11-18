@@ -259,3 +259,13 @@ describe("desk cards and dashboard", () => {
     expect(dash.watchlist.topLow.find((i: any) => i.sku_id === "BR-021")).toBeUndefined();
   });
 });
+
+describe("GET /report uses the per-branch SKU setting", () => {
+  it("GET /report items use the per-branch SKU setting", async () => {
+    const admin = await asAdmin();
+    expect((await putRule(admin, { avgDailySell: 4.5, leadTimeDays: 6 })).status).toBe(200);
+    const res = await call(admin, "GET", `/report?period=${TODAY.slice(0, 7)}&branchId=B-MM`);
+    const it = res.json.items.find((i: any) => i.sku_id === "GB-001" && i.desk_id.startsWith("MM"));
+    expect(it).toMatchObject({ avg_daily_sell: 4.5, lead_time_days: 6 });
+  });
+});

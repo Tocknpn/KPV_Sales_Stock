@@ -1,7 +1,7 @@
 import { api } from "../api.js";
 import { state, branchName, deskById } from "../state.js";
 import { openActionSheet } from "../ui.js";
-import { fmtInt, fmtLak, fmtLakSigned, fmtBaht, icon, escapeHtml, debounce } from "../util.js";
+import { fmtInt, fmtLak, fmtLakSigned, fmtBaht, icon, escapeHtml, debounce, fmtRunwayLine } from "../util.js";
 import { renderFillBar } from "../charts.js";
 import { t } from "../i18n.js";
 import { skuLabel } from "../sku-groups.js";
@@ -191,6 +191,8 @@ async function renderGrid(root) {
 
 function render(root, data) {
   const { kpi, items, ledgerRows, audit, netClosingLak } = data;
+  const byDeskSku = new Map(items.map((it) => [it.key, it]));
+  const avgOf = (r) => byDeskSku.get(`${r.desk_id}__${r.sku_id}`);
 
   root.innerHTML = `
     <div class="grid grid-cols-2 gap-2.5 md:grid-cols-4">
@@ -214,6 +216,16 @@ function render(root, data) {
         <div class="mt-1 text-base font-extrabold text-warning">${fmtLakSigned(-kpi.out.lak)}</div>
         <div class="text-[11px] text-warning">-${fmtInt(kpi.out.pcs)} pcs</div>
       </div>
+    </div>
+    <div class="mt-2.5 grid grid-cols-2 gap-2.5">
+      ${[["grid.retail", kpi.retail], ["grid.wholesale", kpi.wholesale], ["grid.destock", kpi.returned], ["grid.withdraw", kpi.withdrawn]]
+        .map(
+          ([key, b]) => `<div class="card flex items-center justify-between gap-2 px-3 py-2">
+        <span class="truncate text-[11px] font-bold text-gray-600">${t(key)}</span>
+        <span class="shrink-0 text-xs font-extrabold tabular-nums text-warning">${fmtInt(b.pcs)} pcs</span>
+      </div>`
+        )
+        .join("")}
     </div>
     ${
       kpi.adjust.pcs !== 0
@@ -263,6 +275,10 @@ function render(root, data) {
           <div class="mt-1 flex items-center justify-between text-[11px] text-gray-600">
             <span>${it.closing_qty} pcs · ${fmtLak(it.value_lak)}</span><span>${escapeHtml(it.desk_id)}</span>
           </div>
+          ${(() => {
+            const line = fmtRunwayLine(it.avg_daily_sell, it.lead_time_days, it.runway_days);
+            return line ? `<div class="mt-0.5 truncate text-[10px] text-gray-500">${escapeHtml(line)}</div>` : "";
+          })()}
           ${renderFillBar(it.fillPct, deltaUp ? "#10b981" : "#f59e0b")}
         </div>
       </div>`;
@@ -281,6 +297,9 @@ function render(root, data) {
             <th class="px-3 py-2 text-right font-semibold">${t("report.outShort")}</th>
             <th class="px-3 py-2 text-right font-semibold">${t("stock.colClose")}</th>
             <th class="px-3 py-2 text-right font-semibold">${t("stock.colCounted")}</th>
+            <th class="px-3 py-2 text-right font-semibold">${t("replen.avg")}</th>
+            <th class="px-3 py-2 text-right font-semibold">${t("replen.lead")}</th>
+            <th class="px-3 py-2 text-right font-semibold">${t("report.runway")}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-hairline">
@@ -296,6 +315,9 @@ function render(root, data) {
               <td class="px-3 py-2 text-right text-warning">-${(r.stock_out ?? r.retail_sale + r.wholesale + r.destock) + r.transfer_out + r.move + Math.max(-(r.move_qty ?? 0), 0)}</td>
               <td class="px-3 py-2 text-right font-bold text-gray-900">${r.closing_qty}</td>
               <td class="px-3 py-2 text-right ${r.counted_qty != null && r.counted_qty !== r.closing_qty ? "font-bold text-danger" : "text-gray-500"}">${r.counted_qty ?? "—"}</td>
+              <td class="px-3 py-2 text-right text-gray-500">${avgOf(r)?.avg_daily_sell ?? "—"}</td>
+              <td class="px-3 py-2 text-right text-gray-500">${avgOf(r)?.lead_time_days ?? "—"}</td>
+              <td class="px-3 py-2 text-right text-gray-500">${avgOf(r)?.runway_days != null ? Math.round(avgOf(r).runway_days * 10) / 10 : "—"}</td>
             </tr>`
             )
             .join("")}

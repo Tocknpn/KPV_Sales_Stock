@@ -64,6 +64,14 @@ export function fmtRunway(days) {
   return tf("replen.runway", { n: (Math.round(days * 10) / 10).toFixed(1) });
 }
 
+const oneDecimal = (n) => String(Math.round(n * 10) / 10);
+
+// "2.5/day · order 7 d · lasts ≈12 d"; null unless the avg and the runway are both known.
+export function fmtRunwayLine(avg, lead, days) {
+  if (avg == null || days == null) return null;
+  return tf("replen.runwayLine", { avg: oneDecimal(avg), lead: oneDecimal(lead ?? 0), days: oneDecimal(Math.max(0, days)) });
+}
+
 export function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }

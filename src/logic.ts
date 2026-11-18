@@ -179,7 +179,7 @@ function lastActor(rows: LedgerRow[], day: DeskDay | undefined, staffById: Map<s
 
 // Branch-wide replenishment status of a SKU, keyed "branchId|skuId". Structural
 // so logic.ts does not depend on replenishment.ts (which depends on it).
-export type BranchStatuses = Map<string, { status: "critical" | "warning" | "ok" | "no_data"; position: number; onHand: number; avg: { value: number | null }; lead: { value: number }; runwayDays: number | null }>;
+export type BranchStatuses = Map<string, { status: "critical" | "warning" | "ok" | "no_data"; position: number; onHand: number; avg: { value: number | null }; lead: { value: number }; runwayDays: number | null; suggestedQty?: number }>;
 
 export function buildDeskCards(
   desks: Desk[],
@@ -729,7 +729,7 @@ export interface ReportFilter {
   q?: string;
 }
 
-export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus: MasterSku[], filter: ReportFilter, config: SystemConfig, lakPerBaht: number) {
+export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus: MasterSku[], filter: ReportFilter, config: SystemConfig, lakPerBaht: number, statuses: BranchStatuses = new Map()) {
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
   const statusByDay = new Map(periodDays.map((d) => [`${d.desk_id}__${d.ledger_date}`, d.status]));
   const statusOf = (r: LedgerRow) => statusByDay.get(`${r.desk_id}__${r.ledger_date}`);
@@ -754,6 +754,10 @@ export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus
     opening: { lak: 0, pcs: 0 },
     in: { lak: 0, pcs: 0 },
     out: { lak: 0, pcs: 0 },
+    retail: { lak: 0, pcs: 0 },
+    wholesale: { lak: 0, pcs: 0 },
+    returned: { lak: 0, pcs: 0 },
+    withdrawn: { lak: 0, pcs: 0 },
     adjust: { lak: 0, pcs: 0 },
     closing: { lak: 0, pcs: 0 },
   };
@@ -770,7 +774,15 @@ export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus
     let inSum = 0;
     let outSum = 0;
     let adjustSum = 0;
+    let retailSum = 0;
+    let wholesaleSum = 0;
+    let returnedSum = 0;
+    let withdrawnSum = 0;
     for (const r of sorted) {
+      retailSum += r.retail_sale;
+      wholesaleSum += r.wholesale;
+      returnedSum += r.destock;
+      withdrawnSum += r.withdraw ?? 0;
       inSum += movementIn(r);
       outSum += movementOut(r);
       // A count adjustment only exists once the day is settled.
@@ -780,6 +792,11 @@ export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus
     add(kpi.opening, sku, first.opening_qty);
     add(kpi.in, sku, inSum);
     add(kpi.out, sku, outSum);
+    add(kpi.retail, sku, retailSum);
+    add(kpi.wholesale, sku, wholesaleSum);
+    add(kpi.returned, sku, returnedSum);
+    add(kpi.withdrawn, sku, withdrawnSum);
+    const st = statuses.get(`${last.branch_id}|${last.sku_id}`);
     add(kpi.adjust, sku, adjustSum);
     add(kpi.closing, sku, closing);
     return {
@@ -797,6 +814,15 @@ export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus
       value_lak: round2(valueLak(sku, closing, lakPerBaht)),
       fillPct: 0, // set below, against the biggest closing in the list
       desk_id: last.desk_id,
+      retail: retailSum,
+      wholesale: wholesaleSum,
+      returned: returnedSum,
+      withdrawn: withdrawnSum,
+      avg_daily_sell: st?.avg.value ?? null,
+      lead_time_days: st && st.avg.value != null ? st.lead.value : null,
+      runway_days: st?.runwayDays ?? null,
+      branch_status: st?.status ?? ("no_data" as const),
+      suggested_qty: st?.suggestedQty ?? 0,
     };
   });
 

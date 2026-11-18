@@ -10,7 +10,7 @@
 // for that field and it saves on change. Old days may still carry a linked
 // move (shown as "⇄ −3" under Closing) and a count (shown as a note).
 import { t, productName } from "../../i18n.js";
-import { escapeHtml, fmtRunway } from "../../util.js";
+import { escapeHtml, fmtRunway, fmtRunwayLine } from "../../util.js";
 import { skuSizeLabel, skuLabel } from "../../sku-groups.js";
 
 // Same formula as the database's generated closing_qty.
@@ -128,6 +128,12 @@ function runwayChip(r) {
   return `<span class="status-pill mt-0.5 max-w-full truncate px-1.5 py-0 text-[10px] ${critical ? "bg-danger-bg text-danger" : "bg-warning-bg text-warning"}">${escapeHtml(text)}</span>`;
 }
 
+// One small line under the SKU name: avg/day, lead time, how long the stock lasts.
+function runwayLine(r) {
+  const text = fmtRunwayLine(r.avg_daily_sales, r.order_lead_time_days, r.runway_days);
+  return text ? `<span data-runway class="block truncate text-[10px] leading-tight text-gray-500">${escapeHtml(text)}</span>` : "";
+}
+
 const RULE_TEXT = (rule) => t(`stock.rule.${rule}`);
 
 // The line under a row: an old day's count note and destock reason, rule problems.
@@ -161,6 +167,7 @@ export function renderRow(r, view) {
       <div class="${bad ? "bg-danger-bg" : "bg-white"} sticky left-0 z-[1] flex min-w-0 flex-col justify-center rounded-xl border border-gray-200 px-2 py-1">
         <span class="line-clamp-2 break-words text-[13px] font-extrabold leading-tight text-gray-900">${escapeHtml(skuName(r))}</span>
         <span class="truncate text-[10px] leading-tight text-gray-600">${escapeHtml(sub || r.sku_id)}</span>
+        ${runwayLine(r)}
         ${low ? runwayChip(r) : ""}
       </div>
       ${qtyCell(r, "opening_qty", editable.has("opening_qty"), `${BOX} bg-gray-50`)}

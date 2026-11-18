@@ -84,4 +84,15 @@ describe("day grid", () => {
       expect(html).not.toMatch(/<input[^>]*value="8"/);
     }
   });
+
+  it("a row with an avg shows its runway line even when status is ok", () => {
+    const html = renderRow(row({ avg_daily_sales: 2.5, order_lead_time_days: 7, runway_days: 12, branch_status: "ok" }), { status: "check_in", mode: "dynamic" });
+    expect(html).toContain("2.5/ວັນ · ສັ່ງ 7 ວັນ · ພໍ ≈12 ວັນ");
+  });
+
+  it("a row with no avg shows no runway line", () => {
+    const html = renderRow(row({ avg_daily_sales: null, order_lead_time_days: null, runway_days: null, branch_status: "no_data" }), { status: "check_in", mode: "dynamic" });
+    expect(html).not.toContain("/ວັນ");
+    expect(html).not.toContain("data-runway");
+  });
 });
