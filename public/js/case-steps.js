@@ -9,3 +9,12 @@ export function caseSteps(card) {
   if (status === "check_in" || status === "final_stock") return { checkIn: "done", close: "active", badge: "pending", goToDate: null };
   return { checkIn: "active", close: "locked", badge: "alert", goToDate: null };
 }
+
+// What tapping the card body does: a done day opens read-only in the day screen
+// (sales, count, history, reopen); a not-started case checks in; otherwise the
+// opening-balance snapshot sheet.
+export function cardBodyAction(status) {
+  if (status === "done") return "day";
+  if (status === "not_started") return "checkIn";
+  return "openingSheet";
+}

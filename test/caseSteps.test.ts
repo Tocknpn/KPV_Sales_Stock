@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 // @ts-expect-error plain browser ES module without types
-import { caseSteps } from "../public/js/case-steps.js";
+import { caseSteps, cardBodyAction } from "../public/js/case-steps.js";
 
 describe("caseSteps", () => {
   it("not_started with no earlier open day: check in is the step", () => {
@@ -22,5 +22,13 @@ describe("caseSteps", () => {
   });
   it("done: everything done", () => {
     expect(caseSteps({ status: "done", openEarlierDate: null })).toEqual({ checkIn: "done", close: "done", badge: "done", goToDate: null });
+  });
+});
+
+describe("cardBodyAction", () => {
+  it("a done card body opens the read-only day", () => expect(cardBodyAction("done")).toBe("day"));
+  it("not_started checks in", () => expect(cardBodyAction("not_started")).toBe("checkIn"));
+  it("other statuses keep the opening-balance sheet", () => {
+    for (const s of ["opening", "check_in", "final_stock"]) expect(cardBodyAction(s)).toBe("openingSheet");
   });
 });

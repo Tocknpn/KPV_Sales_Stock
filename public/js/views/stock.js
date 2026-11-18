@@ -10,7 +10,7 @@ import { go, pathFor, backTo } from "../router.js";
 import { renderSkuPickerInto, openingRowsHtml, bindOpeningInputs } from "./sku-picker.js";
 import { skeletonCards, skeletonCalendar } from "../skeleton.js";
 import { skuSizeLabel } from "../sku-groups.js";
-import { caseSteps } from "../case-steps.js";
+import { caseSteps, cardBodyAction } from "../case-steps.js";
 
 function setStockDate(date) {
   state.stock.date = date;
@@ -211,9 +211,9 @@ const BADGE = {
 };
 
 // One step button: the active step is the primary button; done and locked steps are grey and disabled.
-function stepButton(step, state, label) {
-  if (state === "active") return `<button data-step="${step}" class="btn-primary min-w-0 flex-1 px-2 py-2 text-xs">${label}</button>`;
-  return `<button data-step="${step}" disabled aria-disabled="true" class="btn-secondary min-w-0 flex-1 cursor-not-allowed bg-gray-100 px-2 py-2 text-xs text-gray-400">${label}${state === "done" ? " ✓" : ""}</button>`;
+function stepButton(step, stepState, label) {
+  if (stepState === "active") return `<button data-step="${step}" class="btn-primary min-w-0 flex-1 px-2 py-2 text-xs">${label}</button>`;
+  return `<button data-step="${step}" disabled aria-disabled="true" class="btn-secondary min-w-0 flex-1 cursor-not-allowed bg-gray-100 px-2 py-2 text-xs text-gray-400">${label}${stepState === "done" ? " ✓" : ""}</button>`;
 }
 
 // The warning line under an overdue card; other tiers say nothing extra.
@@ -281,7 +281,9 @@ function renderGrid(desks) {
       // Not started today has no opening-balance row to show yet (it's only
       // materialized on check-in), so tapping the card falls back to the
       // same check-in + edit flow as the action button in that case.
-      if (desk.status === "not_started") handleCardAction(desk);
+      const action = cardBodyAction(desk.status);
+      if (action === "checkIn") handleCardAction(desk);
+      else if (action === "day") openDeskDetail(desk);
       else openOpeningBalanceSheet(desk);
     });
   });
