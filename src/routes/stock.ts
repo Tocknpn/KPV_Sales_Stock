@@ -1,5 +1,5 @@
 // Daily Stock: desk cards, the desk day lifecycle
-// (not started -> check_in -> final_stock -> done) and row entry.
+// (not started -> opening -> check_in -> [final_stock] -> done) and row entry.
 import { storeFor, newRouter, readBody, HttpError, scopeBranch, requireDesk, requireDate, assertDateWritable, getDay, requireOpenDay, audit } from "../app";
 import type { Ctx } from "../app";
 import { LEDGER_CHANGE_FIELDS, TEXT_CHANGE_FIELDS } from "../store";
@@ -10,7 +10,7 @@ import { buildDayStatus } from "../dayStatus";
 import { loadBranchStatuses } from "../replenishment";
 import { resolveGoldPrice, priceOn } from "../goldPrice";
 import { buildCaseHistory } from "../caseHistory";
-import { bahtOf, valueLak, buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, computeClosing, parseQty, parseSignedQty, validateDeskDay } from "../logic";
+import { bahtOf, valueLak, buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, computeClosing, parseQty, stepFields, validateDeskDay } from "../logic";
 import type { Desk, DeskDay, LedgerRow, MasterSku, SessionUser, StaffAccount, Transfer } from "../types";
 
 // Mounted behind requireAuth in src/index.ts.
@@ -34,6 +34,7 @@ function hasActivity(row: LedgerRow) {
     row.wholesale !== 0 ||
     row.transfer_out !== 0 ||
     row.destock !== 0 ||
+    (row.withdraw ?? 0) !== 0 ||
     row.move !== 0 ||
     (row.stock_out_single ?? 0) !== 0 ||
     (row.move_qty ?? 0) !== 0
@@ -66,6 +67,16 @@ async function planCarry(store: Store, from: DeskDay, toDate: string, actor: str
   return { inserts, patches, reopenings };
 }
 
+// The SKUs a case's day carries from its previous day: every non-excluded row
+// of the case's latest earlier day. Their opening is yesterday's closing and
+// cannot be typed. A case's first day has no previous day, so none are carried.
+async function carriedSkus(store: Store, deskId: string, date: string): Promise<Set<string>> {
+  const [previous] = await store.deskDays({ deskId, before: date, order: "desc", limit: 1 });
+  if (!previous) return new Set();
+  const rows = await store.ledger({ deskId, date: previous.ledger_date });
+  return new Set(rows.filter((row) => !row.excluded).map((row) => row.sku_id));
+}
+
 async function carryForward(store: Store, from: DeskDay, toDate: string, actor: string) {
   const { inserts, patches } = await planCarry(store, from, toDate, actor);
   await store.insertLedgerRows(inserts, { overwriteOpening: true });
@@ -75,9 +86,9 @@ async function carryForward(store: Store, from: DeskDay, toDate: string, actor: 
 const safeDropNote = (body: Record<string, any>) =>
   body.safe_drop_note !== undefined ? { safe_drop_note: body.safe_drop_note ? String(body.safe_drop_note).slice(0, 500) : null } : {};
 
-// Marks an open day Done (from check-in or final stock) once every row is
-// counted and explained, then updates the following day's opening balances if
-// that day already exists. Shared by /transition (to done) and /close.
+// Marks an open day Done (from check-in or final stock; never from the
+// opening step) once no row ends below 0 (no physical count is needed), then
+// updates the following day's opening balances if that day already exists. Shared by /transition (to done) and /close.
 async function closeDeskDay(store: Store, user: SessionUser, desk: Desk, date: string, note: { safe_drop_note?: string | null }) {
   const day = await getDay(store, desk.desk_id, date);
   if (!day || (day.status !== "check_in" && day.status !== "final_stock")) {
@@ -409,7 +420,11 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
   const gold = resolveGoldPrice(goldRow, config, today);
   // A past day is valued at the price in force that day; today at the live price.
   const lakPerBaht = date < today ? priceOn(date, await store.goldPriceHistory(date, date), gold.lakPerBaht) : gold.lakPerBaht;
-  const detail = buildDeskDetail(desk, branches.find((b) => b.branch_id === desk.branch_id), day, skus, ledgerRows, staffAccounts, config, weights, statuses, lakPerBaht, types);
+  const built = buildDeskDetail(desk, branches.find((b) => b.branch_id === desk.branch_id), day, skus, ledgerRows, staffAccounts, config, weights, statuses, lakPerBaht, types);
+  // In the opening step a SKU the day did not carry (added today, or every row
+  // on a case's first day) still takes a typed opening.
+  const carried = day?.status === "opening" ? await carriedSkus(store, deskId, date) : undefined;
+  const detail = { ...built, rows: built.rows.map((row) => ({ ...row, opening_editable: carried !== undefined && !carried.has(row.sku_id) })) };
   const skuName = (id: string) => skus.find((s) => s.sku_id === id)?.name_en ?? id;
   const deskName = (id: string) => {
     const d = allDesks.find((x) => x.desk_id === id);
@@ -448,8 +463,8 @@ r.get("/stock/desk/:deskId", async (c) => {
   return c.json(await deskDetail(c, store, c.get("user"), deskId, date));
 });
 
-// Opens a desk's day and carries the previous day's stock forward. Shared by the
-// check-in route and moves (a destination case is checked in on demand).
+// Opens a desk's day in the `opening` step and carries the previous day's stock
+// forward. Shared by the check-in route and moves (a destination case is checked in on demand).
 export async function checkInDesk(store: Store, user: SessionUser, desk: Desk, date: string, today: string): Promise<"created" | "exists"> {
   if (!desk.active) throw new HttpError(409, "This desk is not active", "DESK_INACTIVE");
 
@@ -479,7 +494,9 @@ export async function checkInDesk(store: Store, user: SessionUser, desk: Desk, d
 }
 
 // ---------------------------------------------------------------------------
-// Check-in: opens the day and carries the previous day's stock forward.
+// Check-in: opens the day in the opening step (yesterday's closing is reviewed
+// as today's opening) and carries the previous day's stock forward. The
+// /transition to check_in confirms it.
 // ---------------------------------------------------------------------------
 r.post("/stock/desk/:deskId/checkin", async (c) => {
   const store = storeFor(c);
@@ -493,12 +510,13 @@ r.post("/stock/desk/:deskId/checkin", async (c) => {
 
 // ---------------------------------------------------------------------------
 // Save entries. Only the fields sent for a row are changed, so two tablets
-// editing different things never overwrite each other. Move in/out (move_qty)
-// is signed; stock-out is typed as retail / wholesale / destock on a dynamic
-// day and as one total (stock_out_single) on a single-mode day.
+// editing different things never overwrite each other. Which fields may be
+// changed depends on the day's step (stepFields): the opening step takes
+// stock-in and the opening of a SKU the day did not carry; check-in takes
+// stock-in and the stock-outs (retail / wholesale / return / withdraw on a
+// dynamic day, one total stock_out_single on a single-mode day).
 // ---------------------------------------------------------------------------
 const DYNAMIC_OUT_FIELDS: readonly LedgerChangeField[] = ["retail_sale", "wholesale", "destock", "withdraw"];
-const parseCount = (v: unknown) => (v === null || v === "" ? null : parseQty(v));
 
 // One compare-and-set change: {sku_id, field, from?, to}. `from` omitted means
 // "apply whatever is stored".
@@ -528,6 +546,8 @@ r.post("/stock/desk/:deskId/entries", async (c) => {
   const mode = day.stock_out_mode ?? "dynamic";
   const offMode = (field: LedgerChangeField) =>
     mode === "single" ? DYNAMIC_OUT_FIELDS.includes(field) : field === "stock_out_single";
+  const allowed = stepFields(day.status, mode);
+  let carried: Set<string> | undefined;
 
   const known = new Set((await store.ledger({ date, deskId: desk.desk_id })).filter((row) => !row.excluded).map((row) => row.sku_id));
   const unknownSku = (skuId: string) => new HttpError(400, `SKU ${skuId} is not on this desk for ${date}`, "ROW_NOT_FOUND", { sku_id: skuId });
@@ -546,6 +566,15 @@ r.post("/stock/desk/:deskId/entries", async (c) => {
       // invisible after reload; refuse it so the device reloads instead.
       if (offMode(change.field)) {
         throw new HttpError(409, `${change.field} is not used on a ${mode} stock-out day — reload`, "WRONG_STOCK_OUT_MODE", { sku_id, field: change.field, mode });
+      }
+      if (!allowed.includes(change.field)) {
+        throw new HttpError(409, `${change.field} cannot be entered while the day is ${day.status}`, "FIELD_NOT_IN_STEP", { sku_id, field: change.field, status: day.status });
+      }
+      if (change.field === "opening_qty") {
+        carried ??= await carriedSkus(store, desk.desk_id, date);
+        if (carried.has(sku_id)) {
+          throw new HttpError(409, "This opening is carried from the previous day and cannot be changed", "OPENING_LOCKED", { sku_id });
+        }
       }
       const list = bySku.get(sku_id) ?? [];
       // Two assignments to one column would make the generated SQL repeat it (42601).
@@ -582,12 +611,19 @@ r.post("/stock/desk/:deskId/transition", async (c) => {
   const today = businessDate(c.env);
   const date = requireDate(body.date, today);
   const toStatus = body.toStatus;
-  if (toStatus !== "final_stock" && toStatus !== "done") throw new HttpError(400, "Invalid status", "BAD_STATUS");
+  if (toStatus !== "check_in" && toStatus !== "final_stock" && toStatus !== "done") throw new HttpError(400, "Invalid status", "BAD_STATUS");
   const desk = await requireDesk(store, user, c.req.param("deskId"));
   const day = await requireOpenDay(store, user, desk.desk_id, date, today);
 
-  const expected = toStatus === "final_stock" ? "check_in" : "final_stock";
+  const expected = toStatus === "check_in" ? "opening" : toStatus === "final_stock" ? "check_in" : "final_stock";
   if (day.status !== expected) throw new HttpError(409, `Cannot move from ${day.status} to ${toStatus}`, "BAD_TRANSITION");
+
+  // Confirm check-in: the opening review is finished and selling may start.
+  if (toStatus === "check_in") {
+    const updated = await store.updateDeskDay(desk.desk_id, date, { status: "check_in" }, "opening");
+    if (!updated) throw new HttpError(409, "This desk was changed on another device — reload", "STALE");
+    return c.json({ ok: true });
+  }
 
   if (toStatus === "final_stock") {
     const updated = await store.updateDeskDay(desk.desk_id, date, { status: "final_stock", ...safeDropNote(body) }, "check_in");
@@ -599,7 +635,7 @@ r.post("/stock/desk/:deskId/transition", async (c) => {
   return c.json({ ok: true });
 });
 
-// One step to Done from check-in or final stock: every row must be counted.
+// One step to Done from check-in or final stock (not from the opening step).
 r.post("/stock/desk/:deskId/close", async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
@@ -643,8 +679,10 @@ r.post("/stock/desk/:deskId/reopen", requireManager, async (c) => {
 // ---------------------------------------------------------------------------
 // Add / remove a SKU on a desk day
 // ---------------------------------------------------------------------------
-// Adds one SKU ({ sku_id, opening_qty }) or several ({ items: [...] }) to a
-// case's day. Every item is checked before anything is written.
+// Adds one SKU ({ sku_id, opening_qty?, stock_in? }) or several ({ items: [...] })
+// to a case's day. Every item is checked before anything is written. An opening
+// is typed only in the opening step and only for a SKU the day did not carry;
+// a SKU added after check-in arrives through stock_in with opening 0.
 const MAX_ADD_ITEMS = 200;
 r.post("/stock/desk/:deskId/sku", async (c) => {
   const store = storeFor(c);
@@ -653,31 +691,37 @@ r.post("/stock/desk/:deskId/sku", async (c) => {
   const today = businessDate(c.env);
   const date = requireDate(body.date, today);
   const desk = await requireDesk(store, user, c.req.param("deskId"));
-  await requireOpenDay(store, user, desk.desk_id, date, today);
+  const day = await requireOpenDay(store, user, desk.desk_id, date, today);
 
-  const items: any[] = Array.isArray(body.items) ? body.items : [{ sku_id: body.sku_id, opening_qty: body.opening_qty }];
+  const items: any[] = Array.isArray(body.items) ? body.items : [{ sku_id: body.sku_id, opening_qty: body.opening_qty, stock_in: body.stock_in }];
   if (items.length === 0 || items.length > MAX_ADD_ITEMS) throw new HttpError(400, `Add between 1 and ${MAX_ADD_ITEMS} SKUs`, "BAD_SKU");
 
   const activeSkus = new Set((await store.skus()).filter((s) => s.active).map((s) => s.sku_id));
-  // sku_id -> opening; a repeated SKU keeps its last opening.
-  const wanted = new Map<string, number>();
+  const qtyOf = (v: unknown, label: string) => {
+    if (v === undefined || v === null || v === "") return 0;
+    const qty = parseQty(v);
+    if (qty === null) throw new HttpError(400, `${label} must be a whole number, 0 or more`, "BAD_QTY");
+    return qty;
+  };
+  // sku_id -> {opening, stockIn}; a repeated SKU keeps its last values.
+  const wanted = new Map<string, { opening: number; stockIn: number }>();
   for (const item of items) {
     const skuId = String(item?.sku_id ?? "");
     if (!activeSkus.has(skuId)) throw new HttpError(400, "Unknown or inactive SKU", "BAD_SKU");
-    let opening = 0;
-    if (item.opening_qty !== undefined && item.opening_qty !== null && item.opening_qty !== "") {
-      const qty = parseQty(item.opening_qty);
-      if (qty === null) throw new HttpError(400, "Opening must be a whole number, 0 or more", "BAD_QTY");
-      opening = qty;
-    }
-    wanted.set(skuId, opening);
+    wanted.set(skuId, { opening: qtyOf(item.opening_qty, "Opening"), stockIn: qtyOf(item.stock_in, "Stock in") });
   }
 
-  // Starting stock can only be typed on a desk's very first day; afterwards
-  // stock arrives through "In" or an incoming transfer.
-  if ([...wanted.values()].some((q) => q > 0)) {
-    const [earlier] = await store.deskDays({ deskId: desk.desk_id, before: date, limit: 1 });
-    if (earlier) throw new HttpError(409, "Opening stock can only be set on a desk's first day", "OPENING_LOCKED");
+  // An opening is typed only while the day is in the opening step, and never
+  // for a SKU carried from the previous day; after check-in stock arrives as stock-in.
+  const withOpening = [...wanted].filter(([, w]) => w.opening > 0).map(([id]) => id);
+  if (withOpening.length) {
+    if (day.status !== "opening") throw new HttpError(409, "An opening can only be typed before check-in is confirmed", "OPENING_LOCKED");
+    const carried = await carriedSkus(store, desk.desk_id, date);
+    const locked = withOpening.find((id) => carried.has(id));
+    if (locked) throw new HttpError(409, "This opening is carried from the previous day and cannot be changed", "OPENING_LOCKED", { sku_id: locked });
+  }
+  if ([...wanted.values()].some((w) => w.stockIn > 0) && !stepFields(day.status, day.stock_out_mode ?? "dynamic").includes("stock_in")) {
+    throw new HttpError(409, `stock_in cannot be entered while the day is ${day.status}`, "FIELD_NOT_IN_STEP", { field: "stock_in", status: day.status });
   }
 
   const key = (sku_id: string) => ({ ledger_date: date, desk_id: desk.desk_id, sku_id, branch_id: desk.branch_id });
@@ -686,9 +730,16 @@ r.post("/stock/desk/:deskId/sku", async (c) => {
   const fresh = [...wanted].filter(([id]) => !existing.has(id));
   // Insert first: it is the write most likely to be refused (another device
   // added the same SKU), and then nothing has been restored yet.
-  if (fresh.length) await store.insertLedgerRows(fresh.map(([id, opening_qty]) => ({ ...key(id), opening_qty, performed_by: user.accountId })));
+  if (fresh.length) await store.insertLedgerRows(fresh.map(([id, w]) => ({ ...key(id), opening_qty: w.opening, performed_by: user.accountId })));
   // A removed row had no activity, so its opening was 0; it takes the one typed now.
-  if (restore.length) await store.patchLedgerRows(restore.map((id) => ({ ...key(id), excluded: false, opening_qty: wanted.get(id)!, performed_by: user.accountId })));
+  if (restore.length) await store.patchLedgerRows(restore.map((id) => ({ ...key(id), excluded: false, opening_qty: wanted.get(id)!.opening, performed_by: user.accountId })));
+  // Stock-in goes through the same compare-and-set path as the grid.
+  for (const id of [...fresh.map(([id]) => id), ...restore]) {
+    const stockIn = wanted.get(id)!.stockIn;
+    if (stockIn === 0) continue;
+    const res = await store.applyLedgerChanges({ ledger_date: date, desk_id: desk.desk_id, sku_id: id }, [{ field: "stock_in", to: stockIn }]);
+    if (!res.ok) throw new HttpError(409, "This row was changed on another device", "ROW_CHANGED", { sku_id: id });
+  }
   return c.json({ ok: true, added: fresh.length, restored: restore.length });
 });
 

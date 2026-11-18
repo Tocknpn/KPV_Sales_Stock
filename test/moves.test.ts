@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEMO_STAFF } from "../src/demoData";
 import { getStore } from "../src/store";
-import { TODAY, YESTERDAY, freshApp, call, asAdmin, asStaff, closeDay } from "./helpers";
+import { TODAY, YESTERDAY, freshApp, call, asAdmin, asStaff, closeDay, checkIn } from "./helpers";
 
 beforeEach(freshApp);
 
@@ -62,7 +62,8 @@ describe("moves", () => {
     expect(yesterday.status).toBe("done");
     expect((await call(staff, "POST", "/moves", body())).status).toBe(200);
     const today = await detailOf(staff, "MM-D02");
-    expect(today.status).toBe("check_in");
+    // Opened like any check-in: in the opening step.
+    expect(today.status).toBe("opening");
     for (const r of yesterday.rows) expect(rowOf(today, r.sku_id).opening_qty).toBe(r.counted_qty ?? r.closing_qty);
     expect(rowOf(today, "GB-001")).toMatchObject({ opening_qty: 0, transfer_in: 1 });
   });
@@ -82,6 +83,8 @@ describe("moves", () => {
     const staff = await asStaff("B-MM");
     const moved = await call(staff, "POST", "/moves", body({ lines: [{ skuId: "GB-001", qty: 2 }] }));
     expect(moved.status).toBe(200);
+    // The move opened MM-D02 in the opening step; confirm check-in before selling.
+    expect((await call(staff, "POST", "/stock/desk/MM-D02/transition", { date: TODAY, toStatus: "check_in" })).status).toBe(200);
     expect((await call(staff, "POST", "/stock/desk/MM-D02/entries", { date: TODAY, changes: [{ sku_id: "GB-001", field: "retail_sale", to: 2 }] })).status).toBe(200);
     const a = await detailOf(staff, "MM-D01");
     const b = await detailOf(staff, "MM-D02");
@@ -216,7 +219,7 @@ describe("desk detail moves (History tab)", () => {
 
   it("no Undo once either day is Done", async () => {
     const staff = await asStaff("B-MM");
-    await call(staff, "POST", "/stock/desk/MM-D02/checkin", { date: TODAY });
+    await checkIn(staff, "MM-D02", TODAY);
     await call(staff, "POST", "/moves", body());
     await closeDay(staff, "MM-D02", TODAY);
     expect((await detailOf(staff, "MM-D01")).moves[0].canUndo).toBe(false);

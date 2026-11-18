@@ -57,16 +57,15 @@ export const asStaff = (branch: keyof typeof DEMO_STAFF, date = TODAY) => login(
 export const asManager = (branch: keyof typeof DEMO_MANAGER = "B-MM", date = TODAY) => login(DEMO_MANAGER[branch], "5678", date);
 export const on = (session: Session, date: string): Session => ({ ...session, date });
 
-// Fills in every count (= calculated closing) so a desk day can be closed.
-export async function countEverything(session: Session, deskId: string, date: string) {
-  const detail = (await call(session, "GET", `/stock/desk/${deskId}?date=${date}`)).json;
-  return call(session, "POST", `/stock/desk/${deskId}/entries`, {
-    date,
-    changes: detail.rows.map((r: any) => ({ sku_id: r.sku_id, field: "counted_qty", to: r.closing_qty })),
-  });
+// Check-in as staff do it: open the day (the opening step) and confirm it, so
+// the day is in check_in and takes stock-outs.
+export async function checkIn(session: Session, deskId: string, date: string) {
+  const opened = await call(session, "POST", `/stock/desk/${deskId}/checkin`, { date });
+  if (opened.status !== 200) return opened;
+  return call(session, "POST", `/stock/desk/${deskId}/transition`, { date, toStatus: "check_in" });
 }
 
+// Closes a day. No physical count is needed.
 export async function closeDay(session: Session, deskId: string, date: string) {
-  await countEverything(session, deskId, date);
   return call(session, "POST", `/stock/desk/${deskId}/close`, { date });
 }

@@ -89,12 +89,19 @@ export async function getDay(store: Store, deskId: string, date: string): Promis
   return (await store.deskDays({ deskId, date, limit: 1 }))[0];
 }
 
-// For every write to a day's rows: the day must exist and must not be Done.
+// For every write to a day's rows: the day must exist, must not be Done, and
+// every earlier day of the case must be Done (days are finished in order).
 export async function requireOpenDay(store: Store, user: SessionUser, deskId: string, date: string, today: string): Promise<DeskDay> {
   const day = await getDay(store, deskId, date);
   assertDateWritable(user, date, today, day);
   if (!day) throw new HttpError(409, "This desk has not been checked in for that date", "NOT_CHECKED_IN");
   if (day.status === "done") throw new HttpError(423, "This day is Done and locked for this Desk", "DAY_LOCKED");
+  const [openEarlier] = await store.deskDays({ deskId, before: date, notStatus: "done", order: "asc", limit: 1 });
+  if (openEarlier) {
+    throw new HttpError(409, `Finish ${openEarlier.ledger_date} first — that day is not Done yet`, "EARLIER_DAY_OPEN", {
+      openDate: openEarlier.ledger_date,
+    });
+  }
   return day;
 }
 

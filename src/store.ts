@@ -195,7 +195,7 @@ export interface Store {
   deskDays(filter: DeskDayFilter): Promise<DeskDay[]>;
   // Each desk's most recent day (any status).
   latestDeskDays(filter: { branchId?: string; deskId?: string }): Promise<DeskDay[]>;
-  // Returns null when that desk/date already exists (someone else checked in).
+  // Opens the day in the `opening` step. Returns null when that desk/date already exists (someone else checked in).
   insertDeskDay(day: Pick<DeskDay, "desk_id" | "ledger_date" | "branch_id" | "checked_in_by">): Promise<DeskDay | null>;
   // Conditional update: applies only while the day is still `expectedStatus`.
   // Returns null when it is not (another tablet got there first).
@@ -525,7 +525,7 @@ export class DemoStore implements Store {
     const now = this.now();
     const row: DeskDay = {
       ...day,
-      status: "check_in",
+      status: "opening",
       safe_drop_note: null,
       done_by: null,
       done_at: null,
@@ -1326,7 +1326,7 @@ class SupabaseStore implements Store {
     const rows = await this.rest<DeskDay[]>("desk_days?on_conflict=desk_id,ledger_date", {
       method: "POST",
       headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
-      body: JSON.stringify({ ...day, status: "check_in" }),
+      body: JSON.stringify({ ...day, status: "opening" }),
     });
     return rows[0] ?? null;
   }

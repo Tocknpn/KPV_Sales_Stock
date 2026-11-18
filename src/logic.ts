@@ -35,7 +35,7 @@ type ClosingInput = Pick<
   "opening_qty" | "stock_in" | "transfer_in" | "retail_sale" | "wholesale" | "transfer_out" | "destock" | "move"
 > & { stock_out_single?: number; move_qty?: number; withdraw?: number };
 
-// Same formula as the generated closing_qty column (migration 11).
+// Same formula as the generated closing_qty column (migration 17, which added withdraw).
 export function computeClosing(row: ClosingInput) {
   return (
     row.opening_qty + row.stock_in + row.transfer_in - row.transfer_out - row.move -
