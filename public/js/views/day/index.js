@@ -108,6 +108,8 @@ export async function mountDay(deskCard, date, hooks = {}, opts = {}) {
     problems: new Map(),
     saveState: "",
     closing: false,
+    // Task 6: the home card's "② Close day" opens the screen with this set; start the close flow here, then clear it.
+    autoClose: opts.step === "close",
     queue: null,
     ctx: null,
   };

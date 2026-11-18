@@ -1,7 +1,7 @@
 import { api } from "../api.js";
 import { state, branchName } from "../state.js";
 import { toast, openSheet, closeSheet, openActionSheet } from "../ui.js";
-import { fmtBaht, fmtInt, fmtDate, icon, statusPillClasses, escapeHtml, fmtClock, fmtLaosStamp, laosDateOf, flameIcon } from "../util.js";
+import { fmtBaht, fmtInt, fmtDate, icon, escapeHtml, fmtClock, fmtLaosStamp, laosDateOf, flameIcon } from "../util.js";
 import { t, tf, productName } from "../i18n.js";
 import { renderCalendar } from "../calendar.js";
 import { isAdmin } from "../session.js";
@@ -10,33 +10,12 @@ import { go, pathFor, backTo } from "../router.js";
 import { renderSkuPickerInto, openingRowsHtml, bindOpeningInputs } from "./sku-picker.js";
 import { skeletonCards, skeletonCalendar } from "../skeleton.js";
 import { skuSizeLabel } from "../sku-groups.js";
+import { caseSteps } from "../case-steps.js";
 
 function setStockDate(date) {
   state.stock.date = date;
   const label = document.getElementById("date-label");
   if (label) label.textContent = fmtDate(date);
-}
-
-function statusLabel(status) {
-  return (
-    {
-      not_started: t("stock.statusNotStarted"),
-      check_in: t("stock.statusCheckIn"),
-      final_stock: t("stock.statusFinalStock"),
-      done: t("stock.statusDone"),
-    }[status] ?? status
-  );
-}
-
-function actionLabel(status) {
-  return (
-    {
-      not_started: t("stock.actionCheckIn"),
-      check_in: t("stock.actionOpen"),
-      final_stock: t("stock.actionOpen"),
-      done: t("stock.statusDone"),
-    }[status] ?? status
-  );
 }
 
 // route.sub is a desk id when the URL names one case: /daily_stock/<deskId>?date=…&tab=…
@@ -54,7 +33,7 @@ export async function mountStock(route = {}) {
   if (!deskId) return;
   const card = currentCards.find((d) => d.desk_id === deskId);
   // Opening a case that was never checked in that day would check it in: show the cards instead.
-  if (card && card.status !== "not_started") await openDeskDetail(card, { fromRoute: true, tab: route.params?.tab });
+  if (card && card.status !== "not_started") await openDeskDetail(card, { fromRoute: true, tab: route.params?.tab, step: route.params?.step });
   else go(pathFor("stock"), { replace: true });
 }
 
@@ -220,9 +199,21 @@ export function unmountStock() {
   document.getElementById("fab-new-case")?.remove();
 }
 
-// A desk cannot start a new day while an earlier day is still not Done.
+// A desk cannot be worked while an earlier day is still not Done.
 function blockedDate(desk) {
-  return desk.status === "not_started" && desk.openEarlierDate ? desk.openEarlierDate : null;
+  return caseSteps(desk).goToDate;
+}
+
+const BADGE = {
+  alert: { icon: "⚠", cls: "bg-danger-bg text-danger", label: () => t("stock.statusOpening") },
+  pending: { icon: "⏳", cls: "bg-warning-bg text-warning", label: () => t("step.badgePending") },
+  done: { icon: "", cls: "bg-success-bg text-success", label: () => t("step.badgeDone") },
+};
+
+// One step button: the active step is the primary button; done and locked steps are grey and disabled.
+function stepButton(step, state, label) {
+  if (state === "active") return `<button data-step="${step}" class="btn-primary min-w-0 flex-1 px-2 py-2 text-xs">${label}</button>`;
+  return `<button data-step="${step}" disabled aria-disabled="true" class="btn-secondary min-w-0 flex-1 cursor-not-allowed bg-gray-100 px-2 py-2 text-xs text-gray-400">${label}${state === "done" ? " ✓" : ""}</button>`;
 }
 
 // The warning line under an overdue card; other tiers say nothing extra.
@@ -244,12 +235,14 @@ function renderCard(d) {
   const overdue = d.tier === "overdue";
   const streak = d.streak > 365 ? "365+" : d.streak;
   const blocked = blockedDate(d);
+  const steps = caseSteps(d);
+  const badge = BADGE[steps.badge];
   return `
-    <div class="card flex items-center gap-3 border-l-4 px-3 py-2.5 ${overdue ? "border-l-danger" : "border-l-transparent"}" data-card="${d.desk_id}" data-tier="${d.tier}">
+    <div class="card border-l-4 px-3 py-2.5 ${overdue ? "border-l-danger" : "border-l-transparent"}" data-card="${d.desk_id}" data-tier="${d.tier}">
       <div class="min-w-0 flex-1">
         <div class="flex items-center gap-2">
-          <span class="truncate text-sm font-extrabold text-gray-900">${escapeHtml(d.display_name)}</span>
-          <span class="status-pill shrink-0 ${statusPillClasses(d.status)}">${statusLabel(d.status)}</span>
+          <span class="min-w-0 truncate text-sm font-extrabold text-gray-900">${escapeHtml(d.display_name)}</span>
+          <span class="status-pill shrink-0 ${badge.cls}" data-badge="${steps.badge}">${badge.icon ? `${badge.icon} ` : ""}${badge.label()}</span>
         </div>
         <div class="mt-0.5 flex items-center gap-2 text-xs font-bold text-gray-800">
           <span>${fmtBaht(d.totalBaht)} Baht · ${fmtInt(d.totalPcs)} pcs</span>
@@ -265,9 +258,10 @@ function renderCard(d) {
         ${overdue ? `<p class="mt-0.5 text-[11px] font-bold leading-snug text-danger">⚠ ${escapeHtml(tierText(d))}</p>` : ""}
         ${blocked ? `<p class="mt-0.5 text-[11px] font-bold leading-snug text-warning">${tf("stock.finishFirst", { date: fmtDate(d.openEarlierDate) })}</p>` : ""}
       </div>
-      <button data-action="${d.desk_id}" class="btn-${d.status === "done" ? "secondary" : "primary"} shrink-0 px-3 py-2 text-xs">
-        ${blocked ? tf("stock.goToDate", { date: fmtDate(d.openEarlierDate) }) : actionLabel(d.status)}
-      </button>
+      <div class="mt-2 flex gap-2">
+        ${stepButton("checkIn", steps.checkIn, blocked ? tf("stock.goToDate", { date: fmtDate(blocked) }) : t("step.checkIn"))}
+        ${stepButton("close", steps.close, t("step.close"))}
+      </div>
     </div>`;
 }
 
@@ -282,7 +276,7 @@ function renderGrid(desks) {
   const root = document.getElementById("view-root");
   root.querySelectorAll("[data-card]").forEach((card) => {
     card.addEventListener("click", (e) => {
-      if (e.target.closest("[data-action]")) return;
+      if (e.target.closest("[data-step]")) return;
       const desk = currentCards.find((d) => d.desk_id === card.dataset.card);
       // Not started today has no opening-balance row to show yet (it's only
       // materialized on check-in), so tapping the card falls back to the
@@ -291,10 +285,12 @@ function renderGrid(desks) {
       else openOpeningBalanceSheet(desk);
     });
   });
-  root.querySelectorAll("[data-action]").forEach((btn) => {
+  root.querySelectorAll("[data-step]:not([disabled])").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const desk = currentCards.find((d) => d.desk_id === btn.dataset.action);
-      handleCardAction(desk);
+      const desk = currentCards.find((d) => d.desk_id === btn.closest("[data-card]").dataset.card);
+      // ① checks in (or opens the day, or jumps to the earlier open day); ② opens the day to close it.
+      if (btn.dataset.step === "close") openDeskDetail(desk, { step: "close" });
+      else handleCardAction(desk);
     });
   });
 }
@@ -376,11 +372,12 @@ export async function openDeskDay(deskId, date) {
   await window.switchView("stock", { sub: deskId, params: { date } });
 }
 
-async function openDeskDetail(deskCard, { fromRoute = false, tab } = {}) {
+async function openDeskDetail(deskCard, { fromRoute = false, tab, step } = {}) {
   if (deskCard.status === "not_started") return handleCardAction(deskCard);
-  if (!fromRoute) go(pathFor("stock", deskCard.desk_id, { date: state.stock.date }), { parent: pathFor("stock") });
+  const closeStep = step === "close" ? "close" : undefined;
+  if (!fromRoute) go(pathFor("stock", deskCard.desk_id, { date: state.stock.date, step: closeStep }), { parent: pathFor("stock") });
   hideFab();
-  await mountDay(deskCard, state.stock.date, dayHooks(deskCard), { tab: tab === "history" ? "history" : undefined });
+  await mountDay(deskCard, state.stock.date, dayHooks(deskCard), { tab: tab === "history" ? "history" : undefined, step: closeStep });
 }
 
 // What the day screen needs from this file: the SKU picker (shared with

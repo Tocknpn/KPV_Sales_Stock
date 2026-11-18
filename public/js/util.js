@@ -102,6 +102,8 @@ export function statusPillClasses(status) {
       return "bg-success-bg text-success";
     case "final_stock":
       return "bg-warning-bg text-warning";
+    case "opening":
+      return "bg-danger-bg text-danger";
     case "check_in":
       return "bg-brand-100 text-brand-700";
     case "not_started":

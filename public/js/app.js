@@ -74,7 +74,7 @@ function setActiveNav(view) {
 async function switchView(view, opts = {}, { fromRoute = false } = {}) {
   if (!views[view]) view = "stock";
   if (!fromRoute) {
-    const params = view === "stock" && opts.sub ? { date: opts.params?.date, tab: opts.params?.tab } : {};
+    const params = view === "stock" && opts.sub ? { date: opts.params?.date, tab: opts.params?.tab, step: opts.params?.step } : {};
     go(pathFor(view, opts.sub ?? null, params), { parent: opts.sub ? pathFor(view) : null });
   }
   if (isSheetOpen()) closeSheet({ fromHistory: true });

@@ -1,0 +1,11 @@
+// The two steps of a case's day as the home card shows them. Pure, so it is unit-tested.
+// card: { status, openEarlierDate }
+// Returns each step as "active" | "done" | "locked", the status icon, and the earlier
+// day to jump to when that day is still open (null otherwise).
+export function caseSteps(card) {
+  const { status, openEarlierDate } = card;
+  if (status === "done") return { checkIn: "done", close: "done", badge: "done", goToDate: null };
+  if (openEarlierDate) return { checkIn: "active", close: "locked", badge: "alert", goToDate: openEarlierDate };
+  if (status === "check_in" || status === "final_stock") return { checkIn: "done", close: "active", badge: "pending", goToDate: null };
+  return { checkIn: "active", close: "locked", badge: "alert", goToDate: null };
+}

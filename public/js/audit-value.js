@@ -5,6 +5,7 @@ import { fmtLaosStamp } from "./util.js";
 
 const STATUS_KEY = {
   not_started: "stock.statusNotStarted",
+  opening: "stock.statusOpening",
   check_in: "stock.statusCheckIn",
   final_stock: "stock.statusFinalStock",
   done: "stock.statusDone",

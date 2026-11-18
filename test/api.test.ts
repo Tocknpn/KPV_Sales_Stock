@@ -328,6 +328,9 @@ describe("admin reopen", () => {
     expect((await call(admin, "POST", `/stock/desk/${desk}/reopen`, { date: YESTERDAY, reason: "wrong count" })).status).toBe(200);
     expect((await detailOf(admin, desk, YESTERDAY)).status).toBe("opening");
     expect((await detailOf(admin, desk, TODAY)).status).toBe("opening");
+    // Today's card is in opening and still points at the earlier open day.
+    const card = (await call(admin, "GET", "/stock/desks")).json.desks.find((d: any) => d.desk_id === desk);
+    expect(card).toMatchObject({ status: "opening", openEarlierDate: YESTERDAY });
     expect((await checkIn(admin, desk, YESTERDAY)).status).toBe(200);
     // Two more sales were missed yesterday.
     await call(admin, "POST", `/stock/desk/${desk}/entries`, {
