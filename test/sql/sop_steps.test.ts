@@ -96,6 +96,20 @@ describe('desk_reopen_from', () => {
   });
 });
 
+describe('desk_reopen_from compare-and-set', () => {
+  it('a day that is not Done returns no rows and changes nothing', async () => {
+    await openDay(D1, 'check_in');
+    await openDay(D2, 'check_in');
+    await db.exec(`update daily_stock_ledger set counted_qty = 5, counted_note = 'n'`);
+    const r = await db.query<any>(`select * from desk_reopen_from('MM-D01', $1::date)`, [D1]);
+    expect(r.rows).toHaveLength(0);
+    const rows = (await db.query<any>(`select counted_qty, counted_note from daily_stock_ledger`)).rows;
+    for (const x of rows) { expect(x.counted_qty).toBe(5); expect(x.counted_note).toBe('n'); }
+    expect((await db.query<any>(`select status from desk_days order by ledger_date`)).rows.map((x: any) => x.status)).toEqual(['check_in', 'check_in']);
+    expect((await db.query<any>(`select * from desk_reopen_from('MM-D01', '2000-01-01'::date)`)).rows).toHaveLength(0);
+  });
+});
+
 describe('branch_velocity', () => {
   it('counts withdraw as sold, not destock', async () => {
     for (let i = 1; i <= 8; i++) {

@@ -179,13 +179,22 @@ grant execute on function branch_velocity(text, date, int) to service_role;
 
 -- Reopen a day and every later day of the desk: status back to 'opening', Done
 -- stamps and typed counts cleared. Status first, because ledger_guard_done
--- blocks ledger writes on a Done day. Returns the reopened dates.
+-- blocks ledger writes on a Done day. Returns the reopened dates. Compare-and-set:
+-- when the day at p_date is not Done (already reopened by someone else, or no
+-- such day) nothing changes and no rows come back.
 create or replace function desk_reopen_from(p_desk text, p_date date)
 returns setof date
 language plpgsql as $$
 declare
   v_dates date[];
+  v_status text;
 begin
+  select status into v_status from desk_days
+   where desk_id = p_desk and ledger_date = p_date for update;
+  if v_status is distinct from 'done' then
+    return;
+  end if;
+
   update desk_days
      set status = 'opening', done_by = null, done_at = null
    where desk_id = p_desk and ledger_date >= p_date;

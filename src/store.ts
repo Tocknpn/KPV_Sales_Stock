@@ -216,7 +216,8 @@ export interface Store {
   ledgerAdd(key: LedgerKey, field: "transfer_in" | "transfer_out" | "move", delta: number, actor: string | null): Promise<number | null>;
   // Reopens a desk's day and every later day: status back to `opening`, done
   // stamps and counts cleared, typed numbers kept. Returns the dates, ascending
-  // (the desk_reopen_from RPC).
+  // (the desk_reopen_from RPC). Compare-and-set: empty, changing nothing, when the
+  // day at `date` is not Done.
   reopenFrom(deskId: string, date: string): Promise<string[]>;
   // Atomic compare-and-set of several fields of one row (the ledger_apply RPC).
   applyLedgerChanges(key: LedgerKey, changes: LedgerChange[]): Promise<ApplyResult>;
@@ -554,6 +555,8 @@ export class DemoStore implements Store {
   }
   async reopenFrom(deskId: string, date: string) {
     this.guard();
+    // Compare-and-set like the SQL function: only a Done day at `date` reopens.
+    if (this.db.deskDays.find((d) => d.desk_id === deskId && d.ledger_date === date)?.status !== "done") return [];
     const days = this.db.deskDays.filter((d) => d.desk_id === deskId && d.ledger_date >= date).sort((a, b) => a.ledger_date.localeCompare(b.ledger_date));
     for (const row of days) {
       const before = { ...row };

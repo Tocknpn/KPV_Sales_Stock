@@ -122,4 +122,36 @@ describe("reopen cascade", () => {
     expect(log).toHaveLength(1);
     expect(log[0]).toMatchObject({ target: `${DESK}/${D3}`, detail: { reason: "audit me", dates: [D3, D2, D1] } });
   });
+
+  it("a second reopen is refused and does not clear a count typed since (sequential: NOT_DONE; racing: STALE)", async () => {
+    const manager = await asManager("B-MM");
+    expect((await reopen(manager, D3)).status).toBe(200);
+    ledgerRow(D2).counted_qty = 7;
+    const again = await reopen(manager, D3);
+    expect(again.status).toBe(409);
+    expect(again.json.code).toBe("NOT_DONE");
+    expect(ledgerRow(D2).counted_qty).toBe(7);
+  });
+
+  it("a reopen that loses the race after its check is STALE and clears nothing", async () => {
+    const manager = await asManager("B-MM");
+    const proto = Object.getPrototypeOf(getStore({ DEMO_DATE: TODAY } as any));
+    const original = proto.reopenFrom;
+    // Another request reopens between this one's NOT_DONE check and its write,
+    // then someone types a count.
+    proto.reopenFrom = async function (this: any, desk: string, date: string) {
+      proto.reopenFrom = original;
+      await original.call(this, desk, date);
+      ledgerRow(D2).counted_qty = 7;
+      return original.call(this, desk, date);
+    };
+    try {
+      const res = await reopen(manager, D3);
+      expect(res.status).toBe(409);
+      expect(res.json.code).toBe("STALE");
+      expect(ledgerRow(D2).counted_qty).toBe(7);
+    } finally {
+      proto.reopenFrom = original;
+    }
+  });
 });

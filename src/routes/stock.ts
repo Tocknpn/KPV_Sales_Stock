@@ -665,6 +665,7 @@ r.post("/stock/desk/:deskId/reopen", requireManager, async (c) => {
   const day = await getDay(store, desk.desk_id, date);
   if (!day || day.status !== "done") throw new HttpError(409, "Only a Done day can be reopened", "NOT_DONE");
   const dates = await store.reopenFrom(desk.desk_id, date);
+  if (dates.length === 0) throw new HttpError(409, "This desk was changed on another device — reload", "STALE");
   await audit(store, user, "desk_day.reopen", `${desk.desk_id}/${date}`, { reason, dates }, { branchId: desk.branch_id, deskId: desk.desk_id });
   return c.json({ ok: true });
 });
