@@ -166,7 +166,9 @@ export function renderRow(r, view) {
     <div class="grid items-stretch gap-1.5" style="grid-template-columns:${gridTemplate(mode)}">
       <div class="${bad ? "bg-danger-bg" : "bg-white"} sticky left-0 z-[1] flex min-w-0 flex-col justify-center rounded-xl border border-gray-200 px-2 py-1">
         <span class="line-clamp-2 break-words text-[13px] font-extrabold leading-tight text-gray-900">${escapeHtml(skuName(r))}</span>
-        <span class="truncate text-[10px] leading-tight text-gray-600">${escapeHtml(sub || r.sku_id)}</span>
+        <span class="flex min-w-0 items-center gap-1 text-[10px] leading-tight text-gray-600">${
+          r.added_today ? `<span class="shrink-0 rounded-full bg-brand-600 px-1.5 font-extrabold leading-4 text-white">${t("day.newBadge")}</span>` : ""
+        }<span class="min-w-0 truncate">${escapeHtml(sub || r.sku_id)}</span></span>
         ${runwayLine(r)}
         ${low ? runwayChip(r) : ""}
       </div>

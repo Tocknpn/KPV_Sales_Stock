@@ -354,20 +354,26 @@ function renderNotices() {
   el.innerHTML = parts.join("");
 }
 
+// SKUs added today (not carried from the previous day) sit in their own
+// section on top, so staff find them again at close among up to 50 rows.
+const NEW_KEY = "new";
+const sectionKeyOf = (r) => (r.added_today ? NEW_KEY : `t:${groupKeyOf(r)}`);
+
 // Rows grouped by Type (Lao label, in the Types' order); sizes by grams.
 function groupRows() {
   const groups = new Map();
   const order = new Map();
   for (const r of S.rows) {
-    const key = groupKeyOf(r);
+    const key = sectionKeyOf(r);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(r);
-    order.set(key, Math.min(order.get(key) ?? Infinity, key ? r.type_order ?? 999 : Infinity));
+    const rank = key === NEW_KEY ? -Infinity : groupKeyOf(r) ? r.type_order ?? 999 : Infinity;
+    order.set(key, Math.min(order.get(key) ?? Infinity, rank));
   }
   for (const list of groups.values()) {
     list.sort((a, b) => (a.gram_weight_each ?? 0) - (b.gram_weight_each ?? 0) || skuName(a).localeCompare(skuName(b)));
   }
-  return [...groups.entries()].sort(([a], [b]) => order.get(a) - order.get(b) || (a || "￿").localeCompare(b || "￿"));
+  return [...groups.entries()].sort(([a], [b]) => order.get(a) - order.get(b) || (a === "t:" ? "￿" : a).localeCompare(b === "t:" ? "￿" : b));
 }
 
 function groupMeta(list) {
@@ -399,7 +405,7 @@ function renderList() {
       ([key, rows]) => `
       <section data-group="${escapeHtml(key)}">
         <div class="sticky left-0 flex w-fit max-w-[calc(100vw-4rem)] items-center gap-2 px-2 pb-1 pt-2.5 text-xs">
-          <span class="min-w-0 truncate font-extrabold text-gray-900">${escapeHtml(key || t("day.groupOther"))}</span>
+          <span class="min-w-0 truncate font-extrabold ${key === NEW_KEY ? "text-brand-700" : "text-gray-900"}">${escapeHtml(key === NEW_KEY ? t("day.addedToday") : key.slice(2) || t("day.groupOther"))}</span>
           <span data-group-meta class="shrink-0 font-semibold tabular-nums text-gray-500">${groupMeta(rows)}</span>
         </div>
         <div class="flex flex-col gap-1">${rows.map(rowHtml).join("")}</div>
@@ -428,8 +434,8 @@ function refreshRow(sku, opts) {
   const el = document.querySelector(`#day-list [data-sku="${CSS.escape(sku)}"]`);
   const row = S.rows.find((r) => r.sku_id === sku);
   if (el && row) patchRow(el, row, rowView(row), opts);
-  const group = row && document.querySelector(`#day-list [data-group="${CSS.escape(groupKeyOf(row))}"] [data-group-meta]`);
-  if (group) group.textContent = groupMeta(S.rows.filter((r) => groupKeyOf(r) === groupKeyOf(row)));
+  const group = row && document.querySelector(`#day-list [data-group="${CSS.escape(sectionKeyOf(row))}"] [data-group-meta]`);
+  if (group) group.textContent = groupMeta(S.rows.filter((r) => sectionKeyOf(r) === sectionKeyOf(row)));
 }
 
 function renderFooter() {
@@ -568,9 +574,11 @@ async function addSkus() {
       const { ask, field } = addPlan(skus, opening, screen.detail.carriedSkus);
       const qtys = ask.length ? await hooks.askOpeningQtys(ask, meta, opening ? {} : { label: t("day.stockInQty") }) : new Map();
       if (qtys === null) return;
+      let ok = false;
       try {
         await api.addDeskSkus(deskCard.desk_id, { date, items: addItems(skus, field, qtys) });
         toast(tf("picker.addedN", { n: skus.length }), "success");
+        ok = true;
       } catch (err) {
         // Another device added it first (SKU_ALREADY_ON_DAY), or the day moved
         // on: say why, then show what is saved.
@@ -578,8 +586,21 @@ async function addSkus() {
       } finally {
         await hooks.reload?.();
       }
+      if (ok) showAdded(skus.map((s) => s.sku_id));
     }
   );
+}
+
+// Takes staff straight to the first row they just added: scrolled into view,
+// flashed once, its first open input focused.
+function showAdded(ids) {
+  const el = ids.map((id) => document.querySelector(`#day-list [data-sku="${CSS.escape(id)}"]`)).find(Boolean);
+  if (!el) return;
+  el.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  el.classList.remove("card-flash");
+  void el.offsetWidth;
+  el.classList.add("card-flash");
+  el.querySelector("input:not([disabled]):not([readonly])")?.focus({ preventScroll: true });
 }
 
 // ✓ Confirm check-in: the opening review is done; selling may start.

@@ -28,15 +28,17 @@ const report = (label: string) => console.log(`[round trips] ${label}: ${all.len
 
 describe("round trips", () => {
   // Before: 24 calls in 5 stages. The 30 s shared cache (Supabase only) also
-  // skips skus, skuTypes, skuWeights, branches and config when warm.
-  it("GET desk detail: at most 20 calls (15 with a warm shared cache) in at most 3 serial stages", async () => {
+  // skips skus, skuTypes, skuWeights, branches and config when warm. The
+  // previous day's ledger (which rows were added today) is read on every day,
+  // in the last stage, so it adds a call but no stage.
+  it("GET desk detail: at most 21 calls (16 with a warm shared cache) in at most 3 serial stages", async () => {
     const staff = await asStaff("B-MM");
     const res = await call(staff, "GET", `/stock/desk/MM-D01?date=${TODAY}`);
     expect(res.status).toBe(200);
     report("desk detail (today)");
-    expect(all.length).toBeLessThanOrEqual(20);
+    expect(all.length).toBeLessThanOrEqual(21);
     const shared = new Set(["skus", "skuTypes", "skuWeights", "branches", "config"]);
-    expect(all.filter((c) => !shared.has(c.method)).length).toBeLessThanOrEqual(15);
+    expect(all.filter((c) => !shared.has(c.method)).length).toBeLessThanOrEqual(16);
     expect(stagesOf(all)).toBeLessThanOrEqual(3);
   });
 

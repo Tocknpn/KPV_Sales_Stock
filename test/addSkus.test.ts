@@ -104,6 +104,21 @@ describe("add SKUs in a batch", () => {
     expect((await add(staff, "MM-D01", many)).json.code).toBe("BAD_SKU");
   });
 
+  it("flags rows added today (not carried) as added_today", async () => {
+    const staff = await asStaff("B-MM");
+    expect((await add(staff, "MM-D01", [{ sku_id: "SP-904" }])).status).toBe(200);
+    const detail = await detailOf(staff, "MM-D01");
+    expect(rowOf(detail, "SP-904").added_today).toBe(true);
+    expect(rowOf(detail, "GB-001").added_today).toBe(false);
+  });
+
+  it("flags nothing on a case's first day", async () => {
+    const staff = await asStaff("B-MM");
+    const deskId = await newCase(staff);
+    expect((await add(staff, deskId, [{ sku_id: "SP-904", opening_qty: 1 }])).status).toBe(200);
+    expect((await detailOf(staff, deskId)).rows.every((r: any) => r.added_today === false)).toBe(true);
+  });
+
   it("a SKU already on the case is neither added nor restored", async () => {
     const staff = await asStaff("B-MM");
     const res = await add(staff, "MM-D01", [{ sku_id: "GB-001" }]);

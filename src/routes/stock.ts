@@ -449,17 +449,27 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
     date < today ? store.goldPriceHistory(date, date) : Promise.resolve(null),
   ]);
   const day = days[0];
-  const [moves, statuses, carried] = await Promise.all([
+  const [moves, statuses, carriedAll] = await Promise.all([
     historyMoves(store, deskId, date, outgoing, incomingToday, staffAccounts, skus, allDesks),
     loadBranchStatuses(store, [desk.branch_id], today, { skus, rules, config, desks: allDesks }),
-    // In the opening step a SKU the day did not carry (added today, or every row
-    // on a case's first day) still takes a typed opening.
-    day?.status === "opening" ? carriedFrom(store, deskId, previousDays[0]) : Promise.resolve(undefined),
+    carriedFrom(store, deskId, previousDays[0]),
   ]);
+  // In the opening step a SKU the day did not carry (added today, or every row
+  // on a case's first day) still takes a typed opening.
+  const carried = day?.status === "opening" ? carriedAll : undefined;
   const gold = resolveGoldPrice(goldRow, config, today);
   const lakPerBaht = pastPrices ? priceOn(date, pastPrices, gold.lakPerBaht) : gold.lakPerBaht;
   const built = buildDeskDetail(desk, branches.find((b) => b.branch_id === desk.branch_id), day, skus, ledgerRows, staffAccounts, config, weights, statuses, lakPerBaht, types);
-  const detail = { ...built, rows: built.rows.map((row) => ({ ...row, opening_editable: carried !== undefined && !carried.has(row.sku_id) })) };
+  // added_today: on the day but not carried from the previous day. A case's
+  // first day carries nothing, so nothing there is flagged.
+  const detail = {
+    ...built,
+    rows: built.rows.map((row) => ({
+      ...row,
+      opening_editable: carried !== undefined && !carried.has(row.sku_id),
+      added_today: carriedAll.size > 0 && !carriedAll.has(row.sku_id),
+    })),
+  };
   const skuName = (id: string) => skus.find((s) => s.sku_id === id)?.name_en ?? id;
   const deskName = (id: string) => {
     const d = allDesks.find((x) => x.desk_id === id);
