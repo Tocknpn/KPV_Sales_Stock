@@ -110,8 +110,9 @@ document.getElementById("bottom-nav").addEventListener("click", (e) => {
 
 async function loadMetaAndEnter() {
   try {
-    await loadDataMeta();
-    state.meta = await api.meta();
+    // Independent reads: the data-mode banner and the session meta load together.
+    const [, meta] = await Promise.all([loadDataMeta(), api.meta()]);
+    state.meta = meta;
     state.user = state.meta.user;
     state.stock.date = state.meta.today;
     state.stock.branch = state.meta.branches[0]?.branch_id ?? null;

@@ -245,3 +245,24 @@ describe("check-in opening step", () => {
     expect(conf.json.code).toBe("EARLIER_DAY_OPEN");
   });
 });
+
+describe("check-in returns the day detail", () => {
+  it("the response carries the same detail as GET, plus ok", async () => {
+    const staff = await asStaff("B-MM");
+    const res = await checkin(staff);
+    expect(res.status).toBe(200);
+    expect(res.json.ok).toBe(true);
+    expect(res.json.alreadyCheckedIn).toBeUndefined();
+    expect(res.json.detail).toEqual(await detailOf(staff));
+    expect(res.json.detail.status).toBe("opening");
+  });
+
+  it("a second check-in says alreadyCheckedIn and still carries the detail", async () => {
+    const staff = await asStaff("B-MM");
+    await checkin(staff);
+    const res = await checkin(staff);
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ ok: true, alreadyCheckedIn: true });
+    expect(res.json.detail).toEqual(await detailOf(staff));
+  });
+});

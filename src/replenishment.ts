@@ -253,7 +253,15 @@ export function buildBranchRows(input: {
   );
 }
 
-export async function loadBranchRows(store: Store, branchId: string, today: string, shared?: { skus: MasterSku[]; rules: ReplenishmentRule[]; config: SystemConfig; desks: Desk[] }): Promise<ReplenishmentRow[]> {
+// The lists every branch's rows need; a caller that already holds them passes them in.
+export type BranchShared = { skus: MasterSku[]; rules: ReplenishmentRule[]; config: SystemConfig; desks: Desk[] };
+
+export async function loadBranchRows(store: Store, branchId: string, today: string, shared?: BranchShared): Promise<ReplenishmentRow[]> {
+  return (await loadBranch(store, branchId, today, shared)).rows;
+}
+
+// The rows plus the ledger rows of each case's latest day they were built from.
+async function loadBranch(store: Store, branchId: string, today: string, shared?: BranchShared) {
   const [skus, rules, config, desks] = shared
     ? [shared.skus, shared.rules, shared.config, shared.desks]
     : await Promise.all([store.skus(), store.rules(), store.config(), store.desks()]);
@@ -265,7 +273,7 @@ export async function loadBranchRows(store: Store, branchId: string, today: stri
     store.branchSkus({ branchId }),
   ]);
   const carried = new Set(branchSkus.filter((b) => b.carried).map((b) => b.sku_id));
-  return buildBranchRows({ branchId, skus, rules, config, desks, latestDays, latestRows, inTransit, velocity, carried });
+  return { rows: buildBranchRows({ branchId, skus, rules, config, desks, latestDays, latestRows, inTransit, velocity, carried }), latestRows };
 }
 
 // heldBySku for one branch, loaded from the Store (the carries switch refuses
@@ -281,14 +289,22 @@ export async function loadHeld(store: Store, branchId: string) {
 }
 
 // Status of every (branch, SKU) pair, for the desk cards and the dashboard.
-export async function loadBranchStatuses(store: Store, branchIds: string[], today: string): Promise<Map<string, ReplenishmentRow>> {
-  const [skus, rules, config, desks] = await Promise.all([store.skus(), store.rules(), store.config(), store.desks()]);
-  const out = new Map<string, ReplenishmentRow>();
-  const perBranch = await Promise.all(branchIds.map((b) => loadBranchRows(store, b, today, { skus, rules, config, desks })));
+export async function loadBranchStatuses(store: Store, branchIds: string[], today: string, shared?: BranchShared): Promise<Map<string, ReplenishmentRow>> {
+  return (await loadBranchData(store, branchIds, today, shared)).statuses;
+}
+
+// The statuses plus every branch's latest-day ledger rows (ledgerLatest per
+// branch), so a caller that also needs those does not read them again.
+export async function loadBranchData(store: Store, branchIds: string[], today: string, shared?: BranchShared) {
+  const lists = shared ?? (await Promise.all([store.skus(), store.rules(), store.config(), store.desks()]).then(([skus, rules, config, desks]) => ({ skus, rules, config, desks })));
+  const statuses = new Map<string, ReplenishmentRow>();
+  const latestRows: LedgerRow[] = [];
+  const perBranch = await Promise.all(branchIds.map((b) => loadBranch(store, b, today, lists)));
   branchIds.forEach((b, i) => {
-    for (const row of perBranch[i]) out.set(statusKey(b, row.sku_id), row);
+    for (const row of perBranch[i].rows) statuses.set(statusKey(b, row.sku_id), row);
+    latestRows.push(...perBranch[i].latestRows);
   });
-  return out;
+  return { statuses, latestRows };
 }
 
 export const statusKey = (branchId: string, skuId: string) => `${branchId}|${skuId}`;

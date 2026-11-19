@@ -5,15 +5,33 @@ import type { Context } from "hono";
 import type { Desk, DeskDay, Env, SessionUser } from "./types";
 import { getStore, type Store } from "./store";
 import { assertBranchAccess } from "./auth";
-import { isValidDate } from "./time";
+import { isLive, isValidDate } from "./time";
+import { cachedStore } from "./cachedStore";
+import { dataMode } from "./dataMode";
 
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser } };
 export type Ctx = Context<AppEnv>;
 
+// Tests only: wraps the raw store each request uses (to count its calls).
+export const storeTestHooks: { wrap?: (store: Store) => Store } = {};
+
+// One CachedStore per request (and acting user), so repeated reads of the
+// small lists within a request hit the database once.
+const requestStores = new WeakMap<Ctx, { actorId: string | undefined; store: Store }>();
+
 // The store for this request: every write is attributed to the logged-in user.
+// The 30 s cross-request cache is for the Supabase store only; the in-memory
+// demo store (and the tests) get the per-request memo alone.
 export function storeFor(c: Ctx): Store {
   const user = c.get("user");
-  return getStore(c.env, user ? { id: user.accountId } : undefined);
+  const actorId = user?.accountId;
+  const known = requestStores.get(c);
+  if (known && known.actorId === actorId) return known.store;
+  const raw = getStore(c.env, actorId ? { id: actorId } : undefined);
+  const inner = storeTestHooks.wrap ? storeTestHooks.wrap(raw) : raw;
+  const store = cachedStore(inner, isLive(c.env) ? { sharedKey: `${dataMode(c.env)}|${c.env.SUPABASE_URL}` } : {});
+  requestStores.set(c, { actorId, store });
+  return store;
 }
 
 export function newRouter() {

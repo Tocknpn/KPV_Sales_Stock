@@ -176,6 +176,8 @@ export interface Store {
   createDesk(input: NewDesk): Promise<Desk>;
 
   staffAccounts(): Promise<StaffAccount[]>;
+  // One account by id (null when there is none): the per-request session check.
+  staffAccount(id: string): Promise<StaffAccount | null>;
   // Seed vs real row counts per table (the kpv_seed_counts() RPC).
   seedCounts(): Promise<SeedCount[]>;
   createStaffAccount(account: NewStaffAccount): Promise<StaffAccount>;
@@ -408,6 +410,9 @@ export class DemoStore implements Store {
   async staffAccounts() {
     return this.db.staffAccounts;
   }
+  async staffAccount(id: string) {
+    return this.db.staffAccounts.find((a) => a.id === id) ?? null;
+  }
   async createStaffAccount(account: NewStaffAccount) {
     this.guard();
     const row: StaffAccount = {
@@ -513,6 +518,7 @@ export class DemoStore implements Store {
       if (filter.deskId && d.desk_id !== filter.deskId) return false;
       if (filter.status && d.status !== filter.status) return false;
       if (filter.notStatus && d.status === filter.notStatus) return false;
+      if (filter.pairs && !filter.pairs.some((p) => p.deskId === d.desk_id && p.date === d.ledger_date)) return false;
       return true;
     });
     const dir = filter.order === "desc" ? -1 : 1;
@@ -1295,6 +1301,10 @@ class SupabaseStore implements Store {
   }
   async staffAccounts() {
     return this.rest<StaffAccount[]>("staff_accounts?select=*&order=created_at");
+  }
+  async staffAccount(id: string) {
+    const [row] = await this.rest<StaffAccount[]>(`staff_accounts?id=eq.${enc(id)}&select=*`);
+    return row ?? null;
   }
   async createStaffAccount(account: NewStaffAccount) {
     const [row] = await this.rest<StaffAccount[]>("staff_accounts", { method: "POST", body: JSON.stringify(account) });

@@ -148,9 +148,9 @@ export async function requireAuth(c: Context<{ Bindings: Env; Variables: { user:
   const payload = await verifyToken(token, authSecret(c.env));
   if (!payload) return c.json({ error: "Session expired, please log in again" }, 401);
 
-  const store = getStore(c.env);
-  const accounts = await store.staffAccounts();
-  const account = accounts.find((a) => a.id === payload.sub);
+  // One account, read fresh on every request: a lockout, deactivation or
+  // logout (token_version bump) takes effect at once.
+  const account = await getStore(c.env).staffAccount(payload.sub);
   if (!account || !account.active || account.token_version !== payload.tokenVersion || seedBlocked(c.env, account)) {
     return c.json({ error: "Session expired, please log in again" }, 401);
   }

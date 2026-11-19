@@ -15,7 +15,7 @@ r.get("/meta", async (c) => {
   const payload = token ? await verifyToken(token, authSecret(c.env)) : null;
   if (!payload) return c.json(body);
   const store = getStore(c.env);
-  const account = (await store.staffAccounts()).find((a) => a.id === payload.sub);
+  const account = await store.staffAccount(payload.sub);
   if (account && account.active && account.token_version === payload.tokenVersion && account.role === "admin") {
     body.seedRows = (await store.seedCounts()).reduce((sum, row) => sum + Number(row.seed_rows), 0);
   }

@@ -7,7 +7,7 @@ import type { Store, LedgerRowPatch, NewLedgerRow, LedgerChange, LedgerChangeFie
 import { requireManager, assertBranchAccess, isManagerOf } from "../auth";
 import { addDays, businessDate, datesInMonth, isValidMonth, laosDate } from "../time";
 import { buildDayStatus } from "../dayStatus";
-import { loadBranchStatuses } from "../replenishment";
+import { loadBranchData, loadBranchStatuses } from "../replenishment";
 import { resolveGoldPrice, priceOn } from "../goldPrice";
 import { buildCaseHistory } from "../caseHistory";
 import { bahtOf, valueLak, buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, computeClosing, parseQty, stepFields, validateDeskDay } from "../logic";
@@ -72,6 +72,11 @@ async function planCarry(store: Store, from: DeskDay, toDate: string, actor: str
 // cannot be typed. A case's first day has no previous day, so none are carried.
 async function carriedSkus(store: Store, deskId: string, date: string): Promise<Set<string>> {
   const [previous] = await store.deskDays({ deskId, before: date, order: "desc", limit: 1 });
+  return carriedFrom(store, deskId, previous);
+}
+
+// The same, for a caller that already read the case's previous day.
+async function carriedFrom(store: Store, deskId: string, previous: DeskDay | undefined): Promise<Set<string>> {
   if (!previous) return new Set();
   const rows = await store.ledger({ deskId, date: previous.ledger_date });
   return new Set(rows.filter((row) => !row.excluded).map((row) => row.sku_id));
@@ -142,7 +147,7 @@ r.get("/stock/desks", async (c) => {
   const today = businessDate(c.env);
   const date = requireDate(c.req.query("date"), today);
   const branchId = scopeBranch(user, c.req.query("branchId") || undefined);
-  const [desks, branches, skus, days, ledgerRows, staffAccounts, config, openEarlier, history, closed, goldRow] = await Promise.all([
+  const [desks, branches, skus, days, ledgerRows, staffAccounts, config, openEarlier, history, closed, goldRow, rules] = await Promise.all([
     store.desks(),
     store.branches(),
     store.skus(),
@@ -155,9 +160,12 @@ r.get("/stock/desks", async (c) => {
     store.deskDays({ branchId, from: addDays(today, -400), to: today }),
     store.closedDays({ branchId, from: addDays(today, -400), to: today }),
     store.goldPrice(),
+    store.rules(),
   ]);
   const scopedDesks = branchId ? desks.filter((d) => d.branch_id === branchId) : desks;
-  const statuses = await loadBranchStatuses(store, [...new Set(scopedDesks.map((d) => d.branch_id))], today);
+  // The statuses read each branch's latest-day ledger rows; they also give the
+  // "carried" rows below, so ledgerLatest is not read a second time.
+  const { statuses, latestRows } = await loadBranchData(store, [...new Set(scopedDesks.map((d) => d.branch_id))], today, { skus, rules, config, desks });
   // Earliest unfinished earlier day per desk — check-in is blocked until it is closed.
   const blockedBy = new Map<string, string>();
   for (const d of openEarlier) if (!blockedBy.has(d.desk_id)) blockedBy.set(d.desk_id, d.ledger_date);
@@ -174,7 +182,7 @@ r.get("/stock/desks", async (c) => {
   const carried = new Map<string, { rows: LedgerRow[]; status: DeskDay["status"] | undefined }>();
   const withDay = new Set(days.map((d) => d.desk_id));
   if (scopedDesks.some((d) => !withDay.has(d.desk_id))) {
-    for (const r of await store.ledgerLatest({ branchId })) {
+    for (const r of latestRows) {
       if (withDay.has(r.desk_id) || r.ledger_date >= date) continue;
       const entry = carried.get(r.desk_id) ?? {
         rows: [],
@@ -361,9 +369,12 @@ r.get("/desks/:deskId/history", async (c) => {
 // The same-branch moves touching a case on a date, one item per ticket, for the
 // History tab. canUndo mirrors what POST /moves/:ticketId/undo will accept: the
 // ticket is not undone, is not itself an undo, and neither day is Done.
-async function historyMoves(store: Store, deskId: string, date: string, outgoing: Transfer[], staffAccounts: StaffAccount[], skus: MasterSku[], allDesks: Desk[]) {
-  const incomingToday = await store.transfers({ toDeskId: deskId, sentDate: date });
+// `outgoing` / `incomingToday` are the case's transfers sent from / to it on that
+// date. No move ticket (the usual case): nothing is read. Otherwise one
+// deskDays read gives the day status of every case involved.
+export async function historyMoves(store: Store, deskId: string, date: string, outgoing: Transfer[], incomingToday: Transfer[], staffAccounts: StaffAccount[], skus: MasterSku[], allDesks: Desk[]) {
   const rows = [...outgoing, ...incomingToday].filter((t) => t.kind === "move" && t.ticket_id && t.status !== "cancelled");
+  if (rows.length === 0) return [];
   const tickets = new Map<string, Transfer[]>();
   for (const t of rows) {
     const list = tickets.get(t.ticket_id!) ?? [];
@@ -371,7 +382,9 @@ async function historyMoves(store: Store, deskId: string, date: string, outgoing
     tickets.set(t.ticket_id!, list);
   }
   const reversedIds = new Set(rows.map((t) => t.reverses_id).filter(Boolean));
-  const statusOf = async (id: string) => (await store.deskDays({ deskId: id, date, limit: 1 }))[0]?.status;
+  const involved = [...new Set([...tickets.values()].flatMap(([first]) => [first.from_desk_id, first.to_desk_id]))];
+  const statusByDesk = new Map((await store.deskDays({ pairs: involved.map((id) => ({ deskId: id, date })) })).map((d) => [d.desk_id, d.status]));
+  const statusOf = (id: string) => statusByDesk.get(id);
   const deskName = (id: string) => {
     const d = allDesks.find((x) => x.desk_id === id);
     return d ? `${d.desk_id} · ${d.display_name}` : id;
@@ -381,7 +394,7 @@ async function historyMoves(store: Store, deskId: string, date: string, outgoing
     const first = lines[0];
     const reversal = lines.some((t) => t.reverses_id);
     const reversed = lines.some((t) => reversedIds.has(t.id));
-    const open = (await statusOf(first.from_desk_id)) !== "done" && (await statusOf(first.to_desk_id)) !== "done";
+    const open = statusOf(first.from_desk_id) !== "done" && statusOf(first.to_desk_id) !== "done";
     out.push({
       ticketId,
       created_at: lines.reduce((m, t) => (t.created_at < m ? t.created_at : m), first.created_at),
@@ -401,8 +414,12 @@ async function historyMoves(store: Store, deskId: string, date: string, outgoing
 }
 
 async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: string, date: string) {
+  // Three serial stages: the desk (and the access check), then every read that
+  // needs only the desk and date, then what depends on those (the branch
+  // statuses, the move tickets' day statuses, the carried SKUs).
   const desk = await requireDesk(store, user, deskId);
-  const [branches, skus, days, ledgerRows, staffAccounts, weights, config, earlier, incoming, outgoing, allDesks, goldRow, types] = await Promise.all([
+  const today = businessDate(c.env);
+  const [branches, skus, days, ledgerRows, staffAccounts, weights, config, previousDays, incoming, outgoing, incomingToday, allDesks, goldRow, types, rules, pastPrices] = await Promise.all([
     store.branches(),
     store.skus(),
     store.deskDays({ deskId, date, limit: 1 }),
@@ -410,24 +427,30 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
     store.staffAccounts(),
     store.skuWeights(),
     store.config(),
-    store.deskDays({ deskId, before: date, limit: 1 }),
+    // The case's latest earlier day: none = its first day; in the opening step
+    // its rows are the SKUs this day carries.
+    store.deskDays({ deskId, before: date, order: "desc", limit: 1 }),
     store.transfers({ toDeskId: deskId, status: "in_transit" }),
     store.transfers({ fromDeskId: deskId, sentDate: date }),
+    store.transfers({ toDeskId: deskId, sentDate: date }),
     store.desks(),
     store.goldPrice(),
     store.skuTypes(),
+    store.rules(),
+    // A past day is valued at the price in force that day; today at the live price.
+    date < today ? store.goldPriceHistory(date, date) : Promise.resolve(null),
   ]);
-  const moves = await historyMoves(store, deskId, date, outgoing, staffAccounts, skus, allDesks);
   const day = days[0];
-  const statuses = await loadBranchStatuses(store, [desk.branch_id], businessDate(c.env));
-  const today = businessDate(c.env);
+  const [moves, statuses, carried] = await Promise.all([
+    historyMoves(store, deskId, date, outgoing, incomingToday, staffAccounts, skus, allDesks),
+    loadBranchStatuses(store, [desk.branch_id], today, { skus, rules, config, desks: allDesks }),
+    // In the opening step a SKU the day did not carry (added today, or every row
+    // on a case's first day) still takes a typed opening.
+    day?.status === "opening" ? carriedFrom(store, deskId, previousDays[0]) : Promise.resolve(undefined),
+  ]);
   const gold = resolveGoldPrice(goldRow, config, today);
-  // A past day is valued at the price in force that day; today at the live price.
-  const lakPerBaht = date < today ? priceOn(date, await store.goldPriceHistory(date, date), gold.lakPerBaht) : gold.lakPerBaht;
+  const lakPerBaht = pastPrices ? priceOn(date, pastPrices, gold.lakPerBaht) : gold.lakPerBaht;
   const built = buildDeskDetail(desk, branches.find((b) => b.branch_id === desk.branch_id), day, skus, ledgerRows, staffAccounts, config, weights, statuses, lakPerBaht, types);
-  // In the opening step a SKU the day did not carry (added today, or every row
-  // on a case's first day) still takes a typed opening.
-  const carried = day?.status === "opening" ? await carriedSkus(store, deskId, date) : undefined;
   const detail = { ...built, rows: built.rows.map((row) => ({ ...row, opening_editable: carried !== undefined && !carried.has(row.sku_id) })) };
   const skuName = (id: string) => skus.find((s) => s.sku_id === id)?.name_en ?? id;
   const deskName = (id: string) => {
@@ -439,7 +462,7 @@ async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: strin
     date,
     today: businessDate(c.env),
     // The very first day of a desk: starting stock may still be typed in.
-    isFirstDay: Boolean(day) && earlier.length === 0,
+    isFirstDay: Boolean(day) && previousDays.length === 0,
     // In the opening step: the SKUs the day carries from its previous day. Their
     // opening is locked, so the add flow restores a removed one without asking
     // for an opening.
@@ -476,14 +499,15 @@ r.get("/stock/desk/:deskId", async (c) => {
 export async function checkInDesk(store: Store, user: SessionUser, desk: Desk, date: string, today: string): Promise<"created" | "exists"> {
   if (!desk.active) throw new HttpError(409, "This desk is not active", "DESK_INACTIVE");
 
-  if (await getDay(store, desk.desk_id, date)) return "exists";
-  assertDateWritable(user, date, today, undefined);
-
-  const [openEarlier, later, previous] = await Promise.all([
+  // Read together, checked in order: an existing day wins over the date rule.
+  const [existing, openEarlier, later, previous] = await Promise.all([
+    getDay(store, desk.desk_id, date),
     store.deskDays({ deskId: desk.desk_id, before: date, notStatus: "done", order: "asc", limit: 1 }),
     store.deskDays({ deskId: desk.desk_id, after: date, order: "asc", limit: 1 }),
     store.deskDays({ deskId: desk.desk_id, before: date, order: "desc", limit: 1 }),
   ]);
+  if (existing) return "exists";
+  assertDateWritable(user, date, today, undefined);
   if (openEarlier[0]) {
     throw new HttpError(409, `Finish ${openEarlier[0].ledger_date} first — that day is not Done yet`, "EARLIER_DAY_OPEN", {
       openDate: openEarlier[0].ledger_date,
@@ -513,7 +537,10 @@ r.post("/stock/desk/:deskId/checkin", async (c) => {
   const today = businessDate(c.env);
   const date = requireDate(body.date, today);
   const desk = await requireDesk(store, user, c.req.param("deskId"));
-  return c.json((await checkInDesk(store, user, desk, date, today)) === "exists" ? { ok: true, alreadyCheckedIn: true } : { ok: true });
+  const result = await checkInDesk(store, user, desk, date, today);
+  // The day as GET /stock/desk/:id returns it, so the screen opens without another trip.
+  const detail = await deskDetail(c, store, user, desk.desk_id, date);
+  return c.json(result === "exists" ? { ok: true, alreadyCheckedIn: true, detail } : { ok: true, detail });
 });
 
 // ---------------------------------------------------------------------------
