@@ -4,6 +4,7 @@
 // is supabase/seed_mock_data.sql (hand-written, tagged is_seed).
 import type {
   BranchSku,
+  StaffMainCase,
   Branch,
   Desk,
   MasterSku,
@@ -43,6 +44,7 @@ export interface DemoData {
   assignments: DeskAssignment[];
   rules: ReplenishmentRule[];
   branchSkus: BranchSku[];
+  mainCases: StaffMainCase[];
 }
 
 export const DEMO_ADMIN_ID = "11111111-0000-0000-0000-000000000001";
@@ -189,13 +191,13 @@ export function buildDemoData(today: string): DemoData {
   const skuTypes: SkuType[] = Object.values(T);
 
   const skuWeights: SkuWeight[] = [
-    { weight_id: "BAHT_025", name_en: "0.25 Baht", gram_value: 3.811, active: true, sort_order: 1 },
-    { weight_id: "BAHT_05", name_en: "0.5 Baht", gram_value: 7.622, active: true, sort_order: 2 },
-    { weight_id: "BAHT_1", name_en: "1 Baht", gram_value: 15.244, active: true, sort_order: 3 },
-    { weight_id: "BAHT_2", name_en: "2 Baht", gram_value: 30.488, active: true, sort_order: 4 },
-    { weight_id: "G_1", name_en: "1g", gram_value: 1, active: true, sort_order: 5 },
-    { weight_id: "G_3_75", name_en: "3.75g", gram_value: 3.75, active: true, sort_order: 6 },
-    { weight_id: "KG_1", name_en: "1kg", gram_value: 1000, active: true, sort_order: 7 },
+    { weight_id: "BAHT_025", name_en: "1 ສະຫຼຶງ", qty: 1, unit: "ສະຫຼຶງ", gram_value: 3.811, active: true, sort_order: 1 },
+    { weight_id: "BAHT_05", name_en: "2 ສະຫຼຶງ", qty: 2, unit: "ສະຫຼຶງ", gram_value: 7.622, active: true, sort_order: 2 },
+    { weight_id: "BAHT_1", name_en: "1 ບາດ", qty: 1, unit: "ບາດ", gram_value: 15.244, active: true, sort_order: 3 },
+    { weight_id: "BAHT_2", name_en: "2 ບາດ", qty: 2, unit: "ບາດ", gram_value: 30.488, active: true, sort_order: 4 },
+    { weight_id: "G_1", name_en: "1 ກລາມ", qty: 1, unit: "ກລາມ", gram_value: 1, active: true, sort_order: 5 },
+    { weight_id: "G_3_75", name_en: "3.75 ກລາມ", qty: 3.75, unit: "ກລາມ", gram_value: 3.75, active: true, sort_order: 6 },
+    { weight_id: "KG_1", name_en: "1 ກິໂລ", qty: 1, unit: "ກິໂລ", gram_value: 1000, active: true, sort_order: 7 },
   ];
 
   const skus: MasterSku[] = [
@@ -389,5 +391,6 @@ export function buildDemoData(today: string): DemoData {
     assignments: [],
     rules,
     branchSkus,
+    mainCases: [],
   };
 }

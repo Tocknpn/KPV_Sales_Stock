@@ -42,7 +42,12 @@ export interface SkuType {
 // size must declare its gram_value so stock-weight totals can be computed.
 export interface SkuWeight {
   weight_id: string;
+  // The label shown everywhere: "qty unit" ("8 ບາດ").
   name_en: string;
+  // Amount and unit name typed by the user (migration 18); the unit carries no
+  // conversion, gram_value is what every calculation uses.
+  qty?: number | null;
+  unit?: string | null;
   gram_value: number;
   active: boolean;
   sort_order: number;
@@ -85,6 +90,12 @@ export interface ReplenishmentRule {
   updated_by: string | null;
   updated_at: string;
   is_seed: boolean;
+}
+
+// A case a staff member mainly looks after (migration 18): ordering only.
+export interface StaffMainCase {
+  staff_id: string;
+  desk_id: string;
 }
 
 // Whether a branch carries a SKU (branch_sku, migration 15). No row = not carried.

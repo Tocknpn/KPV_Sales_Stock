@@ -81,7 +81,7 @@ async function backToGrid() {
   await backTo(pathFor("stock"), async () => {
     await unmountDay();
     renderTopbar();
-    refreshCards();
+    await refreshCards();
   });
 }
 
@@ -140,6 +140,23 @@ async function refreshCards(showLoading = true) {
   currentToday = today;
   renderBadges(desks, branchSummary);
   renderBody(desks, branchSummary);
+  flashFinishedCard(desks);
+}
+
+// Set by a finished check-in / close; consumed by the next card render.
+let pendingFlash = null;
+
+function flashFinishedCard(desks) {
+  if (!pendingFlash) return;
+  const { deskId, kind } = pendingFlash;
+  pendingFlash = null;
+  const el = document.querySelector(`[data-card="${CSS.escape(deskId)}"]`);
+  if (el) {
+    el.scrollIntoView({ block: "center" });
+    el.classList.add("card-flash");
+    el.addEventListener("animationend", () => el.classList.remove("card-flash"), { once: true });
+  }
+  if (kind === "close" && desks.length > 1 && desks.every((d) => d.status === "done")) toast(t("done.allClosed"), "success", 3000);
 }
 
 function renderBadges(desks, summary) {
@@ -160,7 +177,7 @@ function renderBody(desks, summary) {
         ? `<p id="branch-line" class="mb-3 text-xs font-bold ${summary.overdue ? "text-danger" : "text-gray-700"}">${tf("stock.branchLine", { cases: summary.cases, checked: summary.checkedToday, overdue: summary.overdue })}</p>`
         : ""
     }
-    <div id="desk-list" class="flex flex-col gap-2"></div>
+    <div id="desk-list"></div>
   `;
   renderFab();
   renderGrid(desks);
@@ -219,16 +236,16 @@ const ICON_PATH = {
 // The case status as a 36 px icon (display only, not a button).
 function statusIconHtml(badge) {
   const { icon, tone } = statusIcon(badge);
-  return `<span role="img" aria-label="${escapeHtml(BADGE_LABEL[badge]())}" data-badge="${badge}" class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${TONE_CLS[tone]}"><svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATH[icon]}</svg></span>`;
+  return `<span role="img" aria-label="${escapeHtml(BADGE_LABEL[badge]())}" data-badge="${badge}" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${TONE_CLS[tone]}"><svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATH[icon]}</svg></span>`;
 }
 
 // One step button: the active step is the primary button; done and locked steps are grey and disabled.
-// The label sits in its own span: a flex button cannot truncate its text, so a
-// long label ("Go to 18th Nov") ends in "…" instead of being cut off.
+// The two share the card's width; the label sits in its own span so a long
+// one ("Go to 18th Nov") ends in "…" instead of being cut off.
 function stepButton(step, stepState, label) {
-  if (stepState === "active") return `<button data-step="${step}" title="${escapeHtml(label)}" class="btn-primary min-w-[64px] max-w-[96px] shrink-0 overflow-hidden px-2 py-2 text-[11px]"><span class="min-w-0 truncate">${escapeHtml(label)}</span></button>`;
+  if (stepState === "active") return `<button data-step="${step}" title="${escapeHtml(label)}" class="btn-primary min-w-0 overflow-hidden px-1.5 py-2 text-[11px]"><span class="min-w-0 truncate">${escapeHtml(label)}</span></button>`;
   const text = `${label}${stepState === "done" ? " ✓" : ""}`;
-  return `<button data-step="${step}" disabled aria-disabled="true" title="${escapeHtml(text)}" class="btn-secondary min-w-[64px] max-w-[96px] shrink-0 cursor-not-allowed overflow-hidden bg-gray-100 px-2 py-2 text-[11px] text-gray-400"><span class="min-w-0 truncate">${escapeHtml(text)}</span></button>`;
+  return `<button data-step="${step}" disabled aria-disabled="true" title="${escapeHtml(text)}" class="btn-secondary min-w-0 cursor-not-allowed overflow-hidden bg-gray-100 px-1.5 py-2 text-[11px] text-gray-400"><span class="min-w-0 truncate">${escapeHtml(text)}</span></button>`;
 }
 
 // The warning line under an overdue card; other tiers say nothing extra.
@@ -246,31 +263,48 @@ function lastStamp(d) {
   return tf("stock.lastStamp", { name: d.lastActorName, time });
 }
 
+const fmtGram = (n) => Number(n ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Two cards a row (one on very narrow phones). Weight in grams leads; Baht,
+// pieces and the value in LAK follow; the two step buttons share the bottom.
 function renderCard(d) {
   const overdue = d.tier === "overdue";
   const streak = d.streak > 365 ? "365+" : d.streak;
   const blocked = blockedDate(d);
   const steps = caseSteps(d);
   return `
-    <div class="card border-l-4 px-3 py-2.5 ${overdue ? "border-l-danger" : "border-l-transparent"}" data-card="${d.desk_id}" data-tier="${d.tier}">
-      <div class="flex items-center gap-2">
-        <div class="min-w-0 flex-1 overflow-hidden">
-          <div class="truncate text-sm font-extrabold text-gray-900">${escapeHtml(d.display_name)}</div>
-          <div class="mt-0.5 flex min-w-0 items-center gap-2 overflow-hidden text-xs font-bold text-gray-800">
-            <span class="min-w-0 truncate">${fmtBaht(d.totalBaht)} Baht · ${fmtInt(d.totalPcs)} pcs</span>
-            ${d.streak > 0 ? `<span class="inline-flex shrink-0 items-center gap-0.5 text-[11px] font-extrabold text-brand-700">${flameIcon()}${streak}<span class="sr-only"> ${t("stock.streakDays")}</span></span>` : ""}
-            ${d.criticalCount > 0 ? `<span class="shrink-0 text-[11px] font-bold text-danger">⚠ ${d.criticalCount} ${t("stock.criticalShort")}</span>` : ""}
-          </div>
-        </div>
-        ${stepButton("checkIn", steps.checkIn, blocked ? tf("stock.goToDate", { date: fmtDate(blocked) }) : t("step.checkIn"))}
-        ${stepButton("close", steps.close, t("step.close"))}
+    <div class="card flex min-w-0 flex-col border-l-4 px-2.5 py-2.5 ${overdue ? "border-l-danger" : "border-l-transparent"}" data-card="${d.desk_id}" data-tier="${d.tier}">
+      <div class="flex items-start gap-1.5">
+        <div class="min-w-0 flex-1 truncate text-sm font-extrabold leading-7 text-gray-900">${escapeHtml(d.display_name)}</div>
         ${statusIconHtml(steps.badge)}
       </div>
-      <div class="text-[11px] text-gray-500">≈ ${fmtInt(d.valueLak ?? 0)} LAK</div>
+      <div class="truncate text-[15px] font-extrabold tabular-nums text-gray-900">${fmtGram(d.totalGram)} <span class="text-xs font-bold text-gray-600">g</span></div>
+      <div class="flex min-w-0 items-center gap-1.5 overflow-hidden text-[11px] font-bold text-gray-700">
+        <span class="min-w-0 truncate tabular-nums">${fmtBaht(d.totalBaht)} Baht · ${fmtInt(d.totalPcs)} pcs</span>
+        ${d.streak > 0 ? `<span class="inline-flex shrink-0 items-center gap-0.5 font-extrabold text-brand-700">${flameIcon()}${streak}<span class="sr-only"> ${t("stock.streakDays")}</span></span>` : ""}
+        ${d.criticalCount > 0 ? `<span class="shrink-0 font-bold text-danger">⚠ ${d.criticalCount}<span class="sr-only"> ${t("stock.criticalShort")}</span></span>` : ""}
+      </div>
+      <div class="truncate text-[11px] tabular-nums text-gray-500">≈ ${fmtInt(d.valueLak ?? 0)} LAK</div>
       ${d.lastActorName ? `<div class="truncate text-[11px] text-gray-500">${escapeHtml(lastStamp(d))}</div>` : ""}
       ${overdue ? `<p class="mt-0.5 text-[11px] font-bold leading-snug text-danger">⚠ ${escapeHtml(tierText(d))}</p>` : ""}
       ${blocked ? `<p class="mt-0.5 text-[11px] font-bold leading-snug text-warning">${tf("stock.finishFirst", { date: fmtDate(d.openEarlierDate) })}</p>` : ""}
+      <div class="mt-auto grid grid-cols-2 gap-1.5 pt-2">
+        ${stepButton("checkIn", steps.checkIn, blocked ? tf("stock.goToDate", { date: fmtDate(blocked) }) : t("step.checkIn"))}
+        ${stepButton("close", steps.close, t("step.close"))}
+      </div>
     </div>`;
+}
+
+const GRID_CLS = "grid grid-cols-2 gap-2 max-[359px]:grid-cols-1";
+
+// "My cases" (the viewer's main cases, set in Settings > Users) first, then
+// the rest. Without main cases the list is one grid, as before.
+function casesSection(title, desks, first) {
+  return `
+    <section class="${first ? "" : "mt-4"}">
+      <h2 class="mb-2 flex items-center gap-1.5 text-xs font-extrabold text-gray-700">${escapeHtml(title)}<span class="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-bold text-gray-700">${fmtInt(desks.length)}</span></h2>
+      <div class="${GRID_CLS}">${desks.map((d) => renderCard(d)).join("")}</div>
+    </section>`;
 }
 
 function renderGrid(desks) {
@@ -279,7 +313,11 @@ function renderGrid(desks) {
     list.innerHTML = `<div class="py-10 text-center text-sm text-gray-600">${t("stock.noDesks")}</div>`;
     return;
   }
-  list.innerHTML = desks.map((d) => renderCard(d)).join("");
+  const mine = desks.filter((d) => d.mine);
+  const others = desks.filter((d) => !d.mine);
+  list.innerHTML = mine.length
+    ? casesSection(t("stock.myCases"), mine, true) + (others.length ? casesSection(t("stock.otherCases"), others, false) : "")
+    : `<div class="${GRID_CLS}">${desks.map((d) => renderCard(d)).join("")}</div>`;
 
   const root = document.getElementById("view-root");
   root.querySelectorAll("[data-card]").forEach((card) => {
@@ -396,6 +434,11 @@ async function openDeskDetail(deskCard, { fromRoute = false, tab, step, detail }
 function dayHooks(deskCard) {
   return {
     onBack: backToGrid,
+    // A finished check-in / close: back to the cards, then flash that card.
+    onDone: (kind) => {
+      pendingFlash = { deskId: deskCard.desk_id, kind };
+      return backToGrid();
+    },
     reload: () => reloadDeskDetail(deskCard),
     openSkuPicker: (excludeSkuIds, onAdd) => openSkuPickerSheet(excludeSkuIds, onAdd, deskCard.branch_id),
     askOpeningQtys,

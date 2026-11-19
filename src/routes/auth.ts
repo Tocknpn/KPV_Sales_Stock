@@ -91,10 +91,12 @@ r.post("/auth/logout", requireAuth, async (c) => c.json({ ok: true }));
 r.get("/app-meta", requireAuth, async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
-  const [branches, desks, config, goldRow] = await Promise.all([store.branches(), store.desks(), store.config(), store.goldPrice()]);
+  const [branches, desks, config, goldRow, weights] = await Promise.all([store.branches(), store.desks(), store.config(), store.goldPrice(), store.skuWeights()]);
   const today = businessDate(c.env);
   const mine = <T extends { branch_id: string }>(rows: T[]) => (user.role !== "admin" ? rows.filter((x) => x.branch_id === user.branchId) : rows);
-  return c.json({ branches: mine(branches), desks: mine(desks), config, gold: resolveGoldPrice(goldRow, config, today), today, live: isLive(c.env), user });
+  return c.json({ branches: mine(branches), desks: mine(desks), config, gold: resolveGoldPrice(goldRow, config, today), today, live: isLive(c.env), user,
+    // Size labels ("8 ບາດ") for every SKU line in the app.
+    weights: weights.map((w) => ({ weight_id: w.weight_id, name_en: w.name_en, gram_value: w.gram_value })) });
 });
 
 export default r;

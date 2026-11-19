@@ -5,7 +5,7 @@ import { t, tf, productName } from "../../i18n.js";
 import { state } from "../../state.js";
 import { isAdmin } from "../../session.js";
 import { exportRowsToSheet, sheetRowsToImport, loadXlsx } from "../../sku-xlsx.js";
-import { groupSkusByType, skuSizeLabel, skuLabel, weightLabel, splitWeight, gramsOf, WEIGHT_UNITS } from "../../sku-groups.js";
+import { groupSkusByType, skuSizeLabel, skuLabel, weightLabel, splitWeight, WEIGHT_UNITS, setSizeLabels } from "../../sku-groups.js";
 import { skeletonList } from "../../skeleton.js";
 
 // The catalogue (name, type, size, active; Types and Sizes) is admin only.
@@ -122,10 +122,9 @@ function openTypeForm(existing, body) {
   let selectedIcon = existing?.icon ?? iconKeys[0];
   openSheet(
     `
-    <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.typeNameLabel")}</label>
-    <input id="type-name-en" type="text" value="${existing ? escapeHtml(existing.name_en) : ""}" class="input-filled" />
-    <label class="mt-3 mb-1.5 block text-xs font-bold text-gray-600">${t("settings.typeNameLoLabel")}</label>
-    <input id="type-name-lo" type="text" value="${existing?.name_lo ? escapeHtml(existing.name_lo) : ""}" class="input-filled" />
+    <label for="type-name" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.typeNameOneLabel")}</label>
+    <input id="type-name" type="text" lang="lo" maxlength="60" value="${existing ? escapeHtml(typeLabel(existing)) : ""}" class="input-filled" />
+    ${existing ? `<p class="mt-1.5 text-[11px] text-gray-500">${t("settings.typeRenameHint")}</p>` : ""}
     <label class="mt-3 mb-1.5 block text-xs font-bold text-gray-600">${t("settings.typeIconLabel")}</label>
     <div class="grid grid-cols-4 gap-2">
       ${iconKeys
@@ -154,9 +153,9 @@ function openTypeForm(existing, body) {
           });
         });
         sheetBody.querySelector("#save-type").addEventListener("click", async () => {
-          const name_en = sheetBody.querySelector("#type-name-en").value.trim();
-          if (!name_en) return toast(t("stock.needSkuName"), "error");
-          const payload = { name_en, name_lo: sheetBody.querySelector("#type-name-lo").value.trim() || null, icon: selectedIcon };
+          const name = sheetBody.querySelector("#type-name").value.trim();
+          if (!name) return toast(t("settings.needTypeName"), "error");
+          const payload = { name, icon: selectedIcon };
           if (existing) await api.updateSkuType(existing.type_id, payload);
           else await api.createSkuType(payload);
           closeSheet();
@@ -172,15 +171,16 @@ function openTypeForm(existing, body) {
 
 async function renderWeightTab(body) {
   const { weights } = await api.skuWeights();
+  setSizeLabels(weights);
   body.innerHTML = `
     ${canEdit() ? `<button id="add-weight" class="btn-primary mb-3 w-full py-2.5 text-xs">${t("settings.addWeight")}</button>` : ""}
     <div class="card divide-y divide-hairline p-0">
       ${weights.map((w) => weightRow(w)).join("") || `<div class="py-6 text-center text-xs text-gray-500">—</div>`}
     </div>
   `;
-  body.querySelector("#add-weight")?.addEventListener("click", () => openWeightForm(null, body));
+  body.querySelector("#add-weight")?.addEventListener("click", () => openWeightForm(null, body, weights));
   body.querySelectorAll("[data-edit-weight]").forEach((btn) =>
-    btn.addEventListener("click", () => canEdit() && openWeightForm(weights.find((w) => w.weight_id === btn.dataset.editWeight), body))
+    btn.addEventListener("click", () => canEdit() && openWeightForm(weights.find((w) => w.weight_id === btn.dataset.editWeight), body, weights))
   );
   body.querySelectorAll("[data-toggle-weight]").forEach((btn) =>
     btn.addEventListener("click", async () => {
@@ -195,52 +195,107 @@ function weightRow(w) {
   return `
     <div class="flex items-center gap-2.5 px-4 py-3">
       <button data-edit-weight="${w.weight_id}" class="min-w-0 flex-1 text-left">
-        <span lang="lo" class="lao block truncate text-xs font-bold text-gray-900">${escapeHtml(weightLabel(w.gram_value) || w.name_en)}</span>
+        <span lang="lo" class="lao block truncate text-xs font-bold text-gray-900">${escapeHtml(w.name_en || weightLabel(w.gram_value))}</span>
         <span class="block text-[10px] text-gray-500">${num(w.gram_value)} ກລາມ · ${w.active ? t("settings.activeLabel") : t("settings.inactiveLabel")}</span>
       </button>
       ${canEdit() ? toggleSwitch(w.active, `data-toggle-weight="${w.weight_id}"`) : ""}
     </div>`;
 }
 
-// A size is typed as amount + Lao unit; the grams follow and the name is the Lao label.
-function openWeightForm(existing, body) {
-  const start = existing ? splitWeight(existing.gram_value) : { amount: "", unit: "ບາດ" };
+// A size is qty + unit + its weight in grams, all typed by the user (decided
+// 2026-11-19): "8 ບາດ" = 120 g. The unit list is every unit already in use
+// plus the usual Lao ones; "+ add unit" types a new one. Only the grams are
+// used in calculations; the label "qty unit" is what the app shows.
+const NEW_UNIT = "__new__";
+
+function unitChoices(weights) {
+  const units = WEIGHT_UNITS.map((u) => u.unit);
+  for (const w of weights) if (w.unit && !units.includes(w.unit)) units.push(w.unit);
+  return units;
+}
+
+function openWeightForm(existing, body, weights) {
+  const split = existing && !(existing.qty > 0 && existing.unit) ? splitWeight(existing.gram_value) : null;
+  const start = {
+    qty: existing ? String(split ? split.amount : Number(existing.qty)) : "",
+    unit: existing ? (split ? split.unit : existing.unit) : "ບາດ",
+    grams: existing ? num(existing.gram_value) : "",
+  };
+  const units = unitChoices(weights);
+  if (!units.includes(start.unit)) units.push(start.unit);
   openSheet(
     `
-    <div class="grid grid-cols-2 gap-2">
+    <div class="grid grid-cols-[1fr_1.4fr_1fr] gap-2">
       <div class="min-w-0">
         <label for="weight-amount" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.weightAmountLabel")}</label>
-        <input id="weight-amount" type="number" step="any" min="0" inputmode="decimal" value="${escapeHtml(start.amount)}" class="input-filled" />
+        <input id="weight-amount" type="number" step="any" min="0" inputmode="decimal" value="${escapeHtml(start.qty)}" class="input-filled px-2.5" />
       </div>
       <div class="min-w-0">
         <label for="weight-unit" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.weightUnitLabel")}</label>
-        <select id="weight-unit" lang="lo" class="input-filled">
-          ${WEIGHT_UNITS.map((u) => `<option value="${u.unit}" ${u.unit === start.unit ? "selected" : ""}>${u.unit}</option>`).join("")}
+        <select id="weight-unit" lang="lo" class="input-filled px-2">
+          ${units.map((u) => `<option value="${escapeHtml(u)}" ${u === start.unit ? "selected" : ""}>${escapeHtml(u)}</option>`).join("")}
+          <option value="${NEW_UNIT}">${t("settings.addUnit")}</option>
         </select>
       </div>
+      <div class="min-w-0">
+        <label for="weight-grams" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.weightGramsLabel")}</label>
+        <input id="weight-grams" type="number" step="any" min="0" inputmode="decimal" value="${escapeHtml(start.grams)}" class="input-filled px-2.5" />
+      </div>
+    </div>
+    <div id="new-unit-row" class="mt-2 hidden">
+      <label for="weight-new-unit" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.newUnitLabel")}</label>
+      <input id="weight-new-unit" type="text" lang="lo" maxlength="30" class="input-filled" />
     </div>
     <p id="weight-preview" role="status" class="mt-2 text-[11px] font-semibold text-gray-600"></p>
+    <p id="weight-error" role="alert" class="mt-1 hidden text-xs font-semibold text-danger"></p>
     <button id="save-weight" class="btn-primary mt-4 w-full">${t("settings.save")}</button>
   `,
     {
       title: existing ? t("settings.editWeight") : t("settings.addWeight"),
       onMount: (sheetBody) => {
-        const amount = sheetBody.querySelector("#weight-amount");
-        const unit = sheetBody.querySelector("#weight-unit");
-        const preview = sheetBody.querySelector("#weight-preview");
+        const $ = (sel) => sheetBody.querySelector(sel);
+        const amount = $("#weight-amount");
+        const unit = $("#weight-unit");
+        const grams = $("#weight-grams");
+        const newUnit = $("#weight-new-unit");
+        const unitName = () => (unit.value === NEW_UNIT ? newUnit.value.trim() : unit.value);
         const show = () => {
-          const g = gramsOf(amount.value, unit.value);
-          preview.textContent = g ? `${weightLabel(g)} = ${num(g)} ກລາມ` : "";
+          $("#new-unit-row").classList.toggle("hidden", unit.value !== NEW_UNIT);
+          const q = Number(amount.value);
+          const g = Number(grams.value);
+          const u = unitName();
+          $("#weight-preview").textContent = q > 0 && u ? `${num(q)} ${u}${g > 0 ? ` = ${num(g)} ກລາມ` : ""}` : "";
         };
         amount.addEventListener("input", show);
-        unit.addEventListener("change", show);
+        grams.addEventListener("input", show);
+        newUnit.addEventListener("input", show);
+        unit.addEventListener("change", () => {
+          show();
+          if (unit.value === NEW_UNIT) newUnit.focus();
+        });
         show();
-        sheetBody.querySelector("#save-weight").addEventListener("click", async () => {
-          const gram_value = gramsOf(amount.value, unit.value);
-          if (!gram_value) return toast(t("err.BAD_WEIGHT"), "error");
-          const payload = { name_en: weightLabel(gram_value), gram_value };
-          if (existing) await api.updateSkuWeight(existing.weight_id, payload);
-          else await api.createSkuWeight(payload);
+        const fail = (msg) => {
+          const el = $("#weight-error");
+          el.textContent = msg;
+          el.classList.remove("hidden");
+        };
+        $("#save-weight").addEventListener("click", async (e) => {
+          const qty = Number(amount.value);
+          const gram_value = Number(grams.value);
+          const u = unitName();
+          if (!(qty > 0)) return fail(t("settings.needWeightQty"));
+          if (!u) return fail(t("settings.needWeightUnit"));
+          if (!(gram_value > 0)) return fail(t("settings.needWeightGrams"));
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          try {
+            const payload = { qty, unit: u, gram_value };
+            if (existing) await api.updateSkuWeight(existing.weight_id, payload);
+            else await api.createSkuWeight(payload);
+          } catch (err) {
+            btn.disabled = false;
+            return fail(err.message || t("err.SERVER_ERROR"));
+          }
           closeSheet();
           toast(t("settings.save"), "success");
           renderWeightTab(body);
@@ -260,6 +315,7 @@ async function renderSkuTab(body) {
     api.skuWeights(),
     api.replenishmentRules(branchId),
   ]);
+  setSizeLabels(weights);
   const activeTypes = types.filter((ty) => ty.active);
   const activeWeights = weights.filter((w) => w.active);
   plan = rules;
@@ -283,7 +339,7 @@ async function renderSkuTab(body) {
       </select>
       <select id="sku-size-filter" class="chip min-h-0 min-w-0 flex-1 truncate border-hairline bg-white text-[11px] text-gray-600">
         <option value="all">${t("settings.filterSizeShort")}</option>
-        ${weights.map((w) => `<option value="${w.weight_id}" ${skuSizeFilter === w.weight_id ? "selected" : ""}>${escapeHtml(weightLabel(w.gram_value) || w.name_en)}</option>`).join("")}
+        ${weights.map((w) => `<option value="${w.weight_id}" ${skuSizeFilter === w.weight_id ? "selected" : ""}>${escapeHtml(w.name_en || weightLabel(w.gram_value))}</option>`).join("")}
       </select>
       <button id="sku-search-toggle" aria-label="${t("settings.searchPlaceholder")}" class="tap-target flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-hairline text-gray-500 ${searchOpen ? "border-brand-600 bg-brand-50 text-brand-600" : "bg-white"}">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><circle cx="11" cy="11" r="6.5"/><path stroke-linecap="round" d="M20 20l-4.3-4.3"/></svg>
@@ -624,7 +680,7 @@ function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights,
       <div class="min-w-0">
         <label for="new-sku-weight" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuWeightLabel")}</label>
         <select id="new-sku-weight" lang="lo" ${lock} class="input-filled">
-          ${weightOptions.map((w) => `<option value="${w.weight_id}" ${existing?.weight_id === w.weight_id ? "selected" : ""}>${escapeHtml(weightLabel(w.gram_value) || w.name_en)}</option>`).join("")}
+          ${weightOptions.map((w) => `<option value="${w.weight_id}" ${existing?.weight_id === w.weight_id ? "selected" : ""}>${escapeHtml(w.name_en || weightLabel(w.gram_value))}</option>`).join("")}
         </select>
       </div>
     </div>

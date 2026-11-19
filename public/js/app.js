@@ -10,6 +10,7 @@ import { mountDocuments } from "./views/documents.js";
 import { mountDashboard } from "./views/dashboard.js";
 import { mountReport, unmountReport } from "./views/report.js";
 import { mountSettings } from "./views/settings/index.js";
+import { setSizeLabels } from "./sku-groups.js";
 
 const views = {
   stock: mountStock,
@@ -113,6 +114,7 @@ async function loadMetaAndEnter() {
     // Independent reads: the data-mode banner and the session meta load together.
     const [, meta] = await Promise.all([loadDataMeta(), api.meta()]);
     state.meta = meta;
+    setSizeLabels(meta.weights);
     state.user = state.meta.user;
     state.stock.date = state.meta.today;
     state.stock.branch = state.meta.branches[0]?.branch_id ?? null;

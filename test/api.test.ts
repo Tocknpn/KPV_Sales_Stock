@@ -1098,3 +1098,56 @@ describe("case history and issue grid", () => {
     expect(res.json.rows).toHaveLength(store.db.desks.filter((d: any) => d.branch_id === "B-MM" && d.active).length);
   });
 });
+
+// Decided 2026-11-19: main cases, sizes as qty + unit + grams, one type name.
+describe("main cases, sizes and type names", () => {
+  it("a branch manager sets a person's main cases; they come first for that person only", async () => {
+    const manager = await asManager("B-MM");
+    const staffId = DEMO_STAFF["B-MM"];
+    expect((await call(manager, "PUT", `/users/${staffId}/cases`, { deskIds: ["MM-D02"] })).status).toBe(200);
+    expect((await call(manager, "GET", `/users/${staffId}/cases`)).json.deskIds).toEqual(["MM-D02"]);
+    // Another branch's case, or another branch's person.
+    expect((await call(manager, "PUT", `/users/${staffId}/cases`, { deskIds: ["VTC-D01"] })).json.code).toBe("ASSIGN_OTHER_BRANCH");
+    expect((await call(manager, "PUT", `/users/${DEMO_STAFF["B-VTC"]}/cases`, { deskIds: [] })).status).toBe(403);
+    // Staff cannot set them.
+    const staff = await asStaff("B-MM");
+    expect((await call(staff, "PUT", `/users/${staffId}/cases`, { deskIds: [] })).status).toBe(403);
+
+    const mine = (await call(staff, "GET", "/stock/desks?branchId=B-MM")).json.desks;
+    expect(mine.filter((d: any) => d.mine).map((d: any) => d.desk_id)).toEqual(["MM-D02"]);
+    const others = (await call(manager, "GET", "/stock/desks?branchId=B-MM")).json.desks;
+    expect(others.some((d: any) => d.mine)).toBe(false);
+  });
+
+  it("each case card carries its weight in grams", async () => {
+    const admin = await asAdmin();
+    const card = (await call(admin, "GET", "/stock/desks?branchId=B-MM")).json.desks.find((d: any) => d.desk_id === "MM-D01");
+    expect(card.totalGram).toBeGreaterThan(0);
+    expect(card.totalGram / card.totalBaht).toBeCloseTo(15.244, 0);
+  });
+
+  it("a size is qty + any unit + the grams typed; the label is 'qty unit'", async () => {
+    const admin = await asAdmin();
+    const made = (await call(admin, "POST", "/sku-weights", { qty: 8, unit: "ບາດ", gram_value: 120 })).json;
+    expect(made).toMatchObject({ name_en: "8 ບາດ", qty: 8, unit: "ບາດ", gram_value: 120 });
+    expect((await call(admin, "POST", "/sku-weights", { qty: 8, unit: "ບາດ", gram_value: 121 })).json.code).toBe("WEIGHT_EXISTS");
+    expect((await call(admin, "POST", "/sku-weights", { qty: 1, unit: "ແທ່ງ", gram_value: 0 })).json.code).toBe("BAD_WEIGHT");
+    const custom = (await call(admin, "POST", "/sku-weights", { qty: 1, unit: "ແທ່ງ", gram_value: 50 })).json;
+    expect(custom.name_en).toBe("1 ແທ່ງ");
+    const edited = (await call(admin, "PATCH", `/sku-weights/${made.weight_id}`, { qty: 10, gram_value: 150 })).json;
+    expect(edited).toMatchObject({ name_en: "10 ບາດ", unit: "ບາດ", gram_value: 150 });
+  });
+
+  it("a type has one name; renaming it renames it everywhere", async () => {
+    const admin = await asAdmin();
+    const made = (await call(admin, "POST", "/sku-types", { name: "ສາຍແອວ", icon: "ring" })).json;
+    expect(made).toMatchObject({ name_en: "ສາຍແອວ", name_lo: "ສາຍແອວ" });
+    expect(made.type_id).toBeTruthy();
+    expect((await call(admin, "POST", "/sku-types", { name: "ສາຍແອວ" })).json.code).toBe("TYPE_EXISTS");
+    await call(admin, "PATCH", "/sku-types/GOLD_BARS", { name: "ຄຳແທ່ງໃໝ່" });
+    const type = (await call(admin, "GET", "/sku-types")).json.types.find((t: any) => t.type_id === "GOLD_BARS");
+    expect(type).toMatchObject({ name_en: "ຄຳແທ່ງໃໝ່", name_lo: "ຄຳແທ່ງໃໝ່" });
+    const bar = (await call(admin, "GET", "/skus")).json.skus.find((s: any) => s.sku_id === "GB-001");
+    expect(bar.category).toBe("ຄຳແທ່ງໃໝ່");
+  });
+});

@@ -148,7 +148,7 @@ r.get("/stock/desks", async (c) => {
   const today = businessDate(c.env);
   const date = requireDate(c.req.query("date"), today);
   const branchId = scopeBranch(user, c.req.query("branchId") || undefined);
-  const [desks, branches, skus, days, ledgerRows, staffAccounts, config, openEarlier, history, closed, goldRow, rules] = await Promise.all([
+  const [desks, branches, skus, days, ledgerRows, staffAccounts, config, openEarlier, history, closed, goldRow, rules, mainCases] = await Promise.all([
     store.desks(),
     store.branches(),
     store.skus(),
@@ -162,7 +162,10 @@ r.get("/stock/desks", async (c) => {
     store.closedDays({ branchId, from: addDays(today, -400), to: today }),
     store.goldPrice(),
     store.rules(),
+    // The viewer's own main cases come first on their list (migration 18).
+    store.mainCases({ staffId: user.accountId }),
   ]);
+  const myCases = new Set(mainCases.map((m) => m.desk_id));
   const scopedDesks = branchId ? desks.filter((d) => d.branch_id === branchId) : desks;
   // The statuses read each branch's latest-day ledger rows; they also give the
   // "carried" rows below, so ledgerLatest is not read a second time.
@@ -204,6 +207,7 @@ r.get("/stock/desks", async (c) => {
     });
     return {
       ...card,
+      mine: myCases.has(card.desk_id),
       openEarlierDate: blockedBy.get(card.desk_id) ?? null,
       openedAt: days.find((x) => x.desk_id === card.desk_id)?.created_at ?? null,
       streak: status.streak,

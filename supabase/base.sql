@@ -15,17 +15,30 @@ insert into system_config (id, safety_buffer_days, spot_lak_per_baht, usd_to_lak
   (1, 2, 0, 0);
 
 insert into sku_type (type_id, name_en, name_lo, icon, active, sort_order) values
-  ('GOLD_BARS', 'Gold Bars', 'ທອງຄຳແທ່ງ', 'bar', true, 1),
-  ('NECKLACES', 'Necklaces', 'ສາຍຄໍ', 'necklace', true, 2),
-  ('BRACELETS', 'Bracelets', 'ສາຍແຂນ', 'bracelet', true, 3),
-  ('RINGS_ACCESSORIES', 'Rings & Accessories', 'ແຫວນ', 'ring', true, 4),
-  ('SUPPLIES', 'Supplies', 'ອຸປະກອນ', 'box', true, 5);
+  ('GOLD_BARS', 'ທອງຄຳແທ່ງ', 'ທອງຄຳແທ່ງ', 'bar', true, 1),
+  ('NECKLACES', 'ສາຍຄໍ', 'ສາຍຄໍ', 'necklace', true, 2),
+  ('BRACELETS', 'ສາຍແຂນ', 'ສາຍແຂນ', 'bracelet', true, 3),
+  ('RINGS_ACCESSORIES', 'ແຫວນ', 'ແຫວນ', 'ring', true, 4),
+  ('SUPPLIES', 'ອຸປະກອນ', 'ອຸປະກອນ', 'box', true, 5);
 
 insert into sku_weight (weight_id, name_en, gram_value, active, sort_order) values
-  ('BAHT_025', '0.25 Baht', 3.811, true, 1),
-  ('BAHT_05', '0.5 Baht', 7.622, true, 2),
-  ('BAHT_1', '1 Baht', 15.244, true, 3),
-  ('BAHT_2', '2 Baht', 30.488, true, 4),
-  ('G_1', '1g', 1, true, 5),
-  ('G_3_75', '3.75g', 3.75, true, 6),
-  ('KG_1', '1kg', 1000, true, 7);
+  ('BAHT_025', '1 ສະຫຼຶງ', 3.811, true, 1),
+  ('BAHT_05', '2 ສະຫຼຶງ', 7.622, true, 2),
+  ('BAHT_1', '1 ບາດ', 15.244, true, 3),
+  ('BAHT_2', '2 ບາດ', 30.488, true, 4),
+  ('G_1', '1 ກລາມ', 1, true, 5),
+  ('G_3_75', '3.75 ກລາມ', 3.75, true, 6),
+  ('KG_1', '1 ກິໂລ', 1000, true, 7);
+
+-- Each size's qty + unit (migration 18), once that migration has run.
+do $$
+begin
+  if exists (select 1 from information_schema.columns where table_name = 'sku_weight' and column_name = 'qty') then
+    execute $u$
+      update sku_weight w set qty = v.qty, unit = v.unit
+        from (values ('BAHT_025', 1, 'ສະຫຼຶງ'), ('BAHT_05', 2, 'ສະຫຼຶງ'), ('BAHT_1', 1, 'ບາດ'), ('BAHT_2', 2, 'ບາດ'),
+                     ('G_1', 1, 'ກລາມ'), ('G_3_75', 3.75, 'ກລາມ'), ('KG_1', 1, 'ກິໂລ')) as v(weight_id, qty, unit)
+       where w.weight_id = v.weight_id
+    $u$;
+  end if;
+end $$;

@@ -280,6 +280,37 @@ drop trigger if exists trg_guard_branch_sku on branch_sku;
 create trigger trg_guard_branch_sku before insert or update or delete on branch_sku
   for each row execute function guard_branch_sku();
 
+-- Main cases (migration 18): an admin, or the manager of the branch. The
+-- staff member and the case must belong to the same branch.
+create or replace function guard_staff_main_case() returns trigger
+language plpgsql as $$
+declare
+  v_desk_branch text;
+  v_staff_branch text;
+begin
+  if tg_op = 'DELETE' then
+    select branch_id into v_desk_branch from desks where desk_id = old.desk_id;
+  else
+    select branch_id into v_desk_branch from desks where desk_id = new.desk_id;
+    select branch_id into v_staff_branch from staff_accounts where id = new.staff_id;
+  end if;
+  if tg_op <> 'DELETE' and v_staff_branch is distinct from v_desk_branch then
+    raise exception 'ASSIGN_OTHER_BRANCH: staff and case belong to different branches' using errcode = 'P0001';
+  end if;
+  perform kpv_require('{admin,manager}', v_desk_branch);
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
+end $$;
+
+do $$
+begin
+  if to_regclass('public.staff_main_case') is not null then
+    execute 'drop trigger if exists trg_guard_staff_main_case on staff_main_case';
+    execute 'create trigger trg_guard_staff_main_case before insert or update or delete on staff_main_case
+               for each row execute function guard_staff_main_case()';
+  end if;
+end $$;
+
 drop trigger if exists trg_guard_desk_assignment on desk_assignment;
 create trigger trg_guard_desk_assignment before insert or update or delete on desk_assignment
   for each row execute function guard_desk_assignment();

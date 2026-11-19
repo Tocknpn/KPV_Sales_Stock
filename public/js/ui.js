@@ -19,6 +19,42 @@ export function toast(message, tone = "default", ms = 2200) {
   }, ms);
 }
 
+// A short, centered "done" confirmation (check-in, close-day). Closes itself
+// after `ms` (about 1.2 s: long enough to read a Lao line, short enough not to
+// slow a staff member working through many cases); any tap closes it sooner.
+// Resolves once it is gone, so the caller can then move on (back to the list).
+export function successOverlay(title, subtitle = "", ms = 1200) {
+  return new Promise((resolve) => {
+    const el = document.createElement("div");
+    el.className = "fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 px-6";
+    el.setAttribute("role", "status");
+    el.setAttribute("aria-live", "assertive");
+    el.innerHTML = `
+      <div class="success-pop w-full max-w-[280px] rounded-2xl bg-white px-6 py-7 text-center shadow-pop">
+        <span class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-success-bg text-success">
+          <svg viewBox="0 0 24 24" class="h-9 w-9" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="success-check" d="m5 12.5 4.5 4.5L19 7.5"/></svg>
+        </span>
+        <p class="mt-4 text-lg font-extrabold text-gray-900"></p>
+        <p class="mt-1 text-sm font-semibold text-gray-600"></p>
+      </div>`;
+    const [titleEl, subEl] = el.querySelectorAll("p");
+    titleEl.textContent = title;
+    if (subtitle) subEl.textContent = subtitle;
+    else subEl.remove();
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      el.remove();
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    el.addEventListener("click", finish);
+    document.body.appendChild(el);
+  });
+}
+
 const sheetHost = () => document.getElementById("sheet-host");
 
 export const isSheetOpen = () => {

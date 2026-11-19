@@ -124,7 +124,30 @@ function skuGrams(sku) {
   return baht ? Number(baht[1]) * GRAMS_PER_BAHT : 0;
 }
 
+// Size labels as the admin named them ("8 ບາດ" = 120 g, migration 18), by
+// size id and by grams. Filled from /app-meta and again whenever Settings
+// reloads the sizes. A SKU whose size is unknown falls back to weightLabel.
+const sizeById = new Map();
+const sizeByGrams = new Map();
+const gramKey = (g) => (Number(g) > 0 ? Math.round(Number(g) * 1000) : null);
+
+export function setSizeLabels(weights) {
+  sizeById.clear();
+  sizeByGrams.clear();
+  for (const w of weights ?? []) {
+    if (!w?.name_en) continue;
+    sizeById.set(w.weight_id, w.name_en);
+    const k = gramKey(w.gram_value);
+    if (k !== null && !sizeByGrams.has(k)) sizeByGrams.set(k, w.name_en);
+  }
+}
+
 export function skuSizeLabel(sku) {
+  if (sku?.weight_id && sizeById.has(sku.weight_id)) return sizeById.get(sku.weight_id);
+  for (const g of [sku?.std_gram_weight, sku?.gram_weight_each]) {
+    const k = gramKey(g);
+    if (k !== null && sizeByGrams.has(k)) return sizeByGrams.get(k);
+  }
   return weightLabel(skuGrams(sku));
 }
 

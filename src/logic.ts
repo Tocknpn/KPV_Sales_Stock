@@ -212,6 +212,7 @@ export function buildDeskCards(
       const qtyStatus = prior ? prior.status : status;
       let totalPcs = 0;
       let totalBaht = 0;
+      let totalGram = 0;
       let totalLak = 0;
       // SKUs on this case whose BRANCH-wide runway is Critical (a case alone says nothing).
       let criticalCount = 0;
@@ -220,6 +221,7 @@ export function buildDeskCards(
         const qty = currentQty(r, qtyStatus);
         totalPcs += qty;
         totalBaht += bahtOf(sku, qty);
+        totalGram += gramOf(sku, qty);
         totalLak += valueLak(sku, qty, lakPerBaht);
         if (statuses.get(`${desk.branch_id}|${r.sku_id}`)?.status === "critical") criticalCount++;
       }
@@ -236,6 +238,7 @@ export function buildDeskCards(
         status,
         totalPcs,
         totalBaht: round2(totalBaht),
+        totalGram: round2(totalGram),
         valueLak: round2(totalLak),
         skuCount: rows.length,
         criticalCount,

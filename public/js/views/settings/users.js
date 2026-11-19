@@ -27,7 +27,7 @@ export async function renderUsers(root) {
         <span class="status-pill bg-gray-100 text-gray-600">${t("settings.staffRole")} · ${staff.roleCounts.staff ?? 0}</span>
       </div>
       <div class="mt-3 flex flex-col divide-y divide-hairline">
-        ${staff.accounts.map((a) => userRow(a, admin, manager && a.role === "staff" && a.locked)).join("") || `<div class="py-6 text-center text-xs text-gray-500">—</div>`}
+        ${staff.accounts.map((a) => userRow(a, admin, manager && a.role !== "admin" && a.branch_id === state.user.branchId)).join("") || `<div class="py-6 text-center text-xs text-gray-500">—</div>`}
       </div>
     </div>
     ${admin ? `<p class="mt-3 text-center text-[11px] text-gray-500">${t("users.hint")}</p>` : manager ? `<p class="mt-3 text-center text-[11px] text-gray-500">${t("users.hintManager")}</p>` : ""}
@@ -134,6 +134,46 @@ function passwordField(id, labelKey) {
     <input id="${id}" type="text" maxlength="72" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" class="input-filled" />`;
 }
 
+// Main cases (decided 2026-11-19): chips of the branch's cases; the chosen
+// ones come first on that person's Daily stock list.
+const branchDesks = (branchId) => (state.meta.desks ?? []).filter((d) => d.branch_id === branchId && d.active !== false);
+
+function mainCasesField() {
+  return `
+    <div id="main-cases-wrap">
+      <p class="mb-1.5 mt-3 block text-xs font-bold text-gray-600" id="main-cases-label">${t("users.mainCases")}</p>
+      <div id="main-cases" role="group" aria-labelledby="main-cases-label" class="flex flex-wrap gap-1.5"></div>
+      <p class="mt-1.5 text-[11px] text-gray-500">${t("users.mainCasesHint")}</p>
+    </div>`;
+}
+
+// Renders the chips for one branch into the sheet; returns the live selection.
+function bindMainCases(body, branchId, selected) {
+  const host = body.querySelector("#main-cases");
+  if (!host) return selected;
+  const desks = branchDesks(branchId);
+  for (const id of [...selected]) if (!desks.some((d) => d.desk_id === id)) selected.delete(id);
+  host.innerHTML = desks.length
+    ? desks
+        .map((d) => {
+          const on = selected.has(d.desk_id);
+          return `<button type="button" data-case="${escapeHtml(d.desk_id)}" aria-pressed="${on}" class="chip ${on ? "border-brand-600 bg-brand-50 text-brand-700" : "border-hairline bg-white text-gray-600"}">${on ? "✓ " : ""}${escapeHtml(d.display_name)}</button>`;
+        })
+        .join("")
+    : `<span class="text-[11px] text-gray-500">${t("users.mainCasesNone")}</span>`;
+  host.querySelectorAll("[data-case]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.case;
+      if (selected.has(id)) selected.delete(id);
+      else selected.add(id);
+      bindMainCases(body, branchId, selected);
+    })
+  );
+  return selected;
+}
+
+const sameSet = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
+
 function openUserForm(existing, root) {
   if (isBranchManager(state.user)) return openUnlockSheet(existing, root);
   const branches = state.meta.branches;
@@ -166,6 +206,7 @@ function openUserForm(existing, root) {
              <select id="user-branch" class="input-filled">
                ${branches.map((b) => `<option value="${b.branch_id}" ${existing?.branch_id === b.branch_id ? "selected" : ""}>${escapeHtml(branchName(b.branch_id))}</option>`).join("")}
              </select>
+             ${mainCasesField()}
            </div>`
         : ""
     }
@@ -216,6 +257,24 @@ function openUserForm(existing, root) {
           body.querySelector("#user-branch-wrap").classList.toggle("hidden", e.target.value === "admin");
         });
 
+        let casesBefore = new Set();
+        const cases = new Set();
+        const branchSelect = body.querySelector("#user-branch");
+        if (branchSelect) {
+          bindMainCases(body, branchSelect.value, cases);
+          branchSelect.addEventListener("change", () => bindMainCases(body, branchSelect.value, cases));
+          if (existing && existing.role !== "admin") {
+            api
+              .userCases(existing.id)
+              .then(({ deskIds }) => {
+                casesBefore = new Set(deskIds);
+                deskIds.forEach((id) => cases.add(id));
+                bindMainCases(body, branchSelect.value, cases);
+              })
+              .catch(() => {});
+          }
+        }
+
         body.querySelector("#user-save").addEventListener("click", async () => {
           const displayName = body.querySelector("#user-name").value.trim();
           const username = body.querySelector("#user-username").value.trim().toLowerCase();
@@ -231,10 +290,12 @@ function openUserForm(existing, root) {
             if (username !== existing.username) payload.username = username;
             if (existing.role !== "admin" && branchId !== existing.branch_id) payload.branchId = branchId;
             if (password) payload.password = password;
-            await api.updateUser(existing.id, payload);
+            if (Object.keys(payload).length) await api.updateUser(existing.id, payload);
+            if (existing.role !== "admin" && !sameSet(cases, casesBefore)) await api.setUserCases(existing.id, [...cases]);
           } else {
             const role = body.querySelector("#user-role").value;
-            await api.createUser({ displayName, username, role, branchId: role === "admin" ? null : branchId, password });
+            const { id } = await api.createUser({ displayName, username, role, branchId: role === "admin" ? null : branchId, password });
+            if (role !== "admin" && cases.size) await api.setUserCases(id, [...cases]);
           }
           await done("settings.savedToast");
         });
@@ -253,14 +314,42 @@ function openUserForm(existing, root) {
   );
 }
 
-// A branch manager can only unlock a locked staff account of their own branch.
+// A branch manager sets the main cases of a person in their branch, and can
+// unlock a locked staff account. Nothing else.
 function openUnlockSheet(existing, root) {
+  const canUnlock = existing.role === "staff" && existing.locked;
   openSheet(
-    `<button id="user-unlock" class="btn-primary w-full">${t("users.unlock")}</button>`,
+    `
+    ${mainCasesField()}
+    <button id="cases-save" class="btn-primary mt-4 w-full">${t("settings.save")}</button>
+    ${canUnlock ? `<button id="user-unlock" class="btn-secondary mt-2.5 w-full">${t("users.unlock")}</button>` : ""}
+  `,
     {
       title: existing.display_name,
       onMount: (body) => {
-        body.querySelector("#user-unlock").addEventListener("click", async () => {
+        const cases = new Set();
+        let before = new Set();
+        bindMainCases(body, existing.branch_id, cases);
+        api
+          .userCases(existing.id)
+          .then(({ deskIds }) => {
+            before = new Set(deskIds);
+            deskIds.forEach((id) => cases.add(id));
+            bindMainCases(body, existing.branch_id, cases);
+          })
+          .catch(() => {});
+        body.querySelector("#cases-save").addEventListener("click", async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            if (!sameSet(cases, before)) await api.setUserCases(existing.id, [...cases]);
+          } finally {
+            e.currentTarget.disabled = false;
+          }
+          closeSheet();
+          toast(t("users.mainCasesSaved"), "success");
+          await renderUsers(root);
+        });
+        body.querySelector("#user-unlock")?.addEventListener("click", async () => {
           await api.updateUser(existing.id, { unlock: true });
           closeSheet();
           toast(t("users.unlocked"), "success");

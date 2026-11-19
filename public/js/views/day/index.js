@@ -14,7 +14,7 @@
 // stock.js owns the case cards and opens this with mountDay(deskCard, date, hooks).
 import { api } from "../../api.js";
 import { state } from "../../state.js";
-import { toast, openActionSheet, openSheet, closeSheet } from "../../ui.js";
+import { toast, openActionSheet, openSheet, closeSheet, successOverlay } from "../../ui.js";
 import { fmtBaht, fmtInt, fmtDate, escapeHtml, statusPillClasses } from "../../util.js";
 import { t } from "../../i18n.js";
 import { closingOf, groupKeyOf, renderRow, patchRow, headerHtml, gridTemplate, gridMinWidth, skuName } from "./row.js";
@@ -592,17 +592,27 @@ async function confirmCheckIn() {
     await screen.queue.flushAll();
     if (screen.queue.hasUnsaved()) return toast(t("day.unsaved"), "error");
     try {
-      // Any refusal (EARLIER_DAY_OPEN, BAD_TRANSITION ...) is followed by the reload below.
       await api.transitionDesk(screen.deskCard.desk_id, { date: screen.date, toStatus: "check_in" });
-      toast(t("stock.checkedInToast"), "success");
     } catch (err) {
+      // A refusal (EARLIER_DAY_OPEN, BAD_TRANSITION ...): stay here and show what is saved.
       toast(err.message || t("err.SERVER_ERROR"), "error");
+      await screen.hooks.reload?.();
+      return;
     }
-    await screen.hooks.reload?.();
+    // Done: confirm it, and go back to the case list underneath so the next case is one tap away.
+    await finishStep(screen, "checkIn");
   } finally {
     screen.busy = false;
     if (S === screen) renderFooter();
   }
+}
+
+// After a successful check-in or close: the success overlay plays while the
+// case list loads behind it, so the user lands on the list ready for the next case.
+async function finishStep(screen, kind) {
+  const title = t(kind === "close" ? "done.closeTitle" : "done.checkInTitle");
+  const back = screen.hooks.onDone ? screen.hooks.onDone(kind) : screen.hooks.onBack ? screen.hooks.onBack() : screen.hooks.reload?.();
+  await Promise.all([successOverlay(title, screen.deskCard.display_name), Promise.resolve(back).catch(() => {})]);
 }
 
 // Day totals for the close sheet, in pieces.
@@ -700,8 +710,7 @@ async function submitClose(screen) {
       }
       throw err;
     }
-    toast(t("stock.finalClosingSubmitted"), "success");
-    await (screen.hooks.onBack ? screen.hooks.onBack() : screen.hooks.reload?.());
+    await finishStep(screen, "close");
   } finally {
     screen.closing = false;
     if (S === screen) renderFooter();

@@ -364,15 +364,22 @@ r.put("/skus/:id/carried", async (c) => {
 // ---------------------------------------------------------------------------
 r.get("/sku-types", async (c) => c.json({ types: await storeFor(c).skuTypes() }));
 
+// A type has one name (decided 2026-11-19): name_lo and name_en hold the same
+// text. The id is made once from the name (or a fallback for a Lao-only name)
+// and never changes, so a rename reaches every SKU, report and old record.
+const typeName = (body: Record<string, any>) => String(body.name ?? body.name_lo ?? body.name_en ?? "").trim().slice(0, 60);
+
 r.post("/sku-types", requireAdmin, async (c) => {
   const store = storeFor(c);
   const body = await readBody(c);
-  const name_en = String(body.name_en ?? "").trim();
-  if (!name_en) throw new HttpError(400, "name_en is required", "BAD_TYPE");
-  const type_id = slug(body.type_id || name_en);
-  if (!type_id) throw new HttpError(400, "name_en must contain letters or digits", "BAD_TYPE");
-  const type = await store.createSkuType({ type_id, name_en, name_lo: body.name_lo ?? null, icon: body.icon ?? "ring" });
-  await audit(store, c.get("user"), "sku_type.create", type.type_id, { name_en });
+  const name = typeName(body);
+  if (!name) throw new HttpError(400, "A type name is required", "BAD_TYPE");
+  const types = await store.skuTypes();
+  if (types.some((t) => (t.name_lo ?? t.name_en).trim() === name || t.name_en.trim() === name)) throw new HttpError(409, "That type already exists", "TYPE_EXISTS");
+  let type_id = slug(body.type_id || name) || `T_${Date.now().toString(36).toUpperCase()}`;
+  if (types.some((t) => t.type_id === type_id)) type_id = `${type_id}_${Date.now().toString(36).toUpperCase()}`;
+  const type = await store.createSkuType({ type_id, name_en: name, name_lo: name, icon: body.icon ?? "ring" });
+  await audit(store, c.get("user"), "sku_type.create", type.type_id, { name });
   return c.json(type);
 });
 
@@ -388,11 +395,12 @@ r.patch("/sku-types/:id", requireAdmin, async (c) => {
   const store = storeFor(c);
   const body = await readBody(c);
   const patch: Partial<SkuType> = {};
-  if (body.name_en !== undefined) {
-    if (!String(body.name_en).trim()) throw new HttpError(400, "name_en cannot be empty", "BAD_TYPE");
-    patch.name_en = String(body.name_en).trim();
+  if (body.name !== undefined || body.name_en !== undefined || body.name_lo !== undefined) {
+    const name = typeName(body);
+    if (!name) throw new HttpError(400, "The type name cannot be empty", "BAD_TYPE");
+    patch.name_en = name;
+    patch.name_lo = name;
   }
-  if (body.name_lo !== undefined) patch.name_lo = body.name_lo || null;
   if (body.icon !== undefined) patch.icon = String(body.icon);
   if (body.active !== undefined) patch.active = Boolean(body.active);
   if (body.sort_order !== undefined) patch.sort_order = Number(body.sort_order) || 0;
@@ -405,16 +413,40 @@ r.patch("/sku-types/:id", requireAdmin, async (c) => {
 
 r.get("/sku-weights", async (c) => c.json({ weights: await storeFor(c).skuWeights() }));
 
+// A size is "qty unit" with its grams typed by the user (decided 2026-11-19):
+// 8 ບາດ = 120 g. The unit is a free name (the list is every unit already in use
+// plus a new one typed in); only the grams are used in calculations.
+function readSize(body: Record<string, any>, partial: boolean) {
+  const out: { qty?: number; unit?: string; gram_value?: number } = {};
+  if (!partial || body.qty !== undefined) {
+    const qty = Number(body.qty);
+    if (!(qty > 0) || qty > 1_000_000) throw new HttpError(400, "Enter an amount above 0", "BAD_WEIGHT");
+    out.qty = Math.round(qty * 10000) / 10000;
+  }
+  if (!partial || body.unit !== undefined) {
+    const unit = String(body.unit ?? "").trim().slice(0, 30);
+    if (!unit) throw new HttpError(400, "Choose or type a unit", "BAD_WEIGHT");
+    out.unit = unit;
+  }
+  if (!partial || body.gram_value !== undefined) {
+    const g = Number(body.gram_value);
+    if (!(g > 0) || g > 100_000_000) throw new HttpError(400, "Enter the weight in grams, above 0", "BAD_WEIGHT");
+    out.gram_value = Math.round(g * 10000) / 10000;
+  }
+  return out;
+}
+const sizeLabel = (qty: number, unit: string) => `${Number(qty)} ${unit}`;
+
 r.post("/sku-weights", requireAdmin, async (c) => {
   const store = storeFor(c);
   const body = await readBody(c);
-  const name_en = String(body.name_en ?? "").trim();
-  const gram_value = Number(body.gram_value);
-  if (!name_en || !(gram_value > 0)) throw new HttpError(400, "name_en and a gram_value above 0 are required", "BAD_WEIGHT");
-  // Names are Lao now, which slug() drops: fall back to the grams.
-  const weight_id = slug(body.weight_id || name_en) || `W_${String(gram_value).replace(/[.]/g, "_")}`;
-  if ((await store.skuWeights()).some((w) => w.weight_id === weight_id)) throw new HttpError(409, "That size already exists", "WEIGHT_EXISTS");
-  const weight = await store.createSkuWeight({ weight_id, name_en, gram_value });
+  const { qty, unit, gram_value } = readSize(body, false) as { qty: number; unit: string; gram_value: number };
+  const name_en = sizeLabel(qty, unit);
+  const weights = await store.skuWeights();
+  if (weights.some((w) => w.name_en.trim() === name_en)) throw new HttpError(409, "That size already exists", "WEIGHT_EXISTS");
+  let weight_id = `W_${String(qty).replace(/[.]/g, "_")}_${Date.now().toString(36).toUpperCase()}`;
+  if (weights.some((w) => w.weight_id === weight_id)) weight_id += "X";
+  const weight = await store.createSkuWeight({ weight_id, name_en, qty, unit, gram_value, sort_order: weights.length + 1 });
   await audit(store, c.get("user"), "sku_weight.create", weight.weight_id, { name_en, gram_value });
   return c.json(weight);
 });
@@ -422,18 +454,23 @@ r.post("/sku-weights", requireAdmin, async (c) => {
 r.patch("/sku-weights/:id", requireAdmin, async (c) => {
   const store = storeFor(c);
   const body = await readBody(c);
-  const patch: Partial<SkuWeight> = {};
-  if (body.name_en !== undefined) {
-    if (!String(body.name_en).trim()) throw new HttpError(400, "name_en cannot be empty", "BAD_WEIGHT");
-    patch.name_en = String(body.name_en).trim();
-  }
-  if (body.gram_value !== undefined) {
-    if (!(Number(body.gram_value) > 0)) throw new HttpError(400, "gram_value must be above 0", "BAD_WEIGHT");
-    patch.gram_value = Number(body.gram_value);
+  const id = c.req.param("id") ?? "";
+  const weights = await store.skuWeights();
+  const current = weights.find((w) => w.weight_id === id);
+  if (!current) throw new HttpError(404, "Weight not found", "NOT_FOUND");
+  const patch: Partial<SkuWeight> = { ...readSize(body, true) };
+  if (patch.qty !== undefined || patch.unit !== undefined) {
+    const qty = patch.qty ?? current.qty;
+    const unit = patch.unit ?? current.unit;
+    if (!(Number(qty) > 0) || !unit) throw new HttpError(400, "Enter both the amount and the unit", "BAD_WEIGHT");
+    patch.qty = Number(qty);
+    patch.unit = unit;
+    patch.name_en = sizeLabel(Number(qty), unit);
+    if (weights.some((w) => w.weight_id !== id && w.name_en.trim() === patch.name_en)) throw new HttpError(409, "That size already exists", "WEIGHT_EXISTS");
   }
   if (body.active !== undefined) patch.active = Boolean(body.active);
   if (body.sort_order !== undefined) patch.sort_order = Number(body.sort_order) || 0;
-  const weight = await store.updateSkuWeight((c.req.param("id") ?? ""), patch);
+  const weight = await store.updateSkuWeight(id, patch);
   if (!weight) throw new HttpError(404, "Weight not found", "NOT_FOUND");
   // Keep each SKU's gram weight equal to its size definition.
   if (patch.gram_value !== undefined) {
@@ -581,9 +618,44 @@ r.patch("/users/:id", requireManager, async (c) => {
   if (changes.some((ch) => ch !== "unlocked" && ch !== "activated" && ch !== "username")) patch.token_version = account.token_version + 1;
   if (changes.length === 0) return c.json({ ok: true });
 
+  // A person moved to another branch keeps no main cases of the old one.
+  if (patch.branch_id !== undefined && patch.branch_id !== account.branch_id) await store.setMainCases(account.id, []);
   await store.updateStaffAccount(account.id, patch);
   await audit(store, me, "user.update", account.display_name, { id: account.id, changes }, { branchId: account.branch_id });
   return c.json({ ok: true });
+});
+
+// Main cases (decided 2026-11-19): the cases a person mainly looks after come
+// first on their Daily stock list. Ordering only: everyone in the branch still
+// sees and works every case. Set by an admin or the manager of that branch.
+async function mainCaseTarget(c: any) {
+  const store = storeFor(c);
+  const me = c.get("user");
+  const account = (await store.staffAccounts()).find((a) => a.id === (c.req.param("id") ?? ""));
+  if (!account) throw new HttpError(404, "User not found", "NOT_FOUND");
+  if (account.role === "admin" || !account.branch_id) throw new HttpError(400, "An admin has no branch cases", "BAD_USER");
+  if (me.role === "manager" && !isManagerOf(me, account.branch_id)) throw new HttpError(403, "Another branch", "ROLE_DENIED");
+  return { store, me, account };
+}
+
+r.get("/users/:id/cases", requireManager, async (c) => {
+  const { store, account } = await mainCaseTarget(c);
+  return c.json({ deskIds: (await store.mainCases({ staffId: account.id })).map((m) => m.desk_id) });
+});
+
+r.put("/users/:id/cases", requireManager, async (c) => {
+  const { store, me, account } = await mainCaseTarget(c);
+  const body = await readBody(c);
+  if (!Array.isArray(body.deskIds) || body.deskIds.some((d: unknown) => typeof d !== "string")) throw new HttpError(400, "deskIds must be a list", "BAD_CASES");
+  const deskIds = [...new Set(body.deskIds as string[])];
+  const desks = await store.desks();
+  for (const id of deskIds) {
+    const desk = desks.find((d) => d.desk_id === id);
+    if (!desk || desk.branch_id !== account.branch_id) throw new HttpError(400, "A case of another branch", "ASSIGN_OTHER_BRANCH");
+  }
+  await store.setMainCases(account.id, deskIds);
+  await audit(store, me, "user.cases", account.display_name, { id: account.id, desk_ids: deskIds }, { branchId: account.branch_id });
+  return c.json({ deskIds });
 });
 
 // The current password of one account, for the admin (in-house decision,

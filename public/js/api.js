@@ -122,6 +122,8 @@ export const api = {
   createUser: (payload) => post(`/users`, payload),
   updateUser: (id, payload) => patch(`/users/${id}`, payload),
   userPassword: (id) => request(`/users/${encodeURIComponent(id)}/password`),
+  userCases: (id) => request(`/users/${encodeURIComponent(id)}/cases`),
+  setUserCases: (id, deskIds) => request(`/users/${encodeURIComponent(id)}/cases`, { method: "PUT", body: JSON.stringify({ deskIds }) }),
   audit: (params) => request(`/audit?${query(params ?? {})}`),
 
   deskHistory: (deskId, to, days) => request(`/desks/${encodeURIComponent(deskId)}/history?${query({ to, days })}`),

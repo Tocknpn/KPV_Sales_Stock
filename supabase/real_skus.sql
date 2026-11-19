@@ -232,6 +232,11 @@ on conflict (sku_id) do update set
   std_gram_weight = excluded.std_gram_weight, baht_weight = excluded.baht_weight,
   reorder_level = excluded.reorder_level, group_name = excluded.group_name, icon = excluded.icon;
 
+-- Each SKU's category mirrors its type's one name (migration 18).
+update master_sku m set category = t.name_en
+  from sku_type t
+ where m.type_id = t.type_id and m.category is distinct from t.name_en;
+
 -- Every branch carries a SKU that no branch has a choice for yet (migration
 -- 15). A SKU that already has any branch_sku row is left alone, so a re-run
 -- never switches on a branch-only SKU or one a branch stopped selling.

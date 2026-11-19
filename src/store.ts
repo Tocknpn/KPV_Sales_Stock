@@ -5,6 +5,7 @@
 import type {
   Branch,
   BranchSku,
+  StaffMainCase,
   Desk,
   InitialStock,
   MasterSku,
@@ -267,6 +268,10 @@ export interface Store {
   // upserts on (branch_id, sku_id); an admin or a staff / manager of that branch.
   branchSkus(filter?: { branchId?: string }): Promise<BranchSku[]>;
   setCarried(rows: BranchSku[]): Promise<void>;
+  // The cases each staff member mainly looks after (staff_main_case).
+  mainCases(filter?: { staffId?: string }): Promise<StaffMainCase[]>;
+  // Replaces one person's main cases (admin, or the manager of the branch).
+  setMainCases(staffId: string, deskIds: string[]): Promise<void>;
   // Automatic sales velocity per SKU for one branch (the branch_velocity RPC).
   branchVelocity(branchId: string, to: string, days: number): Promise<VelocityRow[]>;
 
@@ -1040,6 +1045,21 @@ export class DemoStore implements Store {
       else this.db.branchSkus.push({ branch_id: r.branch_id, sku_id: r.sku_id, carried: r.carried });
     }
   }
+  async mainCases(filter: { staffId?: string } = {}) {
+    return this.db.mainCases.filter((m) => !filter.staffId || m.staff_id === filter.staffId);
+  }
+  async setMainCases(staffId: string, deskIds: string[]) {
+    this.guard();
+    const staff = this.db.staffAccounts.find((a) => a.id === staffId);
+    const actorId = this.actor && "id" in this.actor ? this.actor.id : null;
+    const me = actorId ? this.db.staffAccounts.find((a) => a.id === actorId) : undefined;
+    for (const id of deskIds) {
+      const desk = this.db.desks.find((d) => d.desk_id === id);
+      if (!staff || !desk || desk.branch_id !== staff.branch_id) throw new StoreError("INVALID", "ASSIGN_OTHER_BRANCH");
+    }
+    if (me && me.role !== "admin" && !(me.role === "manager" && me.branch_id === staff?.branch_id)) throw new StoreError("DENIED", "ROLE_DENIED");
+    this.db.mainCases = [...this.db.mainCases.filter((m) => m.staff_id !== staffId), ...[...new Set(deskIds)].map((desk_id) => ({ staff_id: staffId, desk_id }))];
+  }
   private sameRule(r: ReplenishmentRule, t: RuleTarget) {
     return r.scope === t.scope && r.scope_key === t.scope_key && r.branch_id === t.branch_id;
   }
@@ -1648,6 +1668,13 @@ class SupabaseStore implements Store {
       headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
       body: JSON.stringify(rows.map((r) => ({ branch_id: r.branch_id, sku_id: r.sku_id, carried: r.carried }))),
     });
+  }
+  async mainCases(filter: { staffId?: string } = {}) {
+    const where = filter.staffId ? `&staff_id=eq.${enc(filter.staffId)}` : "";
+    return this.restAll<StaffMainCase>(`staff_main_case?select=staff_id,desk_id${where}&order=staff_id,desk_id`);
+  }
+  async setMainCases(staffId: string, deskIds: string[]) {
+    await this.rpc("set_main_cases", { p_staff: staffId, p_desks: [...new Set(deskIds)] });
   }
   async branchVelocity(branchId: string, to: string, days: number) {
     return this.rpc<VelocityRow[]>("branch_velocity", { p_branch: branchId, p_to: to, p_days: days });

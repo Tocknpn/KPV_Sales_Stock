@@ -253,7 +253,7 @@ async function renderCreateSkuFormInto(container, onCreated, onCancel, branch) {
       <div class="min-w-0">
         <label for="sku-weight" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuWeightLabel")}</label>
         <select id="sku-weight" lang="lo" class="input-filled">
-          ${activeWeights.map((w) => `<option value="${w.weight_id}">${escapeHtml(weightLabel(w.gram_value) || w.name_en)}</option>`).join("")}
+          ${activeWeights.map((w) => `<option value="${w.weight_id}">${escapeHtml(w.name_en || weightLabel(w.gram_value))}</option>`).join("")}
         </select>
       </div>
     </div>
