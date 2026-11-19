@@ -57,6 +57,8 @@
     </nav>
   </div>
 
-  <script src="/dist/app.js" type="module"></script>
+  <!-- The bundle (npm run build). If it is missing, load the source modules
+       instead; onerror fires only when the file fails to load, never after it ran. -->
+  <script src="/dist/app.js" type="module" onerror="(function(){if(window.__kpvFallback)return;window.__kpvFallback=1;var s=document.createElement('script');s.type='module';s.src='/js/app.js';document.head.appendChild(s)})()"></script>
 </body>
 </html>

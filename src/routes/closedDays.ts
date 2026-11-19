@@ -4,6 +4,7 @@
 import { storeFor, newRouter, readBody, HttpError, scopeBranch } from "../app";
 import { requireManager, isManagerOf } from "../auth";
 import { isValidDate } from "../time";
+import { listHaving } from "../cachedStore";
 import type { ClosedDay } from "../types";
 
 const r = newRouter();
@@ -31,7 +32,7 @@ r.post("/closed-days", requireManager, async (c) => {
   if (!reason) throw new HttpError(400, "A reason is required", "BAD_REASON");
 
   const branchId = String(body.branchId ?? "");
-  const branches = (await store.branches()).map((b) => b.branch_id);
+  const branches = (await listHaving(store, "branches", (l) => branchId === "all" || l.some((b) => b.branch_id === branchId))).map((b) => b.branch_id);
   let targets: string[];
   if (branchId === "all") {
     if (user.role !== "admin") throw new HttpError(403, "Only an admin can close all branches", "ROLE_DENIED");

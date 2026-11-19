@@ -8,7 +8,7 @@
     "build:css": "tailwindcss -i ./src/styles/input.css -o ./public/css/app.css --minify",
     "watch:css": "tailwindcss -i ./src/styles/input.css -o ./public/css/app.css --watch",
     "build": "npm run build:css && node scripts/build-web.mjs",
-    "dev": "npm run build && wrangler dev",
+    "dev": "wrangler dev",
     "deploy": "npm run build && wrangler deploy",
     "cf-typegen": "wrangler types",
     "test": "vitest run",

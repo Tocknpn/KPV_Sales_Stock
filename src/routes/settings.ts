@@ -8,6 +8,7 @@ import { storeFor, newRouter, readBody, HttpError, audit, scopeBranch, targetBra
 import { loadHeld } from "../replenishment";
 import { MAX_IMPORT_ROWS, exportRows, planImport } from "../skuImport";
 import { stripWeight } from "../skuName";
+import { fresh, listHaving } from "../cachedStore";
 import type { NewSku, Store } from "../store";
 import { requireAdmin, requireManager, hashPassword, isValidPassword, normalizeUsername, isValidUsername, isManagerOf, MIN_PASSWORD } from "../auth";
 import { isLive } from "../time";
@@ -158,7 +159,10 @@ r.post("/skus", async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
-  const [types, weights] = await Promise.all([store.skuTypes(), store.skuWeights()]);
+  const [types, weights] = await Promise.all([
+    listHaving(store, "skuTypes", (l) => l.some((t) => t.type_id === body.type_id)),
+    listHaving(store, "skuWeights", (l) => l.some((w) => w.weight_id === body.weight_id)),
+  ]);
   if (!body.weight_id) throw new HttpError(400, "name, type_id and weight_id are required", "BAD_SKU");
   const built = buildSku(body, types, weights);
   if (typeof built === "string") throw new HttpError(400, built, "BAD_SKU");
@@ -184,7 +188,8 @@ r.get("/skus/export", async (c) => {
   const all = asked === "all";
   const branchIds = all ? (await store.branches()).map((b) => b.branch_id) : [scopeBranch(user, asked)].filter((b): b is string => !!b);
   if (branchIds.length === 0) throw new HttpError(400, "branchId is required", "BRANCH_REQUIRED");
-  if (!all && !(await store.branches()).some((b) => b.branch_id === branchIds[0])) throw new HttpError(404, "Branch not found", "BRANCH_NOT_FOUND");
+  const hasBranch = (l: { branch_id: string }[]) => l.some((b) => b.branch_id === branchIds[0]);
+  if (!all && !hasBranch(await listHaving(store, "branches", hasBranch))) throw new HttpError(404, "Branch not found", "BRANCH_NOT_FOUND");
   const [skus, types, rules, branchSkus] = await Promise.all([store.skus(), store.skuTypes(), store.rules(), store.branchSkus(all ? {} : { branchId: branchIds[0] })]);
   return c.json({ branchId: all ? "all" : branchIds[0], rows: exportRows({ branchIds, withBranch: all, skus, types, rules, branchSkus }) });
 });
@@ -204,15 +209,16 @@ r.post("/skus/import", async (c) => {
   if (rows.length === 0) throw new HttpError(400, "The file has no rows", "EMPTY_IMPORT");
   if (rows.length > MAX_IMPORT_ROWS) throw new HttpError(400, `Import at most ${MAX_IMPORT_ROWS} rows at a time`, "IMPORT_TOO_LARGE");
 
-  const [skus, types, weights, rules, branchSkus, branches] = await Promise.all([
-    store.skus(),
-    store.skuTypes(),
-    store.skuWeights(),
-    store.rules(),
-    store.branchSkus(),
-    store.branches(),
-  ]);
-  const plan = planImport({ rows, branchId, isAdmin: user.role === "admin", branchIds: branches.map((b) => b.branch_id), skus, types, weights, rules, branchSkus });
+  // The lists may be up to 30 s old on this isolate: a refused file is
+  // checked once more against fresh ones before the errors are returned.
+  const planFrom = async (s: Store) => {
+    const [skus, types, weights, rules, branchSkus, branches] = await Promise.all([s.skus(), s.skuTypes(), s.skuWeights(), s.rules(), s.branchSkus(), s.branches()]);
+    const plan = planImport({ rows, branchId, isAdmin: user.role === "admin", branchIds: branches.map((b) => b.branch_id), skus, types, weights, rules, branchSkus });
+    return { skus, types, weights, plan };
+  };
+  let planned = await planFrom(store);
+  if (planned.plan.errors.length > 0 && fresh(store) !== store) planned = await planFrom(fresh(store));
+  const { skus, types, weights, plan } = planned;
   const summary = { created: plan.created, updated: plan.updated, unchanged: plan.unchanged, ignored: plan.ignored, cleared: plan.cleared, errors: plan.errors };
   if (plan.errors.length > 0) throw new HttpError(422, "Nothing was imported — fix these rows and try again", "IMPORT_INVALID", summary);
   if (body.dryRun === true) return c.json(summary);
@@ -303,7 +309,10 @@ r.patch("/skus/:id", async (c) => {
   if (typeof plan === "string") throw new HttpError(400, plan, "BAD_SKU");
   const planBranches = plan ? await targetBranches(store, user, body.branchId, body.allBranches) : [];
   if (body.type_id || body.weight_id) {
-    const [types, weights] = await Promise.all([store.skuTypes(), store.skuWeights()]);
+    const [types, weights] = await Promise.all([
+      listHaving(store, "skuTypes", (l) => !body.type_id || l.some((t) => t.type_id === body.type_id)),
+      listHaving(store, "skuWeights", (l) => !body.weight_id || l.some((w) => w.weight_id === body.weight_id)),
+    ]);
     if (body.type_id) {
       const type = types.find((t) => t.type_id === body.type_id);
       if (!type) throw new HttpError(400, "Unknown type_id", "BAD_SKU");
@@ -320,7 +329,7 @@ r.patch("/skus/:id", async (c) => {
   }
   if (Object.keys(patch).length === 0 && !plan) throw new HttpError(400, "Nothing to change", "NOTHING_TO_CHANGE");
   const id = c.req.param("id") ?? "";
-  const sku = Object.keys(patch).length > 0 ? await store.updateSku(id, patch) : (await store.skus()).find((s) => s.sku_id === id) ?? null;
+  const sku = Object.keys(patch).length > 0 ? await store.updateSku(id, patch) : (await listHaving(store, "skus", (l) => l.some((s) => s.sku_id === id))).find((s) => s.sku_id === id) ?? null;
   if (!sku) throw new HttpError(404, "SKU not found", "NOT_FOUND");
   if (plan) await writeSkuRule(store, sku.sku_id, planBranches, plan.avg, plan.lead);
   const changes = plan ? { ...patch, avg_daily_sell: plan.avg, lead_time_days: plan.lead, branch_ids: planBranches } : patch;
@@ -337,7 +346,8 @@ r.put("/skus/:id/carried", async (c) => {
   const [branchId] = await targetBranches(store, user, body.branchId);
   if (typeof body.carried !== "boolean") throw new HttpError(400, "carried must be true or false", "BAD_SKU");
   const id = c.req.param("id") ?? "";
-  if (!(await store.skus()).some((s) => s.sku_id === id)) throw new HttpError(404, "SKU not found", "NOT_FOUND");
+  const hasSku = (l: MasterSku[]) => l.some((s) => s.sku_id === id);
+  if (!hasSku(await listHaving(store, "skus", hasSku))) throw new HttpError(404, "SKU not found", "NOT_FOUND");
   if (!body.carried) {
     const held = (await loadHeld(store, branchId)).get(id);
     if (held && held.onHand + held.inbound > 0) {
@@ -369,7 +379,8 @@ r.post("/sku-types", requireAdmin, async (c) => {
 // Renaming a type must also rename the mirrored category on its SKUs, or
 // grouping would split the type in two.
 async function renameCategory(store: Store, typeId: string, name: string) {
-  const skus = (await store.skus()).filter((s) => s.type_id === typeId && s.category !== name);
+  // Fresh: a SKU made on another isolate within 30 s must be renamed too.
+  const skus = (await fresh(store).skus()).filter((s) => s.type_id === typeId && s.category !== name);
   for (const s of skus) await store.updateSku(s.sku_id, { category: name });
 }
 
@@ -426,7 +437,7 @@ r.patch("/sku-weights/:id", requireAdmin, async (c) => {
   if (!weight) throw new HttpError(404, "Weight not found", "NOT_FOUND");
   // Keep each SKU's gram weight equal to its size definition.
   if (patch.gram_value !== undefined) {
-    for (const s of (await store.skus()).filter((x) => x.weight_id === weight.weight_id)) {
+    for (const s of (await fresh(store).skus()).filter((x) => x.weight_id === weight.weight_id)) {
       await store.updateSku(s.sku_id, { std_gram_weight: weight.gram_value, baht_weight: bahtOfGrams(weight.gram_value) });
     }
   }
@@ -501,7 +512,7 @@ r.post("/users", requireAdmin, async (c) => {
   if (!display_name) throw new HttpError(400, "Name is required", "BAD_USER");
   const username = await checkUsername(store, body.username, null);
   if (!isValidPassword(body.password)) throw new HttpError(400, `Password must be at least ${MIN_PASSWORD} characters`, "BAD_PASSWORD");
-  if (role !== "admin" && !(await store.branches()).some((b) => b.branch_id === branch_id)) throw new HttpError(400, "Choose a branch", "BAD_BRANCH");
+  if (role !== "admin" && !(await listHaving(store, "branches", (l) => l.some((b) => b.branch_id === branch_id))).some((b) => b.branch_id === branch_id)) throw new HttpError(400, "Choose a branch", "BAD_BRANCH");
   const account = await store.createStaffAccount({ display_name: display_name.slice(0, 60), username, role, branch_id, pin_hash: await hashPassword(body.password), password_plain: body.password });
   await audit(store, c.get("user"), "user.create", account.display_name, { id: account.id, role, branch_id }, { branchId: account.branch_id });
   return c.json({ id: account.id });
@@ -538,7 +549,8 @@ r.patch("/users/:id", requireManager, async (c) => {
     }
   }
   if (body.branchId !== undefined && account.role !== "admin") {
-    if (!(await store.branches()).some((b) => b.branch_id === body.branchId)) throw new HttpError(400, "Unknown branch", "BAD_BRANCH");
+    const hasBranch = (l: { branch_id: string }[]) => l.some((b) => b.branch_id === body.branchId);
+    if (!hasBranch(await listHaving(store, "branches", hasBranch))) throw new HttpError(400, "Unknown branch", "BAD_BRANCH");
     patch.branch_id = body.branchId;
     changes.push("branch");
   }

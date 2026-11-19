@@ -10,6 +10,7 @@ import { buildDayStatus } from "../dayStatus";
 import { loadBranchData, loadBranchStatuses } from "../replenishment";
 import { resolveGoldPrice, priceOn } from "../goldPrice";
 import { buildCaseHistory } from "../caseHistory";
+import { listHaving } from "../cachedStore";
 import { bahtOf, valueLak, buildDeskCards, buildDeskDetail, buildCalendarMonth, carryQty, computeClosing, parseQty, stepFields, validateDeskDay } from "../logic";
 import type { Desk, DeskDay, LedgerRow, MasterSku, SessionUser, StaffAccount, Transfer } from "../types";
 
@@ -244,15 +245,18 @@ r.post("/desks", async (c) => {
   const user = c.get("user");
   const body = await readBody(c);
   const branchId = String(body.branchId ?? "");
-  if (!(await store.branches()).some((b) => b.branch_id === branchId)) throw new HttpError(400, "Unknown branch", "BAD_BRANCH");
+  const hasBranch = (l: { branch_id: string }[]) => l.some((b) => b.branch_id === branchId);
+  if (!hasBranch(await listHaving(store, "branches", hasBranch))) throw new HttpError(400, "Unknown branch", "BAD_BRANCH");
   if (!assertBranchAccess(user, branchId)) throw new HttpError(403, "Branch access denied", "BRANCH_DENIED");
   const displayName = String(body.displayName ?? "").trim();
   if (!displayName) throw new HttpError(400, "Case name is required", "NAME_REQUIRED");
 
-  const skuList = await store.skus();
+  const openingItems: any[] = Array.isArray(body.openingSkus) ? body.openingSkus : [];
+  const allActive = (l: MasterSku[]) => openingItems.every((i) => l.some((s) => s.active && s.sku_id === i?.sku_id));
+  const skuList = await listHaving(store, "skus", allActive);
   const skuIds = new Set(skuList.filter((s) => s.active).map((s) => s.sku_id));
   const opening = new Map<string, number>();
-  for (const item of Array.isArray(body.openingSkus) ? body.openingSkus : []) {
+  for (const item of openingItems) {
     const qty = parseQty(item?.opening_qty);
     if (!skuIds.has(item?.sku_id) || qty === null) throw new HttpError(400, "Invalid opening stock row", "BAD_OPENING");
     opening.set(item.sku_id, qty);
@@ -726,7 +730,8 @@ r.post("/stock/desk/:deskId/sku", async (c) => {
   const items: any[] = Array.isArray(body.items) ? body.items : [{ sku_id: body.sku_id, opening_qty: body.opening_qty, stock_in: body.stock_in }];
   if (items.length === 0 || items.length > MAX_ADD_ITEMS) throw new HttpError(400, `Add between 1 and ${MAX_ADD_ITEMS} SKUs`, "BAD_SKU");
 
-  const activeSkus = new Set((await store.skus()).filter((s) => s.active).map((s) => s.sku_id));
+  const allActive = (l: MasterSku[]) => items.every((i) => l.some((s) => s.active && s.sku_id === String(i?.sku_id ?? "")));
+  const activeSkus = new Set((await listHaving(store, "skus", allActive)).filter((s) => s.active).map((s) => s.sku_id));
   const qtyOf = (v: unknown, label: string) => {
     if (v === undefined || v === null || v === "") return 0;
     const qty = parseQty(v);

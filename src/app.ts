@@ -6,7 +6,7 @@ import type { Desk, DeskDay, Env, SessionUser } from "./types";
 import { getStore, type Store } from "./store";
 import { assertBranchAccess } from "./auth";
 import { isLive, isValidDate } from "./time";
-import { cachedStore } from "./cachedStore";
+import { cachedStore, listHaving } from "./cachedStore";
 import { dataMode } from "./dataMode";
 
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser } };
@@ -61,12 +61,12 @@ export function scopeBranch(user: SessionUser, requestedBranchId: string | undef
 // allBranches = every branch, admin only. Otherwise one branch: a staff or
 // manager gets their own (another one sent is refused); an admin must name one.
 export async function targetBranches(store: Store, user: SessionUser, branchId: unknown, allBranches?: unknown): Promise<string[]> {
-  const branches = await store.branches();
+  const asked = branchId === undefined || branchId === null || branchId === "" ? undefined : String(branchId);
+  const branches = await listHaving(store, "branches", (l) => allBranches === true || user.role !== "admin" || asked === undefined || l.some((b) => b.branch_id === asked));
   if (allBranches === true) {
     if (user.role !== "admin") throw new HttpError(403, "Only an admin can change every branch", "ROLE_DENIED");
     return branches.map((b) => b.branch_id);
   }
-  const asked = branchId === undefined || branchId === null || branchId === "" ? undefined : String(branchId);
   if (user.role !== "admin") {
     if (asked !== undefined && asked !== user.branchId) throw new HttpError(403, "Branch access denied", "BRANCH_DENIED");
     if (!user.branchId) throw new HttpError(400, "branchId is required", "BRANCH_REQUIRED");

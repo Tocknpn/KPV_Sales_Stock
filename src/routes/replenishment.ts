@@ -6,6 +6,7 @@
 // Mounted behind requireAuth in src/index.ts.
 import { storeFor, newRouter, readBody, HttpError, audit, scopeBranch, targetBranches } from "../app";
 import { businessDate } from "../time";
+import { listHaving } from "../cachedStore";
 import { loadBranchRows } from "../replenishment";
 import type { RuleTarget, Store } from "../store";
 import type { ReplenishmentRule, RuleScope } from "../types";
@@ -33,7 +34,8 @@ r.get("/replenishment", async (c) => {
   const user = c.get("user");
   const branchId = scopeBranch(user, c.req.query("branchId") || undefined);
   if (!branchId) throw new HttpError(400, "branchId is required", "BRANCH_REQUIRED");
-  if (!(await store.branches()).some((b) => b.branch_id === branchId)) throw new HttpError(404, "Branch not found", "BRANCH_NOT_FOUND");
+  const has = (l: { branch_id: string }[]) => l.some((b) => b.branch_id === branchId);
+  if (!has(await listHaving(store, "branches", has))) throw new HttpError(404, "Branch not found", "BRANCH_NOT_FOUND");
   const today = businessDate(c.env);
   const [rows, config] = await Promise.all([loadBranchRows(store, branchId, today), store.config()]);
   return c.json({
@@ -48,8 +50,12 @@ r.get("/replenishment", async (c) => {
 // PUT /replenishment/rules: one rule; a null / missing value inherits.
 // ---------------------------------------------------------------------------
 async function validScopeKey(store: Store, scope: RuleScope, key: string) {
-  if (scope === "type") return (await store.skuTypes()).some((t) => t.type_id === key);
-  return (await store.skus()).some((s) => s.sku_id === key);
+  if (scope === "type") {
+    const has = (l: { type_id: string }[]) => l.some((t) => t.type_id === key);
+    return has(await listHaving(store, "skuTypes", has));
+  }
+  const has = (l: { sku_id: string }[]) => l.some((s) => s.sku_id === key);
+  return has(await listHaving(store, "skus", has));
 }
 
 // The audit target's branch part: "*" for every branch.

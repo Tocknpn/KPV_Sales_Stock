@@ -6,8 +6,10 @@
 // SKU weights, branches, system config) are also kept in Worker memory for
 // 30 s, shared by every request on the isolate. A write to one of those tables
 // through any CachedStore clears it at once; another isolate can lag up to
-// 30 s (accepted by the owner). Staff accounts, days, ledger and transfers are
-// always read fresh by each request.
+// 30 s (accepted by the owner). A route that checks an id against one of those
+// lists uses listHaving(), which reads fresh once before refusing, so a SKU
+// just made on another isolate is never refused. Staff accounts, days, ledger
+// and transfers are always read fresh by each request.
 import type { Store } from "./store";
 
 export const SHARED_TTL_MS = 30_000;
@@ -35,13 +37,21 @@ const INVALIDATES: Partial<Record<keyof Store, readonly MemoMethod[]>> = {
   setCarried: ["branchSkus"],
 };
 
+// Only settled values are shared: a request never awaits another request's
+// pending read (Workers may cancel or hang a subrequest across requests).
 interface SharedEntry {
   at: number;
-  value: Promise<unknown>;
+  value: unknown;
 }
-// sharedKey -> "method" -> entry. The key names the database (data mode +
-// URL), so test and production data never share an entry.
-const sharedCache = new Map<string, Map<string, SharedEntry>>();
+interface SharedSlot {
+  entries: Map<string, SharedEntry>;
+  // Bumped by every write to the table: a read that started before the write
+  // must not store what it got afterwards.
+  gen: Map<string, number>;
+}
+// sharedKey -> slot. The key names the database (data mode + URL), so test
+// and production data never share an entry.
+const sharedCache = new Map<string, SharedSlot>();
 
 // Tests only.
 export function clearSharedCache() {
@@ -56,34 +66,79 @@ export interface CacheOptions {
 
 const isMemo = (prop: string): prop is MemoMethod => (MEMO as readonly string[]).includes(prop);
 
+// CachedStore -> the same store with its memoised lists read fresh.
+const freshViews = new WeakMap<Store, Store>();
+
+// The store with every memoised list read from the database now (the result
+// refreshes both cache layers). Writes behave as on the store itself. A store
+// without a cache is returned as is.
+export function fresh(store: Store): Store {
+  return freshViews.get(store) ?? store;
+}
+
+type Lookup = "skus" | "skuTypes" | "skuWeights" | "branches";
+type ListOf<M extends Lookup> = Awaited<ReturnType<Store[M]>>;
+
+// A cached list that passes `ok`, re-read fresh once when the cached copy
+// fails it: an id made on another isolate within the last 30 s is found.
+export async function listHaving<M extends Lookup>(store: Store, method: M, ok: (list: ListOf<M>) => boolean): Promise<ListOf<M>> {
+  const read = (s: Store) => (s as unknown as Record<M, () => Promise<ListOf<M>>>)[method]();
+  const list = await read(store);
+  const view = freshViews.get(store);
+  if (ok(list) || !view) return list;
+  return read(view);
+}
+
 export function cachedStore(inner: Store, opts: CacheOptions = {}): Store {
   const now = opts.now ?? Date.now;
-  // "method|args" -> the pending or settled read, so concurrent callers share it.
+  // "method|args" -> this request's pending or settled read, so its own
+  // concurrent callers share it.
   const memo = new Map<string, Promise<unknown>>();
-  const shared = opts.sharedKey === undefined ? undefined : sharedCache.get(opts.sharedKey) ?? sharedCache.set(opts.sharedKey, new Map()).get(opts.sharedKey)!;
+  let shared: SharedSlot | undefined;
+  if (opts.sharedKey !== undefined) {
+    shared = sharedCache.get(opts.sharedKey);
+    if (!shared) sharedCache.set(opts.sharedKey, (shared = { entries: new Map(), gen: new Map() }));
+  }
+  const isShared = (m: MemoMethod) => !!shared && SHARED.includes(m);
 
   const forget = (tables: readonly MemoMethod[]) => {
     for (const key of [...memo.keys()]) if (tables.includes(key.split("|")[0] as MemoMethod)) memo.delete(key);
-    if (shared) for (const t of tables) shared.delete(t);
-  };
-
-  // A rejected read is dropped from both layers, so the next call tries again.
-  const readShared = (method: MemoMethod, read: () => Promise<unknown>): Promise<unknown> => {
-    let entry = shared!.get(method);
-    if (!entry || now() - entry.at >= SHARED_TTL_MS) {
-      const fresh: SharedEntry = { at: now(), value: read() };
-      fresh.value.catch(() => {
-        if (shared!.get(method) === fresh) shared!.delete(method);
-      });
-      shared!.set(method, fresh);
-      entry = fresh;
+    if (shared) {
+      for (const t of tables) {
+        shared.entries.delete(t);
+        shared.gen.set(t, (shared.gen.get(t) ?? 0) + 1);
+      }
     }
-    // Each request gets its own copy: a caller that changes what it got must
-    // not change what the next request reads.
-    return entry.value.then((v) => structuredClone(v));
   };
 
-  return new Proxy(inner, {
+  // This request's own read; its settled value is shared unless a write to
+  // the table happened meanwhile. Each request gets its own copy: a caller
+  // that changes what it got must not change what the next request reads.
+  const readAndShare = async (method: MemoMethod, read: () => Promise<unknown>): Promise<unknown> => {
+    const slot = shared!;
+    const gen = slot.gen.get(method) ?? 0;
+    const at = now();
+    const value = await read();
+    if ((slot.gen.get(method) ?? 0) === gen) slot.entries.set(method, { at, value: structuredClone(value) });
+    return value;
+  };
+
+  const readShared = (method: MemoMethod, read: () => Promise<unknown>): Promise<unknown> => {
+    const entry = shared!.entries.get(method);
+    if (entry && now() - entry.at < SHARED_TTL_MS) return Promise.resolve(structuredClone(entry.value));
+    return readAndShare(method, read);
+  };
+
+  const remember = (key: string, p: Promise<unknown>) => {
+    memo.set(key, p);
+    // A rejected read is dropped, so the next call tries again.
+    p.catch(() => {
+      if (memo.get(key) === p) memo.delete(key);
+    });
+    return p;
+  };
+
+  const proxy = new Proxy(inner, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver);
       if (typeof value !== "function" || typeof prop !== "string") return value;
@@ -93,12 +148,7 @@ export function cachedStore(inner: Store, opts: CacheOptions = {}): Store {
           const hit = memo.get(key);
           if (hit) return hit;
           const read = () => value.apply(target, args) as Promise<unknown>;
-          const p = shared && SHARED.includes(prop) ? readShared(prop, read) : read();
-          memo.set(key, p);
-          p.catch(() => {
-            if (memo.get(key) === p) memo.delete(key);
-          });
-          return p;
+          return remember(key, isShared(prop) ? readShared(prop, read) : read());
         };
       }
       const tables = INVALIDATES[prop as keyof Store];
@@ -113,4 +163,19 @@ export function cachedStore(inner: Store, opts: CacheOptions = {}): Store {
       };
     },
   });
+
+  const freshView = new Proxy(inner, {
+    get(target, prop, receiver) {
+      if (typeof prop === "string" && isMemo(prop)) {
+        const value = Reflect.get(target, prop, receiver) as (...a: unknown[]) => Promise<unknown>;
+        return (...args: unknown[]) => {
+          const read = () => value.apply(target, args);
+          return remember(`${prop}|${JSON.stringify(args)}`, isShared(prop) ? readAndShare(prop, read) : read());
+        };
+      }
+      return Reflect.get(proxy, prop);
+    },
+  });
+  freshViews.set(proxy, freshView);
+  return proxy;
 }

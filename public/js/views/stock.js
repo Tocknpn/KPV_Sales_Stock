@@ -223,9 +223,12 @@ function statusIconHtml(badge) {
 }
 
 // One step button: the active step is the primary button; done and locked steps are grey and disabled.
+// The label sits in its own span: a flex button cannot truncate its text, so a
+// long label ("Go to 18th Nov") ends in "…" instead of being cut off.
 function stepButton(step, stepState, label) {
-  if (stepState === "active") return `<button data-step="${step}" class="btn-primary min-w-[64px] max-w-[96px] shrink-0 truncate px-2 py-2 text-[11px]">${label}</button>`;
-  return `<button data-step="${step}" disabled aria-disabled="true" class="btn-secondary min-w-[64px] max-w-[96px] shrink-0 cursor-not-allowed truncate bg-gray-100 px-2 py-2 text-[11px] text-gray-400">${label}${stepState === "done" ? " ✓" : ""}</button>`;
+  if (stepState === "active") return `<button data-step="${step}" title="${escapeHtml(label)}" class="btn-primary min-w-[64px] max-w-[96px] shrink-0 overflow-hidden px-2 py-2 text-[11px]"><span class="min-w-0 truncate">${escapeHtml(label)}</span></button>`;
+  const text = `${label}${stepState === "done" ? " ✓" : ""}`;
+  return `<button data-step="${step}" disabled aria-disabled="true" title="${escapeHtml(text)}" class="btn-secondary min-w-[64px] max-w-[96px] shrink-0 cursor-not-allowed overflow-hidden bg-gray-100 px-2 py-2 text-[11px] text-gray-400"><span class="min-w-0 truncate">${escapeHtml(text)}</span></button>`;
 }
 
 // The warning line under an overdue card; other tiers say nothing extra.
@@ -251,9 +254,9 @@ function renderCard(d) {
   return `
     <div class="card border-l-4 px-3 py-2.5 ${overdue ? "border-l-danger" : "border-l-transparent"}" data-card="${d.desk_id}" data-tier="${d.tier}">
       <div class="flex items-center gap-2">
-        <div class="min-w-0 flex-1">
+        <div class="min-w-0 flex-1 overflow-hidden">
           <div class="truncate text-sm font-extrabold text-gray-900">${escapeHtml(d.display_name)}</div>
-          <div class="mt-0.5 flex items-center gap-2 text-xs font-bold text-gray-800">
+          <div class="mt-0.5 flex min-w-0 items-center gap-2 overflow-hidden text-xs font-bold text-gray-800">
             <span class="min-w-0 truncate">${fmtBaht(d.totalBaht)} Baht · ${fmtInt(d.totalPcs)} pcs</span>
             ${d.streak > 0 ? `<span class="inline-flex shrink-0 items-center gap-0.5 text-[11px] font-extrabold text-brand-700">${flameIcon()}${streak}<span class="sr-only"> ${t("stock.streakDays")}</span></span>` : ""}
             ${d.criticalCount > 0 ? `<span class="shrink-0 text-[11px] font-bold text-danger">⚠ ${d.criticalCount} ${t("stock.criticalShort")}</span>` : ""}

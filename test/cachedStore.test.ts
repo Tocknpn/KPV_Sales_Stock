@@ -2,7 +2,8 @@
 // the Supabase store only) shared across requests for 30 s. Writes to those
 // tables clear both layers.
 import { beforeEach, describe, expect, it } from "vitest";
-import { cachedStore, clearSharedCache, SHARED_TTL_MS } from "../src/cachedStore";
+import { cachedStore, clearSharedCache, fresh, listHaving, SHARED_TTL_MS } from "../src/cachedStore";
+import type { Store } from "../src/store";
 import { getStore, resetDemoStore } from "../src/store";
 import { DEMO_ADMIN_ID } from "../src/demoData";
 import { TODAY } from "./helpers";
@@ -175,5 +176,106 @@ describe("30 s shared cache (Supabase only)", () => {
     await cachedStore(spy.store, { sharedKey: "test|a" }).skus();
     await cachedStore(spy.store, { sharedKey: "production|b" }).skus();
     expect(spy.count("skus")).toBe(2);
+  });
+});
+
+// A store whose skus() waits until the test lets it go.
+function gated(inner: Store) {
+  const waiting: (() => void)[] = [];
+  let calls = 0;
+  const store = new Proxy(inner, {
+    get(t, p, r) {
+      if (p === "skus") {
+        return async () => {
+          calls++;
+          const list = await inner.skus();
+          const copy = structuredClone(list);
+          await new Promise<void>((go) => waiting.push(go));
+          return copy;
+        };
+      }
+      return Reflect.get(t, p, r);
+    },
+  });
+  return { store, calls: () => calls, release: () => waiting.splice(0).forEach((go) => go()) };
+}
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+describe("shared cache holds only settled values", () => {
+  it("a request never awaits another request's pending read", async () => {
+    const g = gated(raw());
+    const req = () => cachedStore(g.store, { sharedKey: "k" });
+    const a = req().skus();
+    const b = req().skus();
+    await tick();
+    // Each request made its own read.
+    expect(g.calls()).toBe(2);
+    g.release();
+    await Promise.all([a, b]);
+    // Settled: the next request is served from memory.
+    await req().skus();
+    expect(g.calls()).toBe(2);
+  });
+
+  it("a read that started before a write does not store its result after it", async () => {
+    const g = gated(raw());
+    const req = () => cachedStore(g.store, { sharedKey: "k" });
+    const slow = req().skus();
+    await tick();
+    const sku = (await raw().skus())[0];
+    await req().updateSku(sku.sku_id, { name_en: "After" });
+    g.release();
+    expect((await slow).find((s) => s.sku_id === sku.sku_id)!.name_en).not.toBe("After");
+    const next = req().skus();
+    await tick();
+    expect(g.calls()).toBe(2);
+    g.release();
+    expect((await next).find((s) => s.sku_id === sku.sku_id)!.name_en).toBe("After");
+  });
+
+  it("the within-request memo still shares its own pending read", async () => {
+    const g = gated(raw());
+    const store = cachedStore(g.store, { sharedKey: "k" });
+    const a = store.skus();
+    const b = store.skus();
+    await tick();
+    expect(g.calls()).toBe(1);
+    g.release();
+    expect(await a).toBe(await b);
+  });
+});
+
+describe("fresh reads for id checks", () => {
+  it("an id missing from the cached list but in the database is found", async () => {
+    const spy = spyStore(raw());
+    const req = () => cachedStore(spy.store, { sharedKey: "k" });
+    await req().skus();
+    // Made on another isolate: this one's 30 s cache does not know it.
+    const [base] = await raw().skus();
+    await raw().createSkus([{ ...base, sku_id: "SKU-NEW-ELSEWHERE" }]);
+    const r = req();
+    expect((await r.skus()).some((s) => s.sku_id === "SKU-NEW-ELSEWHERE")).toBe(false);
+    const list = await listHaving(r, "skus", (l) => l.some((s) => s.sku_id === "SKU-NEW-ELSEWHERE"));
+    expect(list.some((s) => s.sku_id === "SKU-NEW-ELSEWHERE")).toBe(true);
+    // The fresh read refreshed both layers.
+    expect((await r.skus()).some((s) => s.sku_id === "SKU-NEW-ELSEWHERE")).toBe(true);
+    expect((await req().skus()).some((s) => s.sku_id === "SKU-NEW-ELSEWHERE")).toBe(true);
+    expect(spy.count("skus")).toBe(2);
+  });
+
+  it("a hit on the cached list reads nothing more; a real miss reads once", async () => {
+    const spy = spyStore(raw());
+    const r = cachedStore(spy.store, { sharedKey: "k" });
+    const [first] = await r.skus();
+    await listHaving(r, "skus", (l) => l.some((s) => s.sku_id === first.sku_id));
+    expect(spy.count("skus")).toBe(1);
+    const list = await listHaving(r, "skus", (l) => l.some((s) => s.sku_id === "NO-SUCH"));
+    expect(list.some((s) => s.sku_id === "NO-SUCH")).toBe(false);
+    expect(spy.count("skus")).toBe(2);
+  });
+
+  it("fresh() of a store without a cache is the store itself", () => {
+    const s = raw();
+    expect(fresh(s)).toBe(s);
   });
 });
