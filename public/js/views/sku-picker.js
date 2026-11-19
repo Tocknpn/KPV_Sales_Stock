@@ -16,12 +16,13 @@ const CHECK = `<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="curr
 // onAdd(skus, { types, weights }) gets the picked SKUs (full objects, grid
 // order) and the type/weight lists it loaded; onCancel() is "Back".
 // SKUs already on the case (excludeSkuIds) show greyed out as "In case".
-export async function renderSkuPickerInto(container, { excludeSkuIds = [], onAdd, onCancel, branchId }) {
+// allowCreate: false hides "New SKU" (reorder proposals only pick existing ones).
+export async function renderSkuPickerInto(container, { excludeSkuIds = [], onAdd, onCancel, branchId, allowCreate = true }) {
   container.innerHTML = skeletonGrid();
   const branch = branchId || state.user?.branchId || state.stock.branch || undefined;
   const [{ skus }, { types }, { weights }] = await Promise.all([api.skus({ branchId: branch }), api.skuTypes(), api.skuWeights()]);
   const inCase = new Set(excludeSkuIds);
-  const canCreate = !!state.user;
+  const canCreate = allowCreate && !!state.user;
   let all = skus.filter((s) => s.carried !== false);
   let selected = new Set();
   let query = "";

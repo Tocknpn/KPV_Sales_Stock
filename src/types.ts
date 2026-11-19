@@ -211,6 +211,8 @@ export interface DocumentRow {
   qty: number | null;
   weight_g: number | null;
   note: string | null;
+  // Reorder proposals: the stock the manager saw when ordering.
+  balance?: number | null;
 }
 
 export type DocumentKind = "document" | "proposal";
@@ -231,6 +233,8 @@ export interface DocumentRecord {
   status: ProposalStatus | null;
   decided_by: string | null;
   decided_at: string | null;
+  // Proposals saved together (several cases at once) share a group id.
+  group_id?: string | null;
   rows?: DocumentRow[];
 }
 

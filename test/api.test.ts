@@ -447,7 +447,8 @@ describe("linked transfers", () => {
 describe("documents", () => {
   it("numbers never repeat, even after a delete", async () => {
     const admin = await asAdmin();
-    const make = async () => (await call(admin, "POST", "/documents", { title: "Receipt", branchId: "B-MM", deskId: "MM-D01", rows: [{ item: "x", qty: 1 }] })).json;
+    const make = async () =>
+      (await call(admin, "POST", "/documents", { title: "Order", branchId: "B-MM", deskId: "MM-D01", rows: [{ item: "x", qty: 1 }] })).json;
     const first = await make();
     expect(first.doc_no).toBe("DOC-MM-2026-0003");
     expect((await call(admin, "DELETE", `/documents/${first.id}`)).status).toBe(200);
@@ -456,17 +457,18 @@ describe("documents", () => {
 
   it("a desk from another branch is refused", async () => {
     const admin = await asAdmin();
-    expect((await call(admin, "POST", "/documents", { title: "x", branchId: "B-MM", deskId: "VTC-D01" })).json.code).toBe("DESK_NOT_IN_BRANCH");
+    expect((await call(admin, "POST", "/documents", { title: "x", branchId: "B-MM", deskId: "VTC-D01", rows: [{ item: "x", qty: 1 }] })).json.code).toBe(
+      "DESK_NOT_IN_BRANCH"
+    );
   });
 
-  it("proposals are approved once, by an admin; ordinary documents have no status", async () => {
-    const staff = await asStaff("B-MM");
+  it("proposals are approved once, by an admin", async () => {
+    const manager = await asManager("B-MM");
     const admin = await asAdmin();
-    const proposal = (await call(staff, "POST", "/documents", { title: "Order", branchId: "B-MM", deskId: "MM-D01", kind: "proposal", rows: [{ item: "Gold Bar", qty: 5 }] })).json;
+    const proposal = (await call(manager, "POST", "/documents", { title: "Order", branchId: "B-MM", deskId: "MM-D01", rows: [{ item: "Gold Bar", qty: 5 }] })).json;
     expect(proposal.status).toBe("pending");
-    const plain = (await call(staff, "POST", "/documents", { title: "Receipt", branchId: "B-MM" })).json;
-    expect(plain.status).toBeNull();
-    expect((await call(admin, "POST", `/documents/${plain.id}/decision`, { decision: "approved" })).json.code).toBe("NOT_A_PROPOSAL");
+    expect(proposal.kind).toBe("proposal");
+    expect((await call(admin, "POST", "/documents/a0000000-0000-0000-0000-000000000001/decision", { decision: "approved" })).json.code).toBe("NOT_A_PROPOSAL");
     expect((await call(admin, "POST", `/documents/${proposal.id}/decision`, { decision: "approved" })).status).toBe(200);
     expect((await call(admin, "POST", `/documents/${proposal.id}/decision`, { decision: "rejected" })).json.code).toBe("ALREADY_DECIDED");
     const pending = (await call(admin, "GET", "/documents?kind=proposal&status=pending")).json.documents;

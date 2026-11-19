@@ -409,6 +409,9 @@ export function enrichDocuments(docs: DocumentRecord[], branches: Branch[], desk
       desk_name: doc.desk_id ? deskById.get(doc.desk_id)?.display_name ?? null : null,
       rowCount: rows.length,
       totalWeightG: round2(rows.reduce((s, r) => s + Number(r.weight_g ?? 0), 0)),
+      // Ordered lines only: a proposal lists every SKU on the case, ordered or not.
+      skuCount: rows.filter((r) => Number(r.qty ?? 0) > 0).length,
+      totalQty: round2(rows.reduce((s, r) => s + Number(r.qty ?? 0), 0)),
     };
   });
 }

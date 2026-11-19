@@ -1,21 +1,90 @@
-import { api, openDocumentPrint, openPrintTab, fillPrintTab } from "../api.js";
-import { isAdmin } from "../session.js";
+// Documents = reorder proposals. A branch manager (own branch) or an admin
+// creates and edits them from the "+" button; staff only view and print.
+// One proposal per case per day; several cases saved together share a group
+// and print as one PDF, each case on its own pages.
+import { api, openDocumentPrint, openPrintTab, fillPrintTabMany, openGroupPrint } from "../api.js";
+import { isAdmin, isManager } from "../session.js";
 import { state, branchName, setStoredDocView } from "../state.js";
 import { toast, openSheet, closeSheet, openActionSheet } from "../ui.js";
-import { fmtDateTime, escapeHtml, icon } from "../util.js";
-import { t } from "../i18n.js";
+import { fmtDate, fmtDateTime, escapeHtml, icon, fmtInt } from "../util.js";
+import { t, tf } from "../i18n.js";
 import { skuLabel } from "../sku-groups.js";
 import { skeletonCards, skeletonTable } from "../skeleton.js";
+import { renderSkuPickerInto } from "./sku-picker.js";
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 20;
+const CHEVRON = `<svg class="h-3 w-3 shrink-0 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>`;
+
+const canEdit = () => isManager(state.user);
+const round2 = (n) => Math.round(n * 100) / 100;
+
+function addDays(iso, n) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + Math.round(Number(n) || 0));
+  return d.toISOString().slice(0, 10);
+}
+
+function deskLabel(deskId) {
+  const desk = state.meta.desks.find((d) => d.desk_id === deskId);
+  return desk ? `${desk.desk_id} · ${desk.display_name}` : deskId ?? "—";
+}
 
 export async function mountDocuments() {
   renderTopbar();
+  renderFab();
   await refreshDocuments();
+}
+
+export function unmountDocuments() {
+  document.getElementById("fab-new-proposal")?.remove();
+}
+
+// ---------------------------------------------------------------------------
+// The "+" button: managers only, floating above the bottom nav.
+// ---------------------------------------------------------------------------
+function renderFab() {
+  let host = document.getElementById("fab-new-proposal");
+  if (!canEdit()) {
+    host?.remove();
+    return;
+  }
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "fab-new-proposal";
+    host.className = "pointer-events-none fixed inset-x-0 bottom-[72px] z-20 mx-auto flex max-w-[430px] justify-end px-4";
+    document.body.appendChild(host);
+  }
+  host.classList.remove("hidden");
+  host.innerHTML = `
+    <button id="new-proposal" aria-label="${t("documents.newProposal")}" class="pointer-events-auto tap-target flex h-14 w-14 items-center justify-center rounded-full bg-brand-700 text-white shadow-pop active:scale-95">
+      <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>
+    </button>`;
+  host.querySelector("#new-proposal").addEventListener("click", () => openProposalEditor());
+}
+
+function hideFab() {
+  document.getElementById("fab-new-proposal")?.classList.add("hidden");
+}
+
+// ---------------------------------------------------------------------------
+// Filters: Branch · Case · Date from–to · Created by, on one line.
+// ---------------------------------------------------------------------------
+function dateRangeLabel() {
+  const { dateFrom, dateTo } = state.documents;
+  if (!dateFrom && !dateTo) return t("documents.dateRange");
+  if (dateFrom && dateTo && dateFrom === dateTo) return fmtDate(dateFrom);
+  return `${dateFrom ? fmtDate(dateFrom) : "…"} – ${dateTo ? fmtDate(dateTo) : "…"}`;
+}
+
+function filterButton(id, label, active) {
+  return `<button id="${id}" class="flex min-w-0 items-center justify-between gap-1 rounded-xl border px-2 py-2 text-[11px] font-semibold ${
+    active ? "border-brand-300 bg-brand-50 text-brand-700" : "border-hairline bg-white text-gray-700"
+  }"><span class="truncate">${escapeHtml(label)}</span>${CHEVRON}</button>`;
 }
 
 function renderTopbar() {
   const el = document.getElementById("topbar-slot");
+  const f = state.documents;
   el.innerHTML = `
     <div class="flex items-start justify-between">
       <div>
@@ -27,38 +96,21 @@ function renderTopbar() {
         <button data-view-toggle="table" class="doc-view-toggle rounded-md px-2.5 py-1 text-[11px] font-bold">${t("documents.tableView")}</button>
       </div>
     </div>
-    <div class="mt-3 flex gap-2">
-      <button id="branch-select" class="chip flex-1 justify-between border-hairline bg-white text-gray-700">
-        <span id="branch-label" class="truncate">${state.documents.branch ? branchName(state.documents.branch) : t("documents.allBranches")}</span>
-        <svg class="h-3.5 w-3.5 shrink-0 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
-      </button>
-      <button id="desk-select" class="chip flex-1 justify-between border-hairline bg-white text-gray-700">
-        <span id="desk-label" class="truncate">${state.documents.desk ?? t("documents.allDesks")}</span>
-        <svg class="h-3.5 w-3.5 shrink-0 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
-      </button>
-    </div>
-    <input id="date-filter" type="date" value="${state.documents.date ?? ""}" class="input-filled mt-2 w-full text-xs" />
-    <div class="mt-2 flex gap-1.5" id="doc-kind-filter">
-      ${KIND_FILTERS.map((f) => `<button data-kind-filter="${f.id}" class="chip min-h-0 flex-1 justify-center text-[11px]">${t(f.labelKey)}</button>`).join("")}
+    <div class="mt-3 grid grid-cols-4 gap-1.5">
+      ${filterButton("branch-select", f.branch ? branchName(f.branch) : t("documents.allBranches"), !!f.branch)}
+      ${filterButton("desk-select", f.desk ?? t("documents.allCases"), !!f.desk)}
+      ${filterButton("date-select", dateRangeLabel(), !!(f.dateFrom || f.dateTo))}
+      ${filterButton("creator-select", f.createdBy ?? t("documents.filterByCreator"), !!f.createdBy)}
     </div>
   `;
 
-  const paintKindFilter = () =>
-    document.querySelectorAll("[data-kind-filter]").forEach((btn) => {
-      const active = btn.dataset.kindFilter === (state.documents.filter ?? "all");
-      btn.className = `chip min-h-0 flex-1 justify-center text-[11px] ${active ? "border-brand-600 bg-brand-600 text-white" : "border-hairline bg-white text-gray-600"}`;
-    });
-  document.querySelectorAll("[data-kind-filter]").forEach((btn) =>
-    btn.addEventListener("click", () => {
-      state.documents.filter = btn.dataset.kindFilter;
-      state.documents.page = 1;
-      paintKindFilter();
-      refreshDocuments();
-    })
-  );
-  paintKindFilter();
+  const changed = () => {
+    state.documents.page = 1;
+    renderTopbar();
+    refreshDocuments();
+  };
 
-  document.getElementById("branch-select").addEventListener("click", () => {
+  document.getElementById("branch-select").addEventListener("click", (e) => {
     const options = [{ label: t("documents.allBranches"), value: null }, ...state.meta.branches.map((b) => ({ label: branchName(b.branch_id), value: b.branch_id }))];
     openActionSheet(
       t("documents.filterByBranch"),
@@ -66,33 +118,78 @@ function renderTopbar() {
       (opt) => {
         state.documents.branch = opt.value;
         state.documents.desk = null;
-        state.documents.page = 1;
-        document.getElementById("branch-label").textContent = opt.label;
-        document.getElementById("desk-label").textContent = t("documents.allDesks");
-        refreshDocuments();
-      }
+        state.documents.createdBy = null;
+        changed();
+      },
+      { anchorEl: e.currentTarget }
     );
   });
 
-  document.getElementById("desk-select").addEventListener("click", () => {
+  document.getElementById("desk-select").addEventListener("click", (e) => {
     const pool = state.documents.branch ? state.meta.desks.filter((d) => d.branch_id === state.documents.branch) : state.meta.desks;
-    const options = [{ label: t("documents.allDesks"), value: null }, ...pool.map((d) => ({ label: `${d.desk_id} · ${d.display_name}`, value: d.desk_id }))];
+    const options = [{ label: t("documents.allCases"), value: null }, ...pool.map((d) => ({ label: `${d.desk_id} · ${d.display_name}`, value: d.desk_id }))];
     openActionSheet(
       t("documents.filterByDesk"),
       options.map((o) => ({ ...o, selected: o.value === state.documents.desk })),
       (opt) => {
         state.documents.desk = opt.value;
-        state.documents.page = 1;
-        document.getElementById("desk-label").textContent = opt.label ?? t("documents.allDesks");
-        refreshDocuments();
+        changed();
+      },
+      { anchorEl: e.currentTarget }
+    );
+  });
+
+  document.getElementById("date-select").addEventListener("click", (e) => {
+    openSheet(
+      `
+      <label class="mb-1 block text-xs font-bold text-gray-600">${t("documents.dateFrom")}</label>
+      <input id="range-from" type="date" value="${state.documents.dateFrom ?? ""}" max="${state.meta.today}" class="input-filled mb-3 w-full text-sm" />
+      <label class="mb-1 block text-xs font-bold text-gray-600">${t("documents.dateTo")}</label>
+      <input id="range-to" type="date" value="${state.documents.dateTo ?? ""}" max="${state.meta.today}" class="input-filled mb-4 w-full text-sm" />
+      <div class="flex gap-2 pb-2">
+        <button id="range-clear" class="btn-secondary flex-1">${t("documents.clear")}</button>
+        <button id="range-apply" class="btn-primary flex-1">${t("documents.apply")}</button>
+      </div>`,
+      {
+        title: t("documents.dateRange"),
+        anchorEl: e.currentTarget,
+        onMount: (body) => {
+          body.querySelector("#range-clear").addEventListener("click", () => {
+            state.documents.dateFrom = null;
+            state.documents.dateTo = null;
+            closeSheet();
+            changed();
+          });
+          body.querySelector("#range-apply").addEventListener("click", () => {
+            let from = body.querySelector("#range-from").value || null;
+            let to = body.querySelector("#range-to").value || null;
+            if (from && to && from > to) [from, to] = [to, from];
+            state.documents.dateFrom = from;
+            state.documents.dateTo = to;
+            closeSheet();
+            changed();
+          });
+        },
       }
     );
   });
 
-  document.getElementById("date-filter").addEventListener("change", (e) => {
-    state.documents.date = e.target.value || null;
-    state.documents.page = 1;
-    refreshDocuments();
+  document.getElementById("creator-select").addEventListener("click", async (e) => {
+    const anchorEl = e.currentTarget;
+    let creators = [];
+    try {
+      ({ creators } = await api.documentCreators(state.documents.branch));
+    } catch {}
+    const options = [{ label: t("documents.allCreators"), value: null }, ...creators.map((name) => ({ label: escapeHtml(name), value: name }))];
+    openActionSheet(
+      t("documents.filterByCreator"),
+      options.map((o) => ({ ...o, selected: o.value === state.documents.createdBy })),
+      (opt) => {
+        state.documents.createdBy = opt.value;
+        changed();
+      },
+      { anchorEl }
+    );
   });
 
   document.querySelectorAll(".doc-view-toggle").forEach((btn) =>
@@ -118,19 +215,12 @@ function applyViewToggleStyles() {
 
 let lastData = { documents: [], total: 0, page: 1, pageSize: PAGE_SIZE };
 
-const KIND_FILTERS = [
-  { id: "all", labelKey: "documents.filterAll", params: {} },
-  { id: "proposals", labelKey: "documents.filterProposals", params: { kind: "proposal" } },
-  { id: "pending", labelKey: "documents.filterPending", params: { kind: "proposal", status: "pending" } },
-];
-
 const STATUS_STYLE = {
   pending: "bg-warning-bg text-warning",
   approved: "bg-success-bg text-success",
   rejected: "bg-danger-bg text-danger",
 };
 
-// Only purchase proposals carry a status.
 function statusChip(doc) {
   if (!doc.status) return "";
   return `<span class="status-pill shrink-0 ${STATUS_STYLE[doc.status]}">${t(`documents.status.${doc.status}`)}</span>`;
@@ -140,38 +230,40 @@ function deskLabelOf(doc) {
   return doc.desk_id ? ` · ${escapeHtml(doc.desk_name ? `${doc.desk_id} ${doc.desk_name}` : doc.desk_id)}` : "";
 }
 
+// A manager edits or deletes a pending proposal of their branch; an admin deletes anything.
+const mayEditDoc = (doc) => canEdit() && doc.kind === "proposal" && doc.status === "pending";
+const mayDeleteDoc = (doc) => isAdmin(state.user) || mayEditDoc(doc);
+
 async function refreshDocuments() {
   const root = document.getElementById("view-root");
   root.innerHTML = skeletonCards(4);
+  const f = state.documents;
   const data = await api.documents({
-    branchId: state.documents.branch,
-    deskId: state.documents.desk,
-    date: state.documents.date,
-    page: state.documents.page,
+    branchId: f.branch,
+    deskId: f.desk,
+    dateFrom: f.dateFrom,
+    dateTo: f.dateTo,
+    createdBy: f.createdBy,
+    page: f.page,
     pageSize: PAGE_SIZE,
-    ...(KIND_FILTERS.find((f) => f.id === state.documents.filter)?.params ?? {}),
   });
   lastData = data;
-  renderList(data);
+  if (state.view === "documents" && !document.getElementById("proposal-back")) renderList(data);
+}
+
+function totalsLine(d) {
+  return `<span><b class="text-gray-800">${fmtInt(d.skuCount ?? 0)}</b> ${t("documents.skuCount")}</span>
+    <span><b class="text-gray-800">${fmtInt(d.totalQty ?? 0)}</b> ${t("documents.pcs")}</span>
+    <span><b class="text-gray-800">${round2(d.totalWeightG ?? 0)}</b> g</span>`;
 }
 
 function renderList(data) {
   const root = document.getElementById("view-root");
   root.innerHTML = `
-    <button id="new-doc" class="btn-primary mb-2 w-full">
-      <svg class="h-5 w-5 md:h-6 md:w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12h14"/></svg>
-      ${t("documents.newDocument")}
-    </button>
-    <button id="new-proposal" class="btn-secondary mb-4 w-full border-danger/30 text-danger">
-      <svg class="h-5 w-5 md:h-6 md:w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l9-4 9 4-9 4-9-4z"/><path stroke-linecap="round" stroke-linejoin="round" d="M3 8v9l9 4 9-4V8M12 12v9"/></svg>
-      ${t("documents.newProposal")}
-    </button>
     <div id="doc-list"></div>
     <div id="doc-pagination" class="mt-4 flex items-center justify-between"></div>
+    <div class="h-20"></div>
   `;
-  document.getElementById("new-doc").addEventListener("click", openNewDocumentSheet);
-  document.getElementById("new-proposal").addEventListener("click", openReorderProposalPage);
-
   const listEl = document.getElementById("doc-list");
   if (data.documents.length === 0) {
     listEl.innerHTML = `<div class="card py-10 text-center text-sm text-gray-600">${t("documents.noDocuments")}</div>`;
@@ -180,8 +272,13 @@ function renderList(data) {
   } else {
     renderCards(listEl, data.documents);
   }
-
   renderPagination(data);
+}
+
+function groupLink(d) {
+  return d.group_id && d.group_size > 1
+    ? `<button data-print-group="${escapeHtml(d.group_id)}" class="font-bold text-brand-600">${tf("documents.groupOf", { n: d.group_size })} · ${t("documents.printAll")}</button>`
+    : "";
 }
 
 function renderCards(listEl, docs) {
@@ -189,27 +286,22 @@ function renderCards(listEl, docs) {
   listEl.innerHTML = docs
     .map(
       (d) => `
-    <div class="card p-2.5" data-doc="${d.id}">
-      <div class="flex items-center justify-between">
+    <div class="card cursor-pointer p-2.5" data-doc="${d.id}">
+      <div class="flex items-center justify-between gap-2">
         <div class="min-w-0">
           <div class="truncate text-xs font-extrabold text-gray-900">${escapeHtml(d.title)}</div>
           <div class="text-[10px] text-gray-500">${escapeHtml(d.doc_no)}</div>
         </div>
-        <div class="flex shrink-0 items-center gap-1">
-          ${statusChip(d)}
-          ${
-            isAdmin(state.user)
-              ? `<button data-delete="${d.id}" aria-label="${t("documents.delete")}" class="tap-target shrink-0 text-gray-400 hover:text-danger">
-          <svg class="h-4 w-4 md:h-5 md:w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M9 7V4h6v3m-7 0 1 13h6l1-13"/></svg>
-        </button>`
-              : ""
-          }
-        </div>
+        ${statusChip(d)}
       </div>
-      <div class="mt-1.5 text-[11px] text-gray-600">${escapeHtml(branchName(d.branch_id))}${deskLabelOf(d)} · ${fmtDateTime(d.created_at)} · ${escapeHtml(d.created_by)}</div>
-      <div class="mt-2 flex items-center justify-between border-t border-hairline pt-2 text-[11px]">
-        <span class="text-gray-500">${d.rowCount} ${t("documents.rows")}</span>
-        <button data-print="${d.id}" class="font-bold text-brand-600">${t("documents.printPdf")} ↗</button>
+      <div class="mt-1.5 text-[11px] text-gray-600">${escapeHtml(branchName(d.branch_id))}${deskLabelOf(d)} · ${fmtDate(d.doc_date)} · ${escapeHtml(d.created_by)}</div>
+      <div class="mt-1.5 flex flex-wrap gap-x-3 text-[11px] text-gray-500">${totalsLine(d)}</div>
+      <div class="mt-2 flex items-center justify-between gap-2 border-t border-hairline pt-2 text-[11px]">
+        <span class="text-gray-400">${fmtDateTime(d.created_at)}</span>
+        <span class="flex items-center gap-3">
+          ${groupLink(d)}
+          <button data-print="${d.id}" class="font-bold text-brand-600">${t("documents.printPdf")} ↗</button>
+        </span>
       </div>
     </div>`
     )
@@ -218,16 +310,18 @@ function renderCards(listEl, docs) {
 }
 
 function renderTable(listEl, docs) {
-  listEl.className = "overflow-x-auto rounded-xl border border-hairline";
+  listEl.className = "overflow-x-auto rounded-xl border border-hairline bg-white";
   listEl.innerHTML = `
     <table class="w-full text-left text-[11px] md:text-sm">
       <thead class="bg-gray-50 text-gray-600">
         <tr>
           <th class="px-3 py-2 font-semibold">${t("documents.docNo")}</th>
-          <th class="px-3 py-2 font-semibold">${t("documents.titleField")}</th>
-          <th class="px-3 py-2 font-semibold">${t("documents.branch")}</th>
+          <th class="px-3 py-2 font-semibold">${t("documents.desk")}</th>
           <th class="px-3 py-2 font-semibold">${t("documents.date")}</th>
-          <th class="px-3 py-2 text-right font-semibold">${t("documents.rows")}</th>
+          <th class="px-3 py-2 font-semibold">${t("documents.createdBy")}</th>
+          <th class="px-3 py-2 text-right font-semibold">${t("documents.skuCount")}</th>
+          <th class="px-3 py-2 text-right font-semibold">${t("documents.totalQty")}</th>
+          <th class="px-3 py-2 text-right font-semibold">${t("documents.totalWeight")}</th>
           <th class="px-3 py-2"></th>
         </tr>
       </thead>
@@ -235,15 +329,17 @@ function renderTable(listEl, docs) {
         ${docs
           .map(
             (d) => `
-          <tr data-doc="${d.id}">
-            <td class="whitespace-nowrap px-3 py-2 font-semibold text-gray-800">${escapeHtml(d.doc_no)}</td>
-            <td class="px-3 py-2 text-gray-700">${escapeHtml(d.title)} ${statusChip(d)}</td>
-            <td class="px-3 py-2 text-gray-500">${escapeHtml(branchName(d.branch_id))}${deskLabelOf(d)}</td>
+          <tr data-doc="${d.id}" class="cursor-pointer">
+            <td class="whitespace-nowrap px-3 py-2 font-semibold text-gray-800">${escapeHtml(d.doc_no)} ${statusChip(d)}</td>
+            <td class="whitespace-nowrap px-3 py-2 text-gray-600">${escapeHtml(d.desk_id ?? "—")}</td>
             <td class="whitespace-nowrap px-3 py-2 text-gray-500">${d.doc_date}</td>
-            <td class="px-3 py-2 text-right text-gray-500">${d.rowCount}</td>
+            <td class="whitespace-nowrap px-3 py-2 text-gray-500">${escapeHtml(d.created_by)}</td>
+            <td class="px-3 py-2 text-right text-gray-700">${fmtInt(d.skuCount ?? 0)}</td>
+            <td class="px-3 py-2 text-right text-gray-700">${fmtInt(d.totalQty ?? 0)}</td>
+            <td class="whitespace-nowrap px-3 py-2 text-right text-gray-700">${round2(d.totalWeightG ?? 0)} g</td>
             <td class="whitespace-nowrap px-3 py-2 text-right">
               <button data-print="${d.id}" class="font-bold text-brand-600">${t("documents.printPdf")}</button>
-              ${isAdmin(state.user) ? `<button data-delete="${d.id}" class="ml-2 font-bold text-danger">${t("documents.delete")}</button>` : ""}
+              ${d.group_id && d.group_size > 1 ? `<button data-print-group="${escapeHtml(d.group_id)}" class="ml-2 font-bold text-brand-600">${t("documents.printAll")}</button>` : ""}
             </td>
           </tr>`
           )
@@ -256,9 +352,8 @@ function renderTable(listEl, docs) {
 function wireCardActions(listEl, docs) {
   listEl.querySelectorAll("[data-doc]").forEach((row) =>
     row.addEventListener("click", (e) => {
-      if (e.target.closest("[data-print],[data-delete]")) return;
-      const doc = docs.find((d) => d.id === row.dataset.doc);
-      openDocumentDetail(doc);
+      if (e.target.closest("[data-print],[data-print-group]")) return;
+      openDocumentDetail(docs.find((d) => d.id === row.dataset.doc));
     })
   );
   listEl.querySelectorAll("[data-print]").forEach((btn) =>
@@ -267,10 +362,10 @@ function wireCardActions(listEl, docs) {
       openDocumentPrint(btn.dataset.print);
     })
   );
-  listEl.querySelectorAll("[data-delete]").forEach((btn) =>
+  listEl.querySelectorAll("[data-print-group]").forEach((btn) =>
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      confirmDelete(btn.dataset.delete);
+      openGroupPrint(btn.dataset.printGroup);
     })
   );
 }
@@ -303,7 +398,7 @@ function renderPagination(data) {
 
 function confirmDelete(id) {
   openActionSheet(
-    t("documents.confirmAsAdmin"),
+    t("documents.confirmDelete"),
     [
       { label: t("documents.delete"), value: true },
       { label: t("documents.cancel"), value: false },
@@ -314,18 +409,32 @@ function confirmDelete(id) {
         await api.deleteDocument(id);
         toast(t("documents.deletedToast"), "success");
         await refreshDocuments();
-      } catch {
-        toast(t("documents.deleteFailedToast"), "error");
+      } catch (err) {
+        toast(err.message || t("documents.deleteFailedToast"), "error");
       }
     }
   );
 }
 
 function openDocumentDetail(doc) {
+  const ordered = doc.rows.filter((r) => Number(r.qty ?? 0) > 0);
+  const rest = doc.rows.filter((r) => !(Number(r.qty ?? 0) > 0));
+  const rowHtml = (r, dim) => `
+        <div class="rounded-xl border border-hairline p-2.5 ${dim ? "opacity-60" : ""}">
+          <div class="flex items-center justify-between gap-2">
+            <span class="min-w-0 truncate text-xs font-bold text-gray-900" lang="lo">${escapeHtml(r.item)}</span>
+            <span class="shrink-0 text-xs font-extrabold text-gray-900">${r.qty ?? "—"}</span>
+          </div>
+          <div class="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-gray-500">
+            <span class="min-w-0 truncate">${r.balance != null ? `${t("documents.colBalance")} ${r.balance} · ` : ""}${r.note ? escapeHtml(r.note) : ""}</span>
+            <span class="shrink-0">${r.weight_g ?? "—"} g</span>
+          </div>
+        </div>`;
   openSheet(
     `
-    <div class="mb-3 text-[11px] text-gray-600">${escapeHtml(doc.doc_no)} · ${fmtDateTime(doc.created_at)}</div>
-    <div class="mb-3 text-xs text-gray-500">${escapeHtml(branchName(doc.branch_id))}${deskLabelOf(doc)} · ${t("documents.createdBy")} ${escapeHtml(doc.created_by)}</div>
+    <div class="mb-1 text-[11px] text-gray-600">${escapeHtml(doc.doc_no)} · ${fmtDate(doc.doc_date)} · ${fmtDateTime(doc.created_at)}</div>
+    <div class="mb-2 text-xs text-gray-500">${escapeHtml(branchName(doc.branch_id))}${deskLabelOf(doc)} · ${t("documents.createdBy")} ${escapeHtml(doc.created_by)}</div>
+    <div class="mb-3 flex flex-wrap gap-x-3 text-[11px] text-gray-500">${totalsLine(doc)}</div>
     ${
       doc.status
         ? `<div class="mb-4 flex items-center gap-2">${statusChip(doc)}${
@@ -334,21 +443,8 @@ function openDocumentDetail(doc) {
         : ""
     }
     <div class="flex flex-col gap-2">
-      ${doc.rows
-        .map(
-          (r) => `
-        <div class="rounded-xl border border-hairline p-2.5">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-gray-900">${escapeHtml(r.item)}</span>
-            <span class="text-xs font-extrabold text-gray-900">${r.qty ?? "—"}</span>
-          </div>
-          <div class="mt-0.5 flex items-center justify-between text-[11px] text-gray-500">
-            <span>${r.note ? escapeHtml(r.note) : ""}</span>
-            <span>${r.weight_g ?? "—"} g</span>
-          </div>
-        </div>`
-        )
-        .join("")}
+      ${ordered.map((r) => rowHtml(r, false)).join("")}
+      ${rest.map((r) => rowHtml(r, true)).join("")}
     </div>
     ${doc.notes ? `<p class="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">${escapeHtml(doc.notes)}</p>` : ""}
     ${
@@ -359,15 +455,22 @@ function openDocumentDetail(doc) {
            </div>`
         : ""
     }
-    <div class="mt-3 flex gap-2.5 pb-2">
+    <div class="mt-3 flex flex-wrap gap-2.5 pb-2">
+      ${mayEditDoc(doc) ? `<button id="edit-btn" class="btn-primary flex-1">${t("documents.edit")}</button>` : ""}
       <button id="print-btn" class="btn-secondary flex-1">${t("documents.printPdf")}</button>
-      ${isAdmin(state.user) ? `<button id="delete-btn" class="btn-secondary flex-1 text-danger">${t("documents.delete")}</button>` : ""}
+      ${doc.group_id && doc.group_size > 1 ? `<button id="print-group-btn" class="btn-secondary flex-1">${t("documents.printAll")}</button>` : ""}
+      ${mayDeleteDoc(doc) ? `<button id="delete-btn" class="btn-secondary flex-1 text-danger">${t("documents.delete")}</button>` : ""}
     </div>
   `,
     {
       title: doc.title,
       onMount: (body) => {
         body.querySelector("#print-btn").addEventListener("click", () => openDocumentPrint(doc.id));
+        body.querySelector("#print-group-btn")?.addEventListener("click", () => openGroupPrint(doc.group_id));
+        body.querySelector("#edit-btn")?.addEventListener("click", () => {
+          closeSheet();
+          openProposalEditor({ edit: doc });
+        });
         body.querySelector("#delete-btn")?.addEventListener("click", () => {
           closeSheet();
           confirmDelete(doc.id);
@@ -385,590 +488,621 @@ function openDocumentDetail(doc) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Shared item-row component for both sheets below. A row can be either a
-// freeform text item (legacy behaviour) or linked to a master SKU — once
-// linked, it shows the SKU's live current balance for whichever Case is
-// selected (from the same GET /api/stock/desk/:id payload the Daily Stock
-// screen reads), so "how many do we have right now" and "how many do we
-// want to order" sit side by side instead of staff having to remember or
-// re-check the stock screen separately.
-// ---------------------------------------------------------------------------
-function blankRow() {
-  return { sku_id: null, item: "", pattern: "", skuIcon: null, qty: "", weight_g: "", note: "", gramEach: 0, attention: false, reason: null };
-}
-
-function openSkuPicker(skuCatalog, selectedId, onPick) {
-  const sorted = [...skuCatalog].sort((a, b) => skuLabel(a).localeCompare(skuLabel(b)));
-  const options = [
-    { label: t("documents.customItemOption"), value: null, selected: !selectedId },
-    ...sorted.map((s) => ({ label: `${skuLabel(s)} · ${s.sku_id}`, value: s.sku_id, selected: s.sku_id === selectedId })),
-  ];
-  openActionSheet(t("documents.pickSkuTitle"), options, (opt) => onPick(opt.value));
-}
-
-function buildRowCardHtml(r, i, balanceMap) {
-  const itemCell = r.sku_id
-    ? `<button type="button" data-link-item="${i}" class="flex w-full items-center justify-between gap-1.5 rounded-lg border border-brand-100 bg-brand-50 px-2.5 py-1.5 text-left">
-         <span class="flex min-w-0 items-center gap-1.5">
-           ${icon(r.skuIcon || "ring", "h-3.5 w-3.5 shrink-0 text-brand-600")}
-           <span class="truncate text-xs font-bold text-gray-900">${escapeHtml(r.item)}</span>
-         </span>
-         <svg class="h-3 w-3 shrink-0 text-brand-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
-       </button>
-       <input data-field="pattern" type="text" maxlength="200" placeholder="${t("documents.pattern")}" value="${escapeHtml(r.pattern ?? "")}" class="input-filled mt-1.5 w-full px-2 py-1.5 text-xs" />`
-    : `<div class="flex items-center gap-1">
-         <input data-field="item" type="text" placeholder="${t("documents.item")}" value="${escapeHtml(r.item)}" class="input-filled min-w-0 flex-1 px-2 py-1.5 text-xs" />
-         <button type="button" data-link-item="${i}" aria-label="${t("documents.pickSkuTitle")}" class="tap-target shrink-0 text-gray-500 hover:text-brand-600">${icon(
-           "box",
-           "h-4 w-4"
-         )}</button>
-       </div>`;
-  const balance = r.sku_id ? balanceMap.get(r.sku_id) : null;
-  const balanceLine = r.sku_id
-    ? `<div class="mt-1 text-[10px] text-gray-500">${t("documents.currentBalance")}: <b class="text-gray-700">${
-        balance ? `${balance.closing_qty} pcs` : t("documents.notOnCase")
-      }</b></div>`
-    : "";
-  const reasonLine = r.reason ? `<div class="mt-1 text-[10px] font-semibold text-danger">${escapeHtml(r.reason)}</div>` : "";
-  return `
-    <div class="rounded-xl border ${r.attention ? "border-danger/30 bg-danger-bg" : "border-hairline"} p-2.5" data-row-index="${i}">
-      <div class="flex items-start justify-between gap-2">
-        <div class="min-w-0 flex-1">${itemCell}</div>
-        <button type="button" data-remove-row="${i}" aria-label="${t("documents.delete")}" class="tap-target shrink-0 text-gray-400 hover:text-danger">×</button>
-      </div>
-      ${reasonLine}
-      ${balanceLine}
-      <div class="mt-2 grid grid-cols-3 gap-1.5">
-        <input data-field="qty" type="number" min="0" placeholder="${t("documents.qty")}" value="${r.qty}" class="input-filled px-2 py-1.5 text-center text-xs" />
-        <input data-field="weight_g" type="number" step="0.01" placeholder="${t("documents.weightG")}" value="${r.weight_g}" class="input-filled px-2 py-1.5 text-center text-xs" />
-        <input data-field="note" type="text" placeholder="${t("documents.note")}" value="${escapeHtml(r.note)}" class="input-filled px-2 py-1.5 text-xs" />
-      </div>
-    </div>`;
-}
-
-function wireRowList(rowList, rows, render, body, balanceMap, skuCatalog) {
-  rowList.querySelectorAll("[data-row-index]").forEach((rowEl) => {
-    const idx = Number(rowEl.dataset.rowIndex);
-    rowEl.querySelectorAll("[data-field]").forEach((input) => {
-      input.addEventListener("input", (e) => {
-        const field = e.target.dataset.field;
-        rows[idx][field] = e.target.value;
-        // Keep the order weight in sync with qty for a SKU-linked row (the
-        // staff is ordering pieces, not weighing them on a scale here) — but
-        // only while they haven't typed a weight of their own.
-        if (rows[idx].sku_id && field === "qty" && rows[idx].gramEach) {
-          const weightInput = rowEl.querySelector('[data-field="weight_g"]');
-          if (weightInput && !weightInput.dataset.touched) {
-            const computed = Math.round(Number(e.target.value || 0) * rows[idx].gramEach * 100) / 100;
-            rows[idx].weight_g = computed;
-            weightInput.value = computed;
-          }
-        }
-        if (field === "weight_g") e.target.dataset.touched = "1";
-      });
-    });
-    const linkBtn = rowEl.querySelector("[data-link-item]");
-    if (linkBtn) {
-      linkBtn.addEventListener("click", () => {
-        openSkuPicker(skuCatalog, rows[idx].sku_id, (skuId) => {
-          const sku = skuId ? skuCatalog.find((s) => s.sku_id === skuId) : null;
-          if (sku) {
-            rows[idx].sku_id = sku.sku_id;
-            rows[idx].item = skuLabel(sku);
-            rows[idx].skuIcon = sku.icon;
-            rows[idx].gramEach = sku.std_gram_weight ?? 0;
-          } else {
-            rows[idx].sku_id = null;
-            rows[idx].item = "";
-            rows[idx].skuIcon = null;
-            rows[idx].gramEach = 0;
-          }
-          render(body);
-        });
-      });
-    }
-    rowEl.querySelector("[data-remove-row]").addEventListener("click", () => {
-      rows.splice(idx, 1);
-      render(body);
-    });
-  });
-}
-
-// The reason a flagged row carries (set only on auto-added attention rows)
-// is folded into the saved note so it survives onto the printed PDF, on top
-// of whatever the staff types in manually.
-function cleanRowsFor(rows) {
-  return rows
-    .filter((r) => r.item.trim() !== "")
-    .map((r) => ({
-      sku_id: r.sku_id ?? null,
-      // A product row prints its pattern (ລາຍ) when one is typed, else the product name.
-      item: (r.sku_id && r.pattern?.trim()) || r.item.trim(),
-      qty: r.qty === "" ? null : Number(r.qty),
-      weight_g: r.weight_g === "" ? null : Number(r.weight_g),
-      note: [r.reason, r.note.trim()].filter(Boolean).join(" — ") || null,
-    }));
-}
-
-async function loadSkuCatalog() {
+// Opens the live proposal a case already has on a date (from the case picker's link).
+async function openExistingProposal(docId, deskId, date) {
   try {
-    const { skus } = await api.skus();
-    return skus;
-  } catch {
-    return [];
-  }
+    const { documents } = await api.documents({ deskId, dateFrom: date, dateTo: date, kind: "proposal", pageSize: 20 });
+    const doc = documents.find((d) => d.id === docId);
+    if (doc) openDocumentDetail(doc);
+  } catch {}
 }
 
-async function openNewDocumentSheet() {
-  const desks = state.meta.desks;
-  let selectedBranchId = state.documents.branch ?? state.meta.branches[0]?.branch_id;
-  let selectedDeskId = desks.find((d) => d.branch_id === selectedBranchId)?.desk_id ?? desks[0]?.desk_id;
-  let docDate = state.meta.today;
-  let docTitle = "";
-  let rows = [blankRow()];
-  let skuCatalog = [];
-  let balanceMap = new Map();
-
-  const render = (body) => {
-    const desk = desks.find((d) => d.desk_id === selectedDeskId);
-
-    body.innerHTML = `
-      <label class="mb-1.5 block text-xs font-bold text-gray-600">${t("documents.titleField")}</label>
-      <input id="doc-title" type="text" placeholder="${t("documents.titlePlaceholder")}" value="${escapeHtml(docTitle)}" class="input-filled" />
-
-      <label class="mt-4 mb-1.5 block text-xs font-bold text-gray-600">${t("documents.branch")}</label>
-      <button id="branch-pick" class="chip w-full justify-between border-hairline bg-white text-gray-700">
-        <span>${branchName(selectedBranchId)}</span>
-        <svg class="h-3.5 w-3.5 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
-      </button>
-
-      <label class="mt-4 mb-1.5 block text-xs font-bold text-gray-600">${t("documents.desk")}</label>
-      <button id="desk-pick" class="chip w-full justify-between border-hairline bg-white text-gray-700">
-        <span>${desk ? `${desk.desk_id} · ${desk.display_name}` : "—"}</span>
-        <svg class="h-3.5 w-3.5 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
-      </button>
-
-      <label class="mt-4 mb-1.5 block text-xs font-bold text-gray-600">${t("documents.date")}</label>
-      <input id="doc-date" type="date" value="${docDate}" class="input-filled" />
-
-      <div class="mt-4 mb-1.5 flex items-center justify-between">
-        <label class="text-xs font-bold text-gray-600">${t("documents.item")}</label>
-      </div>
-      <div id="row-list" class="flex flex-col gap-2"></div>
-      <button id="add-row" class="btn-secondary mt-2.5 w-full py-2 text-xs">${t("documents.addRow")}</button>
-
-      <button id="save-doc" class="btn-primary mt-5 mb-2 w-full">${t("documents.save")}</button>
-    `;
-
-    const rowList = body.querySelector("#row-list");
-    rowList.innerHTML = rows.map((r, i) => buildRowCardHtml(r, i, balanceMap)).join("");
-    wireRowList(rowList, rows, render, body, balanceMap, skuCatalog);
-
-    body.querySelector("#doc-title").addEventListener("input", (e) => {
-      docTitle = e.target.value;
-    });
-
-    body.querySelector("#branch-pick").addEventListener("click", () => {
-      openActionSheet(
-        t("documents.branch"),
-        state.meta.branches.map((b) => ({ label: branchName(b.branch_id), value: b.branch_id, selected: b.branch_id === selectedBranchId })),
-        (opt) => {
-          selectedBranchId = opt.value;
-          selectedDeskId = desks.find((d) => d.branch_id === selectedBranchId)?.desk_id;
-          render(body);
-          refreshBalance(body);
-        }
-      );
-    });
-
-    body.querySelector("#desk-pick").addEventListener("click", () => {
-      const pool = desks.filter((d) => d.branch_id === selectedBranchId);
-      openActionSheet(
-        t("documents.desk"),
-        pool.map((d) => ({ label: `${d.desk_id} · ${d.display_name}`, value: d.desk_id, selected: d.desk_id === selectedDeskId })),
-        (opt) => {
-          selectedDeskId = opt.value;
-          render(body);
-          refreshBalance(body);
-        }
-      );
-    });
-
-    body.querySelector("#doc-date").addEventListener("change", (e) => {
-      docDate = e.target.value || state.meta.today;
-    });
-
-    body.querySelector("#add-row").addEventListener("click", () => {
-      rows.push(blankRow());
-      render(body);
-    });
-
-    body.querySelector("#save-doc").addEventListener("click", async () => {
-      const title = docTitle.trim();
-      if (!title) return toast(t("documents.needTitle"), "error");
-      const cleanRows = cleanRowsFor(rows);
-      if (cleanRows.length === 0) return toast(t("documents.needOneRow"), "error");
-      await api.createDocument({
-        title,
-        branchId: selectedBranchId,
-        deskId: selectedDeskId,
-        date: docDate,
-        rows: cleanRows,
-      });
-      toast(t("documents.savedToast"), "success");
-      closeSheet();
-      refreshDocuments();
-    });
-  };
-
-  async function refreshBalance(body) {
-    if (!selectedDeskId) {
-      balanceMap = new Map();
-      render(body);
-      return;
-    }
-    try {
-      const detail = await api.deskDetail(selectedDeskId, "latest");
-      balanceMap = new Map(detail.rows.map((r) => [r.sku_id, { closing_qty: r.closing_qty }]));
-    } catch {
-      balanceMap = new Map();
-    }
-    render(body);
-  }
-
-  openSheet(`<div id="doc-body"></div>`, {
-    title: t("documents.newDocument"),
-    onMount: async (body) => {
-      const inner = body.querySelector("#doc-body");
-      render(inner);
-      skuCatalog = await loadSkuCatalog();
-      await refreshBalance(inner);
-    },
-  });
-}
-
-// Reorder Proposal — a full page (not a sheet/modal), same pattern as
-// stock.js's desk-detail page: its own back-arrow topbar, content rendered
-// straight into #view-root instead of a bottom sheet, so there's room to
-// show every SKU currently on the selected Case (not just the ones needing
-// reorder) laid out as one dense spreadsheet-style row per SKU — the same
-// "paper ledger" feel as the desk-detail stock grid — rather than a short
-// list of cards. Picking a Case pulls that desk's current closing balance
-// (GET /api/stock/desk/:id, the same source the Daily Stock screen uses for
-// its low-stock chip / lifetime alert) and lists every SKU on it with its
-// balance, highlighting the ones below their reorder level or projected to
-// run out. Staff only fill in an order qty for whichever rows they actually
-// want to order — saving goes through the same /api/documents create+print
-// path as a normal document, so it lists and prints alongside everything
-// else.
-function setProposalTopbar(onBack) {
+// ---------------------------------------------------------------------------
+// Reorder proposal editor — a full page. Several cases at once: each case is
+// one swipeable pane listing every SKU on that case's sheet for the date, with
+// the balance the manager orders against (opening before the final count,
+// closing after). Saving shows a check sheet grouped by expected arrival, then
+// creates one proposal per case (or updates the one being edited) and prints.
+// ---------------------------------------------------------------------------
+function setEditorTopbar(title, onBack) {
   document.getElementById("topbar-slot").innerHTML = `
     <div class="flex items-center gap-2.5">
       <button id="proposal-back" aria-label="${t("login.back")}" class="tap-target -ml-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-gray-600 active:bg-gray-100">
         <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
       </button>
-      <h1 class="min-w-0 truncate text-lg font-extrabold text-gray-900">${t("documents.newProposal")}</h1>
+      <h1 class="min-w-0 truncate text-lg font-extrabold text-gray-900">${title}</h1>
     </div>`;
   document.getElementById("proposal-back").addEventListener("click", onBack);
 }
 
-const PROPOSAL_ROW_COLS = "grid-cols-[150px_56px_56px_64px_1fr_26px]";
+const ROW_COLS = "grid-cols-[140px_52px_52px_60px_minmax(90px,1fr)_24px]";
 
-function proposalHeaderHtml() {
-  return `
-  <div class="grid ${PROPOSAL_ROW_COLS} border-b border-hairline bg-gray-50 text-[8px] font-extrabold uppercase tracking-wide text-gray-500">
-    <span class="sticky left-0 z-10 border-r border-hairline bg-gray-50 px-1.5 py-1.5">${t("settings.skuColumn")}</span>
-    <span class="flex items-center justify-center border-r border-hairline px-0.5 py-1.5 text-center">${t("documents.colBalance")}</span>
-    <span class="flex items-center justify-center border-r border-hairline px-0.5 py-1.5 text-center">${t("documents.qty")}</span>
-    <span class="flex items-center justify-center border-r border-hairline px-0.5 py-1.5 text-center">${t("documents.weightG")}</span>
-    <span class="flex items-center justify-center border-r border-hairline px-0.5 py-1.5 text-center">${t("documents.note")}</span>
-    <span></span>
-  </div>`;
+const reasonFor = (r) =>
+  r.branch_status === "critical" || r.branch_status === "warning"
+    ? `${t("documents.proposalReasonLow")} (${r.runway_days ?? "–"}${t("stock.daysShort")})`
+    : r.lifetime_alert
+    ? `${t("documents.proposalReasonLifetime")} (${r.est_lifetime_days}${t("stock.daysShort")})`
+    : null;
+
+function sourceLabel(src) {
+  if (!src) return "";
+  if (src.balance_source === "opening") return tf("documents.balanceOpening", { date: fmtDate(src.balance_date) });
+  if (src.balance_source === "closing") return tf("documents.balanceClosing", { date: fmtDate(src.balance_date) });
+  if (src.balance_source === "previous_closing") return tf("documents.balancePrevious", { date: fmtDate(src.balance_date) });
+  return t("documents.balanceNone");
 }
 
-function proposalRowHtml(r, i, balanceMap) {
-  const balance = r.sku_id ? balanceMap.get(r.sku_id) : undefined;
-  const balanceText = !r.sku_id ? "—" : balance !== undefined ? `${balance} pcs` : t("documents.notOnCase");
-  const itemCell = r.sku_id
-    ? `<div class="flex min-w-0 items-center gap-1.5">
-         <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-50 text-brand-600">${icon(r.skuIcon || "ring", "h-3.5 w-3.5")}</span>
-         <div class="min-w-0 flex-1">
-           <div class="truncate text-[11px] font-bold text-gray-900">${escapeHtml(r.item)}</div>
-           <div class="truncate text-[9px] text-gray-500">${escapeHtml(r.sku_id)}</div>
-           ${r.reason ? `<span class="status-pill mt-0.5 inline-flex px-1 py-0.5 text-[8px] leading-tight bg-danger-bg text-danger">${escapeHtml(r.reason)}</span>` : ""}
-         </div>
-       </div>`
-    : `<button type="button" data-link-item="${i}" class="flex w-full items-center gap-1.5 text-left text-[11px] font-semibold text-brand-600">
-         ${icon("box", "h-4 w-4 shrink-0")}<span>${t("documents.pickSkuTitle")}</span>
-       </button>`;
+const orderedCount = (k) => k.rows.filter((r) => Number(r.qty) > 0).length;
 
-  return `
-  <div class="grid ${PROPOSAL_ROW_COLS} border-b border-hairline ${r.attention ? "bg-danger-bg" : ""}" data-row-index="${i}">
-    <div class="sticky left-0 z-10 flex items-center border-r border-hairline ${r.attention ? "bg-danger-bg" : "bg-surface"} px-1.5 py-1.5">${itemCell}</div>
-    <div class="flex items-center justify-center border-r border-hairline text-center text-[11px] font-bold text-gray-700">${balanceText}</div>
-    <input data-field="qty" type="number" min="0" inputmode="numeric" placeholder="0" value="${r.qty}"
-           class="h-full w-full border-r border-hairline bg-transparent text-center text-[11px] font-bold focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-300" />
-    <input data-field="weight_g" type="number" step="0.01" placeholder="0" value="${r.weight_g}"
-           class="h-full w-full border-r border-hairline bg-transparent text-center text-[11px] font-semibold focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-300" />
-    <input data-field="note" type="text" placeholder="${t("documents.note")}" value="${escapeHtml(r.note)}"
-           class="h-full w-full border-r border-hairline bg-transparent px-1.5 text-[10px] font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-300" />
-    <button type="button" data-remove-row="${i}" aria-label="${t("documents.delete")}" class="flex items-center justify-center text-gray-400 hover:text-danger">×</button>
-  </div>`;
-}
+async function openProposalEditor({ edit } = {}) {
+  const editing = Boolean(edit);
+  const today = state.meta.today;
+  let branchId = editing ? edit.branch_id : state.documents.branch ?? state.user?.branchId ?? state.meta.branches[0]?.branch_id;
+  let date = editing ? edit.doc_date : today;
+  // cases: [{ deskId, title, docId?, loading, source, leadDays, defaultLead, rows: [...] }]
+  let cases = [];
+  let active = 0;
+  let saving = false;
 
-function wireProposalRows(tableHost, rows, render, balanceMap, skuCatalog) {
-  tableHost.querySelectorAll("[data-row-index]").forEach((rowEl) => {
-    const idx = Number(rowEl.dataset.rowIndex);
-    rowEl.querySelectorAll("[data-field]").forEach((input) => {
-      input.addEventListener("input", (e) => {
-        const field = e.target.dataset.field;
-        rows[idx][field] = e.target.value;
-        if (rows[idx].sku_id && field === "qty" && rows[idx].gramEach) {
-          const weightInput = rowEl.querySelector('[data-field="weight_g"]');
-          if (weightInput && !weightInput.dataset.touched) {
-            const computed = Math.round(Number(e.target.value || 0) * rows[idx].gramEach * 100) / 100;
-            rows[idx].weight_g = computed;
-            weightInput.value = computed;
-          }
-        }
-        if (field === "weight_g") e.target.dataset.touched = "1";
-      });
-    });
-    const linkBtn = rowEl.querySelector("[data-link-item]");
-    if (linkBtn) {
-      linkBtn.addEventListener("click", () => {
-        openSkuPicker(skuCatalog, rows[idx].sku_id, (skuId) => {
-          const sku = skuId ? skuCatalog.find((s) => s.sku_id === skuId) : null;
-          if (sku) {
-            rows[idx].sku_id = sku.sku_id;
-            rows[idx].item = skuLabel(sku);
-            rows[idx].skuIcon = sku.icon;
-            rows[idx].gramEach = sku.std_gram_weight ?? 0;
-          }
-          render();
-        });
-      });
-    }
-    rowEl.querySelector("[data-remove-row]").addEventListener("click", () => {
-      rows.splice(idx, 1);
-      render();
-    });
-  });
-}
-
-// Only rows the staff actually put an order qty on are saved — every SKU on
-// the case is shown for reference, but listing them all isn't the same as
-// ordering all of them.
-function cleanProposalRows(rows) {
-  return rows
-    .filter((r) => r.item.trim() !== "" && r.qty !== "" && Number(r.qty) > 0)
-    .map((r) => ({
-      sku_id: r.sku_id ?? null,
-      item: r.item.trim(),
-      qty: Number(r.qty),
-      weight_g: r.weight_g === "" ? null : Number(r.weight_g),
-      note: [r.reason, r.note.trim()].filter(Boolean).join(" — ") || null,
-    }));
-}
-
-async function openReorderProposalPage() {
-  const desks = state.meta.desks;
-  let selectedBranchId = state.documents.branch ?? state.meta.branches[0]?.branch_id;
-  let selectedDeskId = desks.find((d) => d.branch_id === selectedBranchId)?.desk_id ?? desks[0]?.desk_id;
-  let docDate = state.meta.today;
-  let rows = [];
-  let skuCatalog = [];
-  let balanceMap = new Map();
-  let loading = !!selectedDeskId;
-  let docTitle = "";
-  let titleAuto = true;
-
-  const defaultTitle = () => {
-    const desk = desks.find((d) => d.desk_id === selectedDeskId);
-    return `${t("documents.proposalTitlePrefix")} — ${desk ? `${desk.desk_id} · ${desk.display_name}` : ""}`;
-  };
-
-  const reasonFor = (r) =>
-    r.branch_status === "critical" || r.branch_status === "warning"
-      ? `${t("documents.proposalReasonLow")} (${r.runway_days ?? "–"}${t("stock.daysShort")})`
-      : r.lifetime_alert
-      ? `${t("documents.proposalReasonLifetime")} (${r.est_lifetime_days}${t("stock.daysShort")})`
-      : null;
-
-  function backOut() {
+  hideFab();
+  const backOut = () => {
     renderTopbar();
+    renderFab();
     refreshDocuments();
-  }
+  };
+  setEditorTopbar(editing ? t("documents.editProposal") : t("documents.newProposal"), backOut);
 
-  async function loadCaseRows() {
-    if (!selectedDeskId) {
-      rows = [];
-      balanceMap = new Map();
-      loading = false;
-      render();
-      return;
-    }
-    loading = true;
-    render();
-    let detail;
-    try {
-      // Stock as of the desk's latest recorded day — a proposal is about
-      // what is on the desk now, whatever date is written on the document.
-      detail = await api.deskDetail(selectedDeskId, "latest");
-    } catch {
-      loading = false;
-      toast(t("documents.proposalLoadFailed"), "error");
-      render();
-      return;
-    }
-    balanceMap = new Map(detail.rows.map((r) => [r.sku_id, r.closing_qty]));
-    const manualRows = rows.filter((r) => r.manual);
-    rows = [
-      ...detail.rows.map((r) => ({
+  const root = document.getElementById("view-root");
+  root.scrollTop = 0;
+
+  // Turns the server's source rows into editable rows. `saved`: rows to carry
+  // over — a proposal being edited (keepBalance: its saved balance wins) or
+  // what was typed before the date changed (the new date's balance wins).
+  function buildRows(src, saved, keepBalance) {
+    const savedBySku = new Map((saved ?? []).filter((r) => r.sku_id).map((r) => [r.sku_id, r]));
+    const rows = (src?.rows ?? []).map((r) => {
+      const s = savedBySku.get(r.sku_id);
+      savedBySku.delete(r.sku_id);
+      const gramEach = r.gram_each ?? r.std_gram_weight ?? 0;
+      return {
         sku_id: r.sku_id,
         item: skuLabel(r),
         skuIcon: r.icon,
-        gramEach: r.gram_weight_each ?? 0,
+        gramEach,
+        leadDays: r.lead_days,
+        balance: s && keepBalance ? s.balance ?? null : r.balance,
         attention: r.branch_status === "critical" || r.branch_status === "warning" || r.lifetime_alert,
         reason: reasonFor(r),
-        qty: "",
-        weight_g: "",
-        note: "",
+        qty: s?.qty ?? "",
+        weight_g: s?.weight_g ?? "",
+        weightTouched: s ? s.weightTouched ?? (s.weight_g != null && Number(s.weight_g) !== round2(Number(s.qty ?? 0) * gramEach)) : false,
+        note: s?.note ?? "",
         manual: false,
-      })),
-      ...manualRows,
-    ];
-    if (titleAuto) docTitle = defaultTitle();
-    loading = false;
-    render();
+      };
+    });
+    // Lines not on the case's sheet that day (added from the picker, or free text) stay.
+    for (const s of saved ?? []) {
+      if (s.sku_id && !savedBySku.has(s.sku_id)) continue;
+      rows.push({
+        sku_id: s.sku_id ?? null,
+        item: s.item,
+        skuIcon: s.skuIcon ?? "box",
+        gramEach: s.gramEach ?? 0,
+        leadDays: s.leadDays ?? (s.sku_id ? src?.lead_days?.[s.sku_id] ?? null : null),
+        balance: keepBalance ? s.balance ?? null : null,
+        attention: false,
+        reason: null,
+        qty: s.qty ?? "",
+        weight_g: s.weight_g ?? "",
+        weightTouched: s.weightTouched ?? true,
+        note: s.note ?? "",
+        manual: true,
+      });
+    }
+    return rows;
   }
 
-  function render() {
-    const root = document.getElementById("view-root");
-    const desk = desks.find((d) => d.desk_id === selectedDeskId);
-    const attentionCount = rows.filter((r) => r.attention).length;
+  async function loadCase(k, saved, keepBalance = false) {
+    k.loading = true;
+    try {
+      k.source = await api.proposalSource(k.deskId, date);
+      k.rows = buildRows(k.source, saved ?? k.rows.filter((r) => r.manual || r.qty !== "" || r.note), keepBalance);
+    } catch (err) {
+      toast(err.message || t("documents.proposalLoadFailed"), "error");
+      k.source = null;
+    }
+    k.loading = false;
+  }
 
+  function newCase(deskId) {
+    return { deskId, title: `${t("documents.proposalTitlePrefix")} — ${deskLabel(deskId)}`, loading: true, source: null, rows: [] };
+  }
+
+  // ---- rendering ----
+  function render() {
+    const desksOfBranch = state.meta.desks.filter((d) => d.branch_id === branchId);
+    const caseText = cases.length === 0 ? t("documents.pickCases") : cases.length <= 2 ? cases.map((k) => k.deskId).join(", ") : tf("documents.casesN", { n: cases.length });
     root.innerHTML = `
       <p class="mb-3 text-[11px] text-gray-500">${t("documents.proposalIntro")}</p>
-
-      <div class="mb-3 flex gap-2">
-        <button id="branch-pick" class="chip flex-1 justify-between border-hairline bg-white text-gray-700">
-          <span class="truncate">${branchName(selectedBranchId)}</span>
-          <svg class="h-3.5 w-3.5 shrink-0 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
+      <div class="mb-2 grid grid-cols-2 gap-2">
+        <button id="branch-pick" ${editing ? "disabled" : ""} class="chip justify-between border-hairline bg-white text-gray-700 disabled:opacity-60">
+          <span class="truncate">${escapeHtml(branchName(branchId))}</span>${editing ? "" : CHEVRON}
         </button>
-        <button id="desk-pick" class="chip flex-1 justify-between border-hairline bg-white text-gray-700">
-          <span class="truncate">${desk ? `${desk.desk_id} · ${desk.display_name}` : "—"}</span>
-          <svg class="h-3.5 w-3.5 shrink-0 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
+        <button id="case-pick" ${editing || desksOfBranch.length === 0 ? "disabled" : ""} class="chip justify-between ${cases.length ? "border-brand-300 bg-brand-50 text-brand-700" : "border-hairline bg-white text-gray-700"} disabled:opacity-60">
+          <span class="truncate">${escapeHtml(caseText)}</span>${editing ? "" : CHEVRON}
         </button>
       </div>
-      <input id="doc-date" type="date" value="${docDate}" class="input-filled mb-3 w-full text-xs" />
-      <input id="doc-title" type="text" placeholder="${t("documents.titlePlaceholder")}" value="${escapeHtml(docTitle)}" class="input-filled mb-3 w-full" />
+      <input id="doc-date" type="date" value="${date}" max="${today}" ${editing ? "disabled" : ""} class="input-filled mb-3 w-full text-xs disabled:opacity-60" />
 
-      <div class="mb-1.5 flex items-center justify-between">
-        <label class="text-xs font-bold text-gray-600">${t("documents.item")}</label>
-        ${
-          !loading
-            ? `<span class="status-pill px-1.5 py-0.5 text-[9px] ${attentionCount > 0 ? "bg-danger-bg text-danger" : "bg-gray-100 text-gray-500"}">${attentionCount} ${t(
-                "documents.proposalNeedsReorder"
-              )}</span>`
-            : ""
-        }
-      </div>
-
-      <div class="card overflow-x-auto p-1">
-        <div class="min-w-[420px]" id="proposal-table"></div>
-      </div>
-
-      <button id="add-other" class="btn-secondary mt-3 w-full py-2.5 text-xs">${t("documents.addOtherItem")}</button>
+      <div id="case-strip" class="no-scrollbar sticky top-0 z-20 -mx-4 mb-2 flex gap-1.5 overflow-x-auto bg-surface/95 px-4 py-2 backdrop-blur ${cases.length > 1 ? "" : "hidden"}"></div>
+      <div id="panes" class="no-scrollbar -mx-4 flex snap-x snap-mandatory items-start overflow-x-auto overscroll-x-contain scroll-smooth"></div>
+      <div id="pane-dots" class="mt-2 flex justify-center gap-1.5 ${cases.length > 1 ? "" : "hidden"}"></div>
 
       <div class="h-4"></div>
-      <div class="sticky bottom-0 -mx-4 border-t border-hairline bg-white/95 px-4 pb-2 pt-3 backdrop-blur">
-        <button id="save-doc" class="btn-primary w-full">${t("documents.proposalSave")}</button>
+      <div class="sticky bottom-0 z-20 -mx-4 border-t border-hairline bg-white/95 px-4 pb-2 pt-3 backdrop-blur">
+        <button id="save-doc" class="btn-primary w-full" ${cases.length === 0 ? "disabled" : ""}>${t("documents.proposalSave")}</button>
       </div>
     `;
 
-    const tableHost = root.querySelector("#proposal-table");
-    if (loading) {
-      tableHost.innerHTML = skeletonTable(5, 3);
-    } else if (rows.length === 0) {
-      tableHost.innerHTML = `<div class="py-10 text-center text-xs text-gray-500">${t("documents.proposalEmptyCase")}</div>`;
+    const panes = root.querySelector("#panes");
+    if (cases.length === 0) {
+      panes.innerHTML = `
+        <div class="w-full shrink-0 px-4">
+          <button id="empty-pick" class="card flex w-full flex-col items-center gap-2 py-10 text-center text-sm font-semibold text-gray-600">
+            ${icon("box", "h-6 w-6 text-brand-600")}${t("documents.pickCases")}
+          </button>
+        </div>`;
+      panes.querySelector("#empty-pick").addEventListener("click", () => openCasePicker(root.querySelector("#case-pick")));
     } else {
-      tableHost.innerHTML = proposalHeaderHtml() + rows.map((r, i) => proposalRowHtml(r, i, balanceMap)).join("");
-      wireProposalRows(tableHost, rows, render, balanceMap, skuCatalog);
+      panes.innerHTML = cases.map((_, i) => `<section data-pane="${i}" class="w-full shrink-0 snap-center snap-always px-4"></section>`).join("");
+      cases.forEach((_, i) => renderPane(i));
+      paintStrip();
+      panes.addEventListener("scroll", () => {
+        const i = Math.round(panes.scrollLeft / Math.max(1, panes.clientWidth));
+        if (i !== active && i >= 0 && i < cases.length) {
+          active = i;
+          paintStrip();
+        }
+      });
+      if (active > 0) {
+        panes.style.scrollBehavior = "auto";
+        panes.scrollLeft = active * panes.clientWidth;
+        panes.style.scrollBehavior = "";
+      }
     }
 
-    root.querySelector("#branch-pick").addEventListener("click", () => {
+    root.querySelector("#branch-pick").addEventListener("click", (e) => {
+      if (editing) return;
       openActionSheet(
         t("documents.branch"),
-        state.meta.branches.map((b) => ({ label: branchName(b.branch_id), value: b.branch_id, selected: b.branch_id === selectedBranchId })),
+        state.meta.branches.map((b) => ({ label: branchName(b.branch_id), value: b.branch_id, selected: b.branch_id === branchId })),
         (opt) => {
-          selectedBranchId = opt.value;
-          selectedDeskId = desks.find((d) => d.branch_id === selectedBranchId)?.desk_id;
-          loadCaseRows();
-        }
+          if (opt.value === branchId) return;
+          branchId = opt.value;
+          cases = [];
+          active = 0;
+          render();
+        },
+        { anchorEl: e.currentTarget }
       );
     });
-
-    root.querySelector("#desk-pick").addEventListener("click", () => {
-      const pool = desks.filter((d) => d.branch_id === selectedBranchId);
-      openActionSheet(
-        t("documents.desk"),
-        pool.map((d) => ({ label: `${d.desk_id} · ${d.display_name}`, value: d.desk_id, selected: d.desk_id === selectedDeskId })),
-        (opt) => {
-          selectedDeskId = opt.value;
-          loadCaseRows();
-        }
-      );
-    });
-
-    root.querySelector("#doc-date").addEventListener("change", (e) => {
-      docDate = e.target.value || state.meta.today;
-    });
-
-    root.querySelector("#doc-title").addEventListener("input", (e) => {
-      docTitle = e.target.value;
-      titleAuto = false;
-    });
-
-    root.querySelector("#add-other").addEventListener("click", () => {
-      rows.push({ ...blankRow(), manual: true });
+    root.querySelector("#case-pick").addEventListener("click", (e) => openCasePicker(e.currentTarget));
+    root.querySelector("#doc-date").addEventListener("change", async (e) => {
+      const next = e.target.value && e.target.value <= today ? e.target.value : today;
+      e.target.value = next;
+      if (next === date) return;
+      date = next;
+      cases.forEach((k) => (k.loading = true));
+      render();
+      await Promise.all(cases.map((k) => loadCase(k)));
       render();
     });
+    root.querySelector("#save-doc").addEventListener("click", startSave);
+  }
 
-    root.querySelector("#save-doc").addEventListener("click", async () => {
-      const title = docTitle.trim();
-      if (!title) return toast(t("documents.needTitle"), "error");
-      if (!selectedDeskId) return toast(t("documents.proposalNeedCase"), "error");
-      const cleanRows = cleanProposalRows(rows);
-      if (cleanRows.length === 0) return toast(t("documents.proposalNeedAnyQty"), "error");
-      // Opened now, while this is still a tap, so the browser allows the tab.
-      const printTab = openPrintTab();
-      let saved;
-      try {
-        saved = await api.createDocument({
-          title,
-          kind: "proposal",
-          branchId: selectedBranchId,
-          deskId: selectedDeskId,
-          date: docDate,
-          notes: t("documents.proposalAutoNote"),
-          rows: cleanRows,
-        });
-      } catch (err) {
-        printTab?.close();
-        throw err;
+  function paintStrip() {
+    const strip = root.querySelector("#case-strip");
+    const dots = root.querySelector("#pane-dots");
+    if (!strip || cases.length < 2) return;
+    strip.innerHTML = cases
+      .map((k, i) => {
+        const on = i === active;
+        const n = orderedCount(k);
+        return `<button type="button" data-goto="${i}" class="shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-[11px] font-bold ${
+          on ? "border-brand-600 bg-brand-600 text-white" : "border-hairline bg-white text-gray-700"
+        }">${escapeHtml(k.deskId)}${n ? ` · ${tf("documents.toOrderN", { n })}` : ""}</button>`;
+      })
+      .join("");
+    dots.innerHTML = cases.map((_, i) => `<span class="h-1.5 rounded-full ${i === active ? "w-4 bg-brand-600" : "w-1.5 bg-gray-300"}"></span>`).join("");
+    strip.querySelectorAll("[data-goto]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const i = Number(btn.dataset.goto);
+        const panes = root.querySelector("#panes");
+        panes.scrollTo({ left: i * panes.clientWidth, behavior: "smooth" });
+        active = i;
+        paintStrip();
+      })
+    );
+    strip.querySelector(`[data-goto="${active}"]`)?.scrollIntoView({ block: "nearest", inline: "center" });
+  }
+
+  function headerHtml() {
+    return `
+    <div class="grid ${ROW_COLS} border-b border-hairline bg-gray-50 text-[8px] font-extrabold uppercase tracking-wide text-gray-500">
+      <span class="sticky left-0 z-10 border-r border-hairline bg-gray-50 px-1.5 py-1.5">${t("settings.skuColumn")}</span>
+      <span class="flex items-center justify-center border-r border-hairline px-0.5 py-1.5 text-center">${t("documents.colBalance")}</span>
+      <span class="flex items-center justify-center border-r border-hairline px-0.5 py-1.5 text-center">${t("documents.qty")}</span>
+      <span class="flex items-center justify-center border-r border-hairline px-0.5 py-1.5 text-center">${t("documents.weightG")}</span>
+      <span class="flex items-center justify-center border-r border-hairline px-0.5 py-1.5 text-center">${t("documents.note")}</span>
+      <span></span>
+    </div>`;
+  }
+
+  function rowHtml(r, i) {
+    const balanceText = r.balance === null || r.balance === undefined ? "—" : `${fmtInt(r.balance)}`;
+    return `
+    <div class="grid ${ROW_COLS} border-b border-hairline ${r.attention ? "bg-danger-bg" : ""}" data-row-index="${i}">
+      <div class="sticky left-0 z-10 flex items-center border-r border-hairline ${r.attention ? "bg-danger-bg" : "bg-surface"} px-1.5 py-1.5">
+        <div class="flex min-w-0 items-center gap-1.5">
+          <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-50 text-brand-600">${icon(r.skuIcon || "ring", "h-3.5 w-3.5")}</span>
+          <div class="min-w-0 flex-1">
+            <div class="truncate text-[11px] font-bold text-gray-900" lang="lo">${escapeHtml(r.item)}</div>
+            ${r.reason ? `<span class="status-pill mt-0.5 inline-flex px-1 py-0.5 text-[8px] leading-tight bg-danger-bg text-danger">${escapeHtml(r.reason)}</span>` : ""}
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center justify-center border-r border-hairline text-center text-[11px] font-bold text-gray-700">${balanceText}</div>
+      <input data-field="qty" type="number" min="0" inputmode="numeric" placeholder="0" value="${r.qty}"
+             class="h-full w-full border-r border-hairline bg-transparent text-center text-[11px] font-bold focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-300" />
+      <input data-field="weight_g" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0" value="${r.weight_g}"
+             class="h-full w-full border-r border-hairline bg-transparent text-center text-[11px] font-semibold focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-300" />
+      <input data-field="note" type="text" maxlength="300" placeholder="${t("documents.note")}" value="${escapeHtml(r.note)}"
+             class="h-full w-full border-r border-hairline bg-transparent px-1.5 text-[10px] font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-300" />
+      ${
+        r.manual
+          ? `<button type="button" data-remove-row="${i}" aria-label="${t("documents.delete")}" class="flex items-center justify-center text-gray-400 hover:text-danger">×</button>`
+          : "<span></span>"
       }
-      toast(t("documents.proposalSavedToast"), "success");
-      backOut();
-      await fillPrintTab(printTab, saved.id);
+    </div>`;
+  }
+
+  function renderPane(i) {
+    const k = cases[i];
+    const pane = root.querySelector(`[data-pane="${i}"]`);
+    if (!pane) return;
+    const attention = k.rows.filter((r) => r.attention).length;
+    const existing = k.source?.existing && k.source.existing.id !== k.docId ? k.source.existing : null;
+    pane.innerHTML = `
+      <div class="mb-1.5 flex items-center justify-between gap-2">
+        <div class="min-w-0">
+          <div class="truncate text-xs font-extrabold text-gray-900">${escapeHtml(deskLabel(k.deskId))}</div>
+          <div class="text-[10px] text-gray-500">${k.loading ? "…" : escapeHtml(sourceLabel(k.source))}</div>
+        </div>
+        ${
+          !k.loading
+            ? `<span class="status-pill shrink-0 px-1.5 py-0.5 text-[9px] ${attention > 0 ? "bg-danger-bg text-danger" : "bg-gray-100 text-gray-500"}">${attention} ${t("documents.proposalNeedsReorder")}</span>`
+            : ""
+        }
+      </div>
+      ${
+        existing
+          ? `<button type="button" data-open-existing class="mb-2 w-full rounded-lg bg-warning-bg px-3 py-2 text-left text-[11px] font-bold text-warning">${escapeHtml(
+              tf("documents.caseTaken", { doc: existing.doc_no })
+            )} ↗</button>`
+          : ""
+      }
+      <div class="card overflow-x-auto p-1">
+        <div class="min-w-[420px]" data-table></div>
+      </div>
+      <button type="button" data-add-other class="btn-secondary mt-3 w-full py-2.5 text-xs">${t("documents.addOtherItem")}</button>`;
+
+    const table = pane.querySelector("[data-table]");
+    if (k.loading) {
+      table.innerHTML = skeletonTable(5, 3);
+    } else if (k.rows.length === 0) {
+      table.innerHTML = `<div class="py-10 text-center text-xs text-gray-500">${t("documents.proposalEmptyCase")}</div>`;
+    } else {
+      table.innerHTML = headerHtml() + k.rows.map(rowHtml).join("");
+      wireRows(table, k, i);
+    }
+    pane.querySelector("[data-open-existing]")?.addEventListener("click", () => openExistingProposal(existing.id, k.deskId, date));
+    pane.querySelector("[data-add-other]").addEventListener("click", () => openAddOther(i));
+  }
+
+  function wireRows(table, k, paneIndex) {
+    table.querySelectorAll("[data-row-index]").forEach((rowEl) => {
+      const idx = Number(rowEl.dataset.rowIndex);
+      const row = k.rows[idx];
+      rowEl.querySelectorAll("[data-field]").forEach((input) => {
+        input.addEventListener("input", (e) => {
+          const field = e.target.dataset.field;
+          row[field] = e.target.value;
+          // Weight follows qty × grams per piece until the user types a weight.
+          if (field === "qty" && row.gramEach && !row.weightTouched) {
+            const computed = e.target.value === "" ? "" : round2(Number(e.target.value || 0) * row.gramEach);
+            row.weight_g = computed;
+            const w = rowEl.querySelector('[data-field="weight_g"]');
+            if (w) w.value = computed;
+          }
+          if (field === "weight_g") row.weightTouched = e.target.value !== "";
+          if (field === "qty") paintStrip();
+        });
+      });
+      rowEl.querySelector("[data-remove-row]")?.addEventListener("click", () => {
+        k.rows.splice(idx, 1);
+        renderPane(paneIndex);
+        paintStrip();
+      });
     });
   }
 
-  docTitle = defaultTitle();
-  setProposalTopbar(backOut);
-  document.getElementById("view-root").scrollTop = 0;
-  render();
-  skuCatalog = await loadSkuCatalog();
-  await loadCaseRows();
+  // "+ Add Other Item": the same grouped card picker as adding SKUs to a case.
+  function openAddOther(i) {
+    const k = cases[i];
+    openSheet(`<div id="proposal-sku-picker"></div>`, {
+      title: t("documents.pickSkuTitle"),
+      onMount: (body) => {
+        renderSkuPickerInto(body.querySelector("#proposal-sku-picker"), {
+          excludeSkuIds: k.rows.map((r) => r.sku_id).filter(Boolean),
+          branchId,
+          allowCreate: false,
+          onCancel: closeSheet,
+          onAdd: (skus) => {
+            closeSheet();
+            for (const sku of skus) {
+              k.rows.push({
+                sku_id: sku.sku_id,
+                item: skuLabel(sku),
+                skuIcon: sku.icon,
+                gramEach: sku.std_gram_weight ?? (sku.baht_weight ? sku.baht_weight * 15 : 0),
+                leadDays: k.source?.lead_days?.[sku.sku_id] ?? k.source?.default_lead_days ?? null,
+                balance: null,
+                attention: false,
+                reason: null,
+                qty: "",
+                weight_g: "",
+                weightTouched: false,
+                note: "",
+                manual: true,
+              });
+            }
+            renderPane(i);
+            root.querySelector(`[data-pane="${i}"] [data-row-index="${k.rows.length - skus.length}"] [data-field="qty"]`)?.focus();
+          },
+        });
+      },
+    });
+  }
+
+  // Multi-select case picker, opened level with the case box.
+  async function openCasePicker(anchorEl) {
+    if (editing) return;
+    const pool = state.meta.desks.filter((d) => d.branch_id === branchId && d.active !== false);
+    let taken = new Map();
+    try {
+      const res = await api.proposalTaken(branchId, date);
+      taken = new Map(res.taken.map((x) => [x.desk_id, x]));
+    } catch {}
+    const picked = new Set(cases.map((k) => k.deskId).filter((id) => !taken.has(id)));
+    const CHECK = `<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>`;
+    const itemHtml = (d) => {
+      const tk = taken.get(d.desk_id);
+      const on = picked.has(d.desk_id);
+      return `
+        <div class="flex items-center gap-2 rounded-xl px-2 py-2 ${tk ? "opacity-60" : "active:bg-gray-50"}">
+          <button type="button" data-case="${escapeHtml(d.desk_id)}" ${tk ? "disabled" : ""} class="flex min-w-0 flex-1 items-center gap-3 text-left">
+            <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 ${on ? "border-brand-600 bg-brand-600 text-white" : "border-gray-300 bg-white"}">${on ? CHECK : ""}</span>
+            <span class="min-w-0 truncate text-sm font-semibold text-gray-800">${escapeHtml(d.desk_id)} · ${escapeHtml(d.display_name)}</span>
+          </button>
+          ${tk ? `<button type="button" data-taken="${escapeHtml(d.desk_id)}" class="shrink-0 text-[10px] font-bold text-brand-600 underline">${escapeHtml(tf("documents.caseTaken", { doc: tk.doc_no }))}</button>` : ""}
+        </div>`;
+    };
+    openSheet(
+      `<div id="case-list" class="flex flex-col gap-0.5"></div>
+       <div class="sticky -bottom-4 z-10 -mx-5 -mb-4 mt-2 border-t border-hairline bg-white px-5 py-3">
+         <button id="cases-done" class="btn-primary w-full"></button>
+       </div>`,
+      {
+        title: t("documents.pickCases"),
+        anchorEl,
+        onMount: (body) => {
+          const list = body.querySelector("#case-list");
+          const paint = () => {
+            list.innerHTML = pool.map(itemHtml).join("");
+            const done = body.querySelector("#cases-done");
+            done.textContent = tf("documents.doneN", { n: picked.size });
+            done.disabled = picked.size === 0;
+          };
+          paint();
+          list.addEventListener("click", (e) => {
+            const takenBtn = e.target.closest("[data-taken]");
+            if (takenBtn) {
+              const tk = taken.get(takenBtn.dataset.taken);
+              closeSheet();
+              openExistingProposal(tk.id, tk.desk_id, date);
+              return;
+            }
+            const btn = e.target.closest("[data-case]");
+            if (!btn || btn.disabled) return;
+            const id = btn.dataset.case;
+            if (picked.has(id)) picked.delete(id);
+            else picked.add(id);
+            paint();
+          });
+          body.querySelector("#cases-done").addEventListener("click", async () => {
+            closeSheet();
+            // Keep what was typed for cases still picked, in the desk order.
+            const keep = new Map(cases.map((k) => [k.deskId, k]));
+            cases = pool.filter((d) => picked.has(d.desk_id)).map((d) => keep.get(d.desk_id) ?? newCase(d.desk_id));
+            active = Math.min(active, Math.max(0, cases.length - 1));
+            render();
+            const fresh = cases.filter((k) => !keep.has(k.deskId));
+            await Promise.all(fresh.map((k) => loadCase(k, [])));
+            if (fresh.length) render();
+          });
+        },
+      }
+    );
+  }
+
+  // ---- saving ----
+  function payloadRows(k) {
+    return k.rows
+      .filter((r) => r.item.trim() !== "")
+      .map((r) => ({
+        sku_id: r.sku_id ?? null,
+        item: r.item.trim(),
+        qty: r.qty === "" ? null : Number(r.qty),
+        weight_g: r.weight_g === "" ? null : Number(r.weight_g),
+        note: String(r.note ?? "").trim() || null,
+        balance: r.balance ?? null,
+      }));
+  }
+
+  function goToCase(i) {
+    active = i;
+    const panes = root.querySelector("#panes");
+    panes?.scrollTo({ left: i * panes.clientWidth, behavior: "smooth" });
+    paintStrip();
+  }
+
+  function startSave() {
+    if (saving || cases.length === 0) return;
+    if (cases.some((k) => k.loading)) return;
+    const empty = cases.findIndex((k) => orderedCount(k) === 0);
+    if (empty >= 0) {
+      goToCase(empty);
+      return toast(tf("documents.caseEmptyQty", { desk: cases[empty].deskId }), "error");
+    }
+    openConfirm();
+  }
+
+  // The check before saving: ordered lines grouped by expected arrival date
+  // (proposal date + each SKU's lead time), then by case.
+  function openConfirm() {
+    const fallbackLead = cases.find((k) => k.source)?.source?.default_lead_days ?? 0;
+    const byDate = new Map();
+    for (const k of cases) {
+      for (const r of k.rows) {
+        if (!(Number(r.qty) > 0)) continue;
+        const lead = r.leadDays ?? fallbackLead;
+        const arrive = addDays(date, lead);
+        if (!byDate.has(arrive)) byDate.set(arrive, { lead, cases: new Map(), qty: 0, grams: 0, skus: 0 });
+        const g = byDate.get(arrive);
+        if (!g.cases.has(k.deskId)) g.cases.set(k.deskId, []);
+        g.cases.get(k.deskId).push(r);
+        g.qty += Number(r.qty);
+        g.grams += Number(r.weight_g || 0);
+        g.skus += 1;
+      }
+    }
+    const groups = [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const all = groups.reduce((acc, [, g]) => ({ skus: acc.skus + g.skus, qty: acc.qty + g.qty, grams: acc.grams + g.grams }), { skus: 0, qty: 0, grams: 0 });
+    const html = `
+      <p class="mb-3 text-[11px] text-gray-500">${t("documents.confirmIntro")}</p>
+      ${groups
+        .map(
+          ([arrive, g]) => `
+        <div class="mb-3 rounded-xl border border-hairline">
+          <div class="flex items-center justify-between gap-2 rounded-t-xl bg-brand-50 px-3 py-2">
+            <span class="text-xs font-extrabold text-brand-700">📦 ${escapeHtml(tf("documents.arrives", { date: fmtDate(arrive), n: g.lead }))}</span>
+            <span class="shrink-0 text-[10px] font-bold text-gray-600">${g.skus} ${t("documents.skuCount")} · ${fmtInt(g.qty)} ${t("documents.pcs")} · ${round2(g.grams)} g</span>
+          </div>
+          ${[...g.cases.entries()]
+            .map(
+              ([deskId, rows]) => `
+            <div class="border-t border-hairline px-3 py-2">
+              <div class="mb-1 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">${escapeHtml(deskLabel(deskId))}</div>
+              ${rows
+                .map(
+                  (r) => `
+                <div class="flex items-center justify-between gap-2 py-0.5 text-[11px]">
+                  <span class="min-w-0 truncate font-semibold text-gray-800" lang="lo">${escapeHtml(r.item)}${r.note ? ` <span class="font-normal text-gray-500">· ${escapeHtml(r.note)}</span>` : ""}</span>
+                  <span class="shrink-0 font-bold text-gray-900">${fmtInt(Number(r.qty))} · ${r.weight_g === "" ? "—" : round2(Number(r.weight_g))} g</span>
+                </div>`
+                )
+                .join("")}
+            </div>`
+            )
+            .join("")}
+        </div>`
+        )
+        .join("")}
+      <div class="mb-3 flex justify-between rounded-xl bg-gray-50 px-3 py-2 text-xs font-extrabold text-gray-900">
+        <span>${t("documents.totalQty")}</span>
+        <span>${all.skus} ${t("documents.skuCount")} · ${fmtInt(all.qty)} ${t("documents.pcs")} · ${round2(all.grams)} g</span>
+      </div>
+      <div class="flex gap-2 pb-2">
+        <button id="confirm-back" class="btn-secondary flex-1">${t("documents.backToEdit")}</button>
+        <button id="confirm-save" class="btn-primary flex-1">${t("documents.confirmSave")}</button>
+      </div>`;
+    openSheet(html, {
+      title: t("documents.confirmTitle"),
+      onMount: (body) => {
+        body.querySelector("#confirm-back").addEventListener("click", closeSheet);
+        body.querySelector("#confirm-save").addEventListener("click", (e) => {
+          e.currentTarget.disabled = true;
+          save();
+        });
+      },
+    });
+  }
+
+  async function save() {
+    if (saving) return;
+    saving = true;
+    // Opened now, while this is still a tap, so the browser allows the tab.
+    const printTab = openPrintTab();
+    try {
+      let printParams;
+      if (editing) {
+        const updated = await Promise.all(cases.map((k) => api.updateDocument(k.docId, { title: k.title, rows: payloadRows(k) })));
+        printParams = { ids: updated.map((d) => d.id).join(",") };
+        toast(t("documents.proposalUpdatedToast"), "success");
+      } else {
+        const res = await api.createProposals({
+          branchId,
+          date,
+          notes: t("documents.proposalAutoNote"),
+          cases: cases.map((k) => ({ deskId: k.deskId, title: k.title, rows: payloadRows(k) })),
+        });
+        printParams = { groupId: res.groupId };
+        toast(t("documents.proposalSavedToast"), "success");
+      }
+      closeSheet();
+      backOut();
+      await fillPrintTabMany(printTab, printParams);
+    } catch (err) {
+      printTab?.close();
+      closeSheet();
+      saving = false;
+      if (err.code === "PROPOSAL_EXISTS" || err.code === "PROPOSAL_EMPTY_CASE") {
+        const i = cases.findIndex((k) => k.deskId === err.data?.deskId);
+        if (i >= 0) goToCase(i);
+      }
+      toast(err.message || t("documents.proposalLoadFailed"), "error");
+    }
+  }
+
+  // ---- start ----
+  if (editing) {
+    // The whole group while it is still pending, else just this proposal.
+    let docs = [edit];
+    if (edit.group_id && edit.group_size > 1) {
+      try {
+        const { documents } = await api.documents({ groupId: edit.group_id, pageSize: 50 });
+        const pending = documents.filter((d) => d.status === "pending" && d.kind === "proposal");
+        if (pending.some((d) => d.id === edit.id)) docs = pending.sort((a, b) => a.doc_no.localeCompare(b.doc_no));
+      } catch {}
+    }
+    cases = docs.map((d) => ({ deskId: d.desk_id, title: d.title, docId: d.id, loading: true, source: null, rows: [], saved: d.rows }));
+    active = Math.max(0, cases.findIndex((k) => k.docId === edit.id));
+    render();
+    await Promise.all(cases.map((k) => loadCase(k, k.saved, true)));
+    render();
+  } else {
+    render();
+    // Straight into picking cases: that is the first thing a manager does here.
+    openCasePicker(root.querySelector("#case-pick"));
+  }
 }

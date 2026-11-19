@@ -421,7 +421,7 @@ export async function historyMoves(store: Store, deskId: string, date: string, o
   return out.sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
-async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: string, date: string) {
+export async function deskDetail(c: Ctx, store: Store, user: SessionUser, deskId: string, date: string) {
   // Three serial stages: the desk (and the access check), then every read that
   // needs only the desk and date, then what depends on those (the branch
   // statuses, the move tickets' day statuses, the carried SKUs).

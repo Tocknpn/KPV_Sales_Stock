@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { freshApp, call, asStaff, asAdmin } from "./helpers";
+import { freshApp, call, asStaff, asAdmin, asManager } from "./helpers";
 
 beforeEach(freshApp);
 
 describe("document print (case-sheet layout)", () => {
   it("saves each row's product and prints rows grouped with subtotals and a total", async () => {
-    const staff = await asStaff("B-MM");
+    const staff = await asManager("B-MM");
     const created = await call(staff, "POST", "/documents", {
       branchId: "B-MM",
       deskId: "MM-D01",
@@ -33,9 +33,9 @@ describe("document print (case-sheet layout)", () => {
 
   it("another branch cannot print it", async () => {
     const admin = await asAdmin();
-    const created = await call(admin, "POST", "/documents", { branchId: "B-VTC", title: "x", rows: [] });
+    const created = await call(admin, "POST", "/documents", { branchId: "B-VTC", deskId: "VTC-D01", title: "x", rows: [{ item: "x", qty: 1 }] });
     const staff = await asStaff("B-MM");
     expect((await call(staff, "GET", `/documents/${created.json.id}/print`)).status).toBe(403);
-    expect((await call(admin, "GET", `/documents/${created.json.id}/print`)).text).toContain("—");
+    expect((await call(admin, "GET", `/documents/${created.json.id}/print`)).text).toContain(created.json.doc_no);
   });
 });

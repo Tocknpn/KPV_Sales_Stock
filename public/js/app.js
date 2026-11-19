@@ -6,7 +6,7 @@ import { t, tf, getLang } from "./i18n.js";
 import { getToken, getCachedUser, clearSession, isAdmin } from "./session.js";
 import { mountLogin } from "./views/login.js";
 import { mountStock, unmountStock } from "./views/stock.js";
-import { mountDocuments } from "./views/documents.js";
+import { mountDocuments, unmountDocuments } from "./views/documents.js";
 import { mountDashboard } from "./views/dashboard.js";
 import { mountReport, unmountReport } from "./views/report.js";
 import { mountSettings } from "./views/settings/index.js";
@@ -81,6 +81,7 @@ async function switchView(view, opts = {}, { fromRoute = false } = {}) {
   if (isSheetOpen()) closeSheet({ fromHistory: true });
   if (state.view === "report" && view !== "report") unmountReport();
   if (state.view === "stock" && view !== "stock") unmountStock();
+  if (state.view === "documents") unmountDocuments();
   state.view = view;
   setActiveNav(view);
   document.getElementById("view-root").scrollTop = 0;

@@ -110,10 +110,9 @@ export interface SheetDocument {
 
 const BLANK_CELLS = 7; // counted x2, order x2, sender, goldsmith, approver
 
-export function renderDocumentSheet({ doc, skus, types }: { doc: SheetDocument; skus: MasterSku[]; types: SkuType[] }): string {
+function sheetBlock(doc: SheetDocument, skus: MasterSku[], types: SkuType[]): string {
   const sheet = groupSheetRows(doc.rows, skus, types);
   const blanks = '<td class="w"></td>'.repeat(BLANK_CELLS);
-  const vientiane = (iso: string) => new Date(iso).toLocaleString("en-GB", { timeZone: "Asia/Vientiane" });
 
   const body = sheet.groups.length
     ? sheet.groups
@@ -133,7 +132,7 @@ export function renderDocumentSheet({ doc, skus, types }: { doc: SheetDocument; 
         .join("")
     : `<tr><td colspan="${6 + BLANK_CELLS}" class="c muted">—</td></tr>`;
 
-  const deskLabel = doc.desk_name ?? doc.desk_id;
+  const deskLabel = doc.desk_name ? (doc.desk_id ? `${doc.desk_id} · ${doc.desk_name}` : doc.desk_name) : doc.desk_id;
   const branch = doc.branch_name_lo ? `${doc.branch_name} · ${doc.branch_name_lo}` : doc.branch_name;
   const status = doc.status
     ? `<span class="pill">${STATUS_LABEL[doc.status] ?? esc(doc.status)}</span>${
@@ -141,38 +140,7 @@ export function renderDocumentSheet({ doc, skus, types }: { doc: SheetDocument; 
       }`
     : "";
 
-  return `<!doctype html>
-<html lang="lo"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Lao:wght@400;600;700&display=swap" rel="stylesheet" />
-<title>${esc(doc.doc_no)} — ${esc(doc.title)}</title>
-<style>
-  @page{size:A4 portrait;margin:10mm}
-  *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  body{font-family:'Noto Sans Lao',Arial,sans-serif;color:#000;margin:0;padding:16px;background:#fff}
-  .page{max-width:190mm;margin:auto}
-  .meta{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:11px;color:#333;margin-bottom:8px}
-  .meta strong{color:#000}
-  .pill{display:inline-block;padding:1px 8px;border-radius:999px;background:#ffebeb;color:#990000;font-weight:700}
-  .scroll{overflow-x:auto}
-  table{width:100%;border-collapse:collapse;font-size:9.5px;table-layout:fixed;min-width:640px}
-  th,td{border:1px solid #000;padding:3px 4px;height:22px;vertical-align:middle;word-wrap:break-word}
-  thead tr:first-child th{border-top:3px solid #000}
-  th{background:#ffc000;font-weight:600;text-align:center}
-  td.type{background:#c5e4f3;font-weight:700;text-align:center}
-  td.n{text-align:center}
-  .c{text-align:center}
-  tr.sub td{background:#fce4d6}
-  tr.total td{background:#1f5f7a;color:#fff;font-weight:600;border-color:#000}
-  .muted{color:#888}
-  .notes{margin-top:10px;font-size:11px;color:#333}
-  .actions{margin-top:20px}
-  .actions button{font:inherit;padding:8px 16px;border-radius:8px;border:0;background:#990000;color:#fff;font-weight:700;cursor:pointer}
-  @media print{.actions{display:none} body{padding:0} .scroll{overflow:visible} table{min-width:0}}
-</style></head>
-<body><div class="page">
+  return `<section class="sheet">
   <div class="meta">
     <span><strong>${esc(doc.doc_no)}</strong></span>
     <span>${esc(doc.doc_date)}</span>
@@ -206,10 +174,59 @@ export function renderDocumentSheet({ doc, skus, types }: { doc: SheetDocument; 
     </thead>
     <tbody>
       ${body}
-      <tr class="total"><td colspan="4" class="c">ລວມນ້ຳໜັກ+ຈຳນວນ</td><td class="n">${num(sheet.totalQty)}</td><td class="n">${num(sheet.totalGrams)}</td>${'<td></td>'.repeat(BLANK_CELLS)}</tr>
+      <tr class="total"><td colspan="4" class="c">ລວມນ້ຳໜັກ+ຈຳນວນ</td><td class="n">${num(sheet.totalQty)}</td><td class="n">${num(sheet.totalGrams)}</td>${"<td></td>".repeat(BLANK_CELLS)}</tr>
     </tbody>
   </table></div>
   ${doc.notes ? `<p class="notes">ໝາຍເຫດ: ${esc(doc.notes)}</p>` : ""}
+</section>`;
+}
+
+const vientiane = (iso: string) => new Date(iso).toLocaleString("en-GB", { timeZone: "Asia/Vientiane" });
+
+export function renderDocumentSheet({ doc, skus, types }: { doc: SheetDocument; skus: MasterSku[]; types: SkuType[] }): string {
+  return renderDocumentSheets({ docs: [doc], skus, types });
+}
+
+// Several documents on one printable page: each starts on a new sheet with its
+// own header, and a long table repeats its column headings on every page.
+export function renderDocumentSheets({ docs, skus, types }: { docs: SheetDocument[]; skus: MasterSku[]; types: SkuType[] }): string {
+  const title = docs.length === 1 ? `${esc(docs[0].doc_no)} — ${esc(docs[0].title)}` : docs.map((d) => esc(d.doc_no)).join(", ");
+  return `<!doctype html>
+<html lang="lo"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Lao:wght@400;600;700&display=swap" rel="stylesheet" />
+<title>${title}</title>
+<style>
+  @page{size:A4 portrait;margin:10mm}
+  *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body{font-family:'Noto Sans Lao',Arial,sans-serif;color:#000;margin:0;padding:16px;background:#fff}
+  .page{max-width:190mm;margin:auto}
+  .sheet + .sheet{margin-top:32px;break-before:page;page-break-before:always}
+  .meta{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:11px;color:#333;margin-bottom:8px}
+  .meta strong{color:#000}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;background:#ffebeb;color:#990000;font-weight:700}
+  .scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:9.5px;table-layout:fixed;min-width:640px}
+  thead{display:table-header-group}
+  tr{break-inside:avoid;page-break-inside:avoid}
+  th,td{border:1px solid #000;padding:3px 4px;height:22px;vertical-align:middle;word-wrap:break-word}
+  thead tr:first-child th{border-top:3px solid #000}
+  th{background:#ffc000;font-weight:600;text-align:center}
+  td.type{background:#c5e4f3;font-weight:700;text-align:center}
+  td.n{text-align:center}
+  .c{text-align:center}
+  tr.sub td{background:#fce4d6}
+  tr.total td{background:#1f5f7a;color:#fff;font-weight:600;border-color:#000}
+  .muted{color:#888}
+  .notes{margin-top:10px;font-size:11px;color:#333}
+  .actions{margin-top:20px}
+  .actions button{font:inherit;padding:8px 16px;border-radius:8px;border:0;background:#990000;color:#fff;font-weight:700;cursor:pointer}
+  @media print{.actions{display:none} body{padding:0} .scroll{overflow:visible} table{min-width:0} .sheet + .sheet{margin-top:0}}
+</style></head>
+<body><div class="page">
+  ${docs.map((d) => sheetBlock(d, skus, types)).join("")}
   <p class="actions"><button onclick="window.print()">ພິມ / ບັນທຶກເປັນ PDF · Print / Save as PDF</button></p>
 </div></body></html>`;
 }

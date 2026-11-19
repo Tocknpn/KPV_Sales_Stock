@@ -98,12 +98,14 @@ export function openSheet(innerHtml, { onMount, title, anchorEl } = {}) {
   // level with the trigger instead of sliding up from the bottom — keeps the
   // user's eye/focus point on screen instead of jumping it down to whatever
   // height the content happens to be.
-  const anchorTop = anchorEl ? Math.max(12, anchorEl.getBoundingClientRect().top) : null;
+  // Kept on screen: a trigger low on the page moves the panel up just enough
+  // to leave it at least 280px of height.
+  const anchorTop = anchorEl ? Math.max(12, Math.min(anchorEl.getBoundingClientRect().top, window.innerHeight - 296)) : null;
   const panelClass =
     anchorTop != null
       ? "absolute inset-x-0 mx-auto flex max-h-[80vh] w-full max-w-[430px] flex-col rounded-3xl bg-white shadow-pop"
       : "absolute inset-x-0 bottom-0 mx-auto flex max-h-[92vh] w-full max-w-[430px] flex-col rounded-t-3xl bg-white shadow-pop";
-  const panelStyle = anchorTop != null ? `style="top:${anchorTop}px"` : "";
+  const panelStyle = anchorTop != null ? `style="top:${anchorTop}px;max-height:${Math.max(280, window.innerHeight - anchorTop - 16)}px"` : "";
   host.innerHTML = `
     <div class="absolute inset-0 bg-gray-900/40" data-close></div>
     <div class="${panelClass}" ${panelStyle}
@@ -146,7 +148,8 @@ export function closeSheet(opts) {
   if (wasOpen && !opts?.fromHistory) sheetClosed(isSheetOpen);
 }
 
-export function openActionSheet(title, options, onPick) {
+// anchorEl: open level with the trigger instead of from the bottom.
+export function openActionSheet(title, options, onPick, { anchorEl } = {}) {
   const rows = options
     .map(
       (opt, i) => `
@@ -158,6 +161,7 @@ export function openActionSheet(title, options, onPick) {
     .join("");
   openSheet(`<div class="flex flex-col gap-0.5 pb-2">${rows}</div>`, {
     title,
+    anchorEl,
     onMount: (body) => {
       body.querySelectorAll("[data-pick]").forEach((btn) => {
         btn.addEventListener("click", () => {

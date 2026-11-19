@@ -106,8 +106,13 @@ export interface DocumentFilter {
   branchId?: string;
   deskId?: string;
   date?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  createdBy?: string;
+  groupId?: string;
   kind?: DocumentKind;
   status?: ProposalStatus;
+  statusIn?: ProposalStatus[];
   page?: number;
   pageSize?: number;
 }
@@ -235,6 +240,10 @@ export interface Store {
   createDocument(doc: NewDocument, rows: NewDocumentRow[]): Promise<DocumentRecord>;
   updateDocument(id: string, patch: Partial<DocumentRecord>, expectedStatus?: ProposalStatus): Promise<DocumentRecord | null>;
   deleteDocument(id: string): Promise<boolean>;
+  // Replaces every row of a document (editing a pending proposal).
+  replaceDocumentRows(id: string, rows: NewDocumentRow[]): Promise<DocumentRow[]>;
+  // Distinct names that created documents (the "Created by" filter).
+  documentCreators(branchId?: string): Promise<string[]>;
 
   config(): Promise<SystemConfig>;
   updateConfig(patch: Partial<SystemConfig>): Promise<SystemConfig>;
@@ -744,8 +753,13 @@ export class DemoStore implements Store {
       if (filter.branchId && d.branch_id !== filter.branchId) return false;
       if (filter.deskId && d.desk_id !== filter.deskId) return false;
       if (filter.date && d.doc_date !== filter.date) return false;
+      if (filter.dateFrom && d.doc_date < filter.dateFrom) return false;
+      if (filter.dateTo && d.doc_date > filter.dateTo) return false;
+      if (filter.createdBy && d.created_by !== filter.createdBy) return false;
+      if (filter.groupId && d.group_id !== filter.groupId) return false;
       if (filter.kind && d.kind !== filter.kind) return false;
       if (filter.status && d.status !== filter.status) return false;
+      if (filter.statusIn && !filter.statusIn.includes(d.status as ProposalStatus)) return false;
       return true;
     });
     const sorted = [...matched].sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -794,6 +808,19 @@ export class DemoStore implements Store {
     // document_rows cascade with their document, and the trigger sees each row.
     for (const r of removed.rows ?? []) this.log("document_rows", "DELETE", r, null);
     return true;
+  }
+  async replaceDocumentRows(id: string, rows: NewDocumentRow[]) {
+    this.guard();
+    const doc = this.db.documents.find((d) => d.id === id);
+    if (!doc) return [];
+    for (const r of doc.rows ?? []) this.log("document_rows", "DELETE", r, null);
+    doc.rows = rows.map((r, i) => ({ ...r, id: `${id}-${crypto.randomUUID()}`, document_id: id, sort_order: r.sort_order ?? i }));
+    for (const r of doc.rows) this.log("document_rows", "INSERT", null, r);
+    return doc.rows;
+  }
+  async documentCreators(branchId?: string) {
+    const names = this.db.documents.filter((d) => !branchId || d.branch_id === branchId).map((d) => d.created_by);
+    return [...new Set(names)].sort((a, b) => a.localeCompare(b));
   }
 
   async config() {
@@ -1487,8 +1514,13 @@ class SupabaseStore implements Store {
     if (filter.branchId) q.push(`branch_id=eq.${enc(filter.branchId)}`);
     if (filter.deskId) q.push(`desk_id=eq.${enc(filter.deskId)}`);
     if (filter.date) q.push(`doc_date=eq.${filter.date}`);
+    if (filter.dateFrom) q.push(`doc_date=gte.${filter.dateFrom}`);
+    if (filter.dateTo) q.push(`doc_date=lte.${filter.dateTo}`);
+    if (filter.createdBy) q.push(`created_by=eq.${enc(filter.createdBy)}`);
+    if (filter.groupId) q.push(`group_id=eq.${enc(filter.groupId)}`);
     if (filter.kind) q.push(`kind=eq.${filter.kind}`);
     if (filter.status) q.push(`status=eq.${filter.status}`);
+    if (filter.statusIn?.length) q.push(`status=in.(${filter.statusIn.join(",")})`);
     const pageSize = filter.pageSize ?? 10;
     const start = ((filter.page ?? 1) - 1) * pageSize;
     const res = await this.send(`documents?${q.join("&")}`, {
@@ -1526,6 +1558,17 @@ class SupabaseStore implements Store {
   async deleteDocument(id: string) {
     const rows = await this.rest<DocumentRecord[]>(`documents?id=eq.${enc(id)}`, { method: "DELETE" });
     return rows.length > 0;
+  }
+  async replaceDocumentRows(id: string, rows: NewDocumentRow[]) {
+    await this.rest<DocumentRow[]>(`document_rows?document_id=eq.${enc(id)}`, { method: "DELETE" });
+    const payload = rows.map((r, i) => ({ ...r, document_id: id, sort_order: r.sort_order ?? i }));
+    return payload.length ? this.rest<DocumentRow[]>("document_rows", { method: "POST", body: JSON.stringify(payload) }) : [];
+  }
+  async documentCreators(branchId?: string) {
+    const q = ["select=created_by", "order=created_at.desc", "limit=2000"];
+    if (branchId) q.push(`branch_id=eq.${enc(branchId)}`);
+    const rows = await this.rest<{ created_by: string }[]>(`documents?${q.join("&")}`);
+    return [...new Set(rows.map((r) => r.created_by))].sort((a, b) => a.localeCompare(b));
   }
 
   async goldPrice() {

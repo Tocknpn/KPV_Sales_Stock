@@ -103,6 +103,13 @@ export const api = {
 
   documents: (params) => request(`/documents?${query(params)}`),
   createDocument: (payload) => post(`/documents`, payload),
+  // payload = { branchId, date, cases: [{ deskId, title, rows }] }
+  createProposals: (payload) => post(`/documents/proposals`, payload),
+  updateDocument: (id, payload) => request(`/documents/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(payload) }),
+  documentCreators: (branchId) => request(`/documents/creators?${query({ branchId })}`),
+  proposalTaken: (branchId, date) => request(`/documents/proposal-taken?${query({ branchId, date })}`),
+  proposalSource: (deskId, date) => request(`/documents/proposal-source?${query({ deskId, date })}`),
+  documentsPrintHtml: async (params) => (await send(`/documents/print?${query(params)}`)).text(),
   decideDocument: (id, decision) => post(`/documents/${id}/decision`, { decision }),
   deleteDocument: (id) => request(`/documents/${id}`, { method: "DELETE" }),
   documentPrintHtml: async (id) => (await send(`/documents/${id}/print`)).text(),
@@ -155,4 +162,22 @@ export async function fillPrintTab(win, id) {
 
 export function openDocumentPrint(id) {
   return fillPrintTab(openPrintTab(), id);
+}
+
+// Several documents (one group, or a list of ids) in one printable tab.
+export async function fillPrintTabMany(win, params) {
+  try {
+    const html = await api.documentsPrintHtml(params);
+    if (!win) return;
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+  } catch (err) {
+    win?.close();
+    throw err;
+  }
+}
+
+export function openGroupPrint(groupId) {
+  return fillPrintTabMany(openPrintTab(), { groupId });
 }
