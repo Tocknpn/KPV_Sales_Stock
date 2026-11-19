@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 // @ts-expect-error plain browser ES module without types
-import { caseSteps, cardBodyAction } from "../public/js/case-steps.js";
+import { caseSteps, cardBodyAction, statusIcon } from "../public/js/case-steps.js";
 
 describe("caseSteps", () => {
   it("not_started with no earlier open day: check in is the step", () => {
@@ -30,5 +30,18 @@ describe("cardBodyAction", () => {
   it("not_started checks in", () => expect(cardBodyAction("not_started")).toBe("checkIn"));
   it("other statuses keep the opening-balance sheet", () => {
     for (const s of ["opening", "check_in", "final_stock"]) expect(cardBodyAction(s)).toBe("openingSheet");
+  });
+});
+
+describe("statusIcon", () => {
+  it("maps each badge to its glyph and tint", () => {
+    expect(statusIcon("alert")).toEqual({ icon: "triangle", tone: "red" });
+    expect(statusIcon("pending")).toEqual({ icon: "clock", tone: "amber" });
+    expect(statusIcon("done")).toEqual({ icon: "check", tone: "green" });
+  });
+  it("follows caseSteps for every status", () => {
+    expect(statusIcon(caseSteps({ status: "not_started", openEarlierDate: null }).badge).icon).toBe("triangle");
+    expect(statusIcon(caseSteps({ status: "check_in", openEarlierDate: null }).badge).icon).toBe("clock");
+    expect(statusIcon(caseSteps({ status: "done", openEarlierDate: null }).badge).icon).toBe("check");
   });
 });

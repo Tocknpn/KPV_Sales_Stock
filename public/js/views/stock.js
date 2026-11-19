@@ -10,7 +10,7 @@ import { go, pathFor, backTo } from "../router.js";
 import { renderSkuPickerInto, openingRowsHtml, bindOpeningInputs } from "./sku-picker.js";
 import { skeletonCards, skeletonCalendar } from "../skeleton.js";
 import { skuSizeLabel } from "../sku-groups.js";
-import { caseSteps, cardBodyAction } from "../case-steps.js";
+import { caseSteps, cardBodyAction, statusIcon } from "../case-steps.js";
 
 function setStockDate(date) {
   state.stock.date = date;
@@ -204,16 +204,28 @@ function blockedDate(desk) {
   return caseSteps(desk).goToDate;
 }
 
-const BADGE = {
-  alert: { icon: "⚠", cls: "bg-danger-bg text-danger", label: () => t("stock.statusOpening") },
-  pending: { icon: "⏳", cls: "bg-warning-bg text-warning", label: () => t("step.badgePending") },
-  done: { icon: "", cls: "bg-success-bg text-success", label: () => t("step.badgeDone") },
+const BADGE_LABEL = {
+  alert: () => t("stock.statusOpening"),
+  pending: () => t("step.badgePending"),
+  done: () => t("step.badgeDone"),
 };
+const TONE_CLS = { red: "bg-danger-bg text-danger", amber: "bg-warning-bg text-warning", green: "bg-success-bg text-success" };
+const ICON_PATH = {
+  triangle: '<path d="M12 4 3 20h18L12 4Z"/><path d="M12 10v4.5M12 17.5v.01"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+};
+
+// The case status as a 36 px icon (display only, not a button).
+function statusIconHtml(badge) {
+  const { icon, tone } = statusIcon(badge);
+  return `<span role="img" aria-label="${escapeHtml(BADGE_LABEL[badge]())}" data-badge="${badge}" class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${TONE_CLS[tone]}"><svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATH[icon]}</svg></span>`;
+}
 
 // One step button: the active step is the primary button; done and locked steps are grey and disabled.
 function stepButton(step, stepState, label) {
-  if (stepState === "active") return `<button data-step="${step}" class="btn-primary min-w-0 flex-1 px-2 py-2 text-xs">${label}</button>`;
-  return `<button data-step="${step}" disabled aria-disabled="true" class="btn-secondary min-w-0 flex-1 cursor-not-allowed bg-gray-100 px-2 py-2 text-xs text-gray-400">${label}${stepState === "done" ? " ✓" : ""}</button>`;
+  if (stepState === "active") return `<button data-step="${step}" class="btn-primary min-w-[64px] max-w-[96px] shrink-0 truncate px-2 py-2 text-[11px]">${label}</button>`;
+  return `<button data-step="${step}" disabled aria-disabled="true" class="btn-secondary min-w-[64px] max-w-[96px] shrink-0 cursor-not-allowed truncate bg-gray-100 px-2 py-2 text-[11px] text-gray-400">${label}${stepState === "done" ? " ✓" : ""}</button>`;
 }
 
 // The warning line under an overdue card; other tiers say nothing extra.
@@ -236,32 +248,25 @@ function renderCard(d) {
   const streak = d.streak > 365 ? "365+" : d.streak;
   const blocked = blockedDate(d);
   const steps = caseSteps(d);
-  const badge = BADGE[steps.badge];
   return `
     <div class="card border-l-4 px-3 py-2.5 ${overdue ? "border-l-danger" : "border-l-transparent"}" data-card="${d.desk_id}" data-tier="${d.tier}">
-      <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-2">
-          <span class="min-w-0 truncate text-sm font-extrabold text-gray-900">${escapeHtml(d.display_name)}</span>
-          <span class="status-pill shrink-0 ${badge.cls}" data-badge="${steps.badge}">${badge.icon ? `${badge.icon} ` : ""}${badge.label()}</span>
+      <div class="flex items-center gap-2">
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-sm font-extrabold text-gray-900">${escapeHtml(d.display_name)}</div>
+          <div class="mt-0.5 flex items-center gap-2 text-xs font-bold text-gray-800">
+            <span class="min-w-0 truncate">${fmtBaht(d.totalBaht)} Baht · ${fmtInt(d.totalPcs)} pcs</span>
+            ${d.streak > 0 ? `<span class="inline-flex shrink-0 items-center gap-0.5 text-[11px] font-extrabold text-brand-700">${flameIcon()}${streak}<span class="sr-only"> ${t("stock.streakDays")}</span></span>` : ""}
+            ${d.criticalCount > 0 ? `<span class="shrink-0 text-[11px] font-bold text-danger">⚠ ${d.criticalCount} ${t("stock.criticalShort")}</span>` : ""}
+          </div>
         </div>
-        <div class="mt-0.5 flex items-center gap-2 text-xs font-bold text-gray-800">
-          <span>${fmtBaht(d.totalBaht)} Baht · ${fmtInt(d.totalPcs)} pcs</span>
-          ${d.streak > 0 ? `<span class="inline-flex shrink-0 items-center gap-0.5 text-[11px] font-extrabold text-brand-700">${flameIcon()}${streak}<span class="sr-only"> ${t("stock.streakDays")}</span></span>` : ""}
-          ${d.criticalCount > 0 ? `<span class="shrink-0 text-[11px] font-bold text-danger">⚠ ${d.criticalCount} ${t("stock.criticalShort")}</span>` : ""}
-        </div>
-        <div class="text-[11px] text-gray-500">≈ ${fmtInt(d.valueLak ?? 0)} LAK</div>
-        ${
-          d.lastActorName
-            ? `<div class="truncate text-[11px] text-gray-500">${escapeHtml(lastStamp(d))}</div>`
-            : ""
-        }
-        ${overdue ? `<p class="mt-0.5 text-[11px] font-bold leading-snug text-danger">⚠ ${escapeHtml(tierText(d))}</p>` : ""}
-        ${blocked ? `<p class="mt-0.5 text-[11px] font-bold leading-snug text-warning">${tf("stock.finishFirst", { date: fmtDate(d.openEarlierDate) })}</p>` : ""}
-      </div>
-      <div class="mt-2 flex gap-2">
         ${stepButton("checkIn", steps.checkIn, blocked ? tf("stock.goToDate", { date: fmtDate(blocked) }) : t("step.checkIn"))}
         ${stepButton("close", steps.close, t("step.close"))}
+        ${statusIconHtml(steps.badge)}
       </div>
+      <div class="text-[11px] text-gray-500">≈ ${fmtInt(d.valueLak ?? 0)} LAK</div>
+      ${d.lastActorName ? `<div class="truncate text-[11px] text-gray-500">${escapeHtml(lastStamp(d))}</div>` : ""}
+      ${overdue ? `<p class="mt-0.5 text-[11px] font-bold leading-snug text-danger">⚠ ${escapeHtml(tierText(d))}</p>` : ""}
+      ${blocked ? `<p class="mt-0.5 text-[11px] font-bold leading-snug text-warning">${tf("stock.finishFirst", { date: fmtDate(d.openEarlierDate) })}</p>` : ""}
     </div>`;
 }
 
@@ -333,7 +338,8 @@ async function openOpeningBalanceSheet(deskCard) {
       onMount: (body) => {
         body.querySelector("#go-check-stock")?.addEventListener("click", () => {
           closeSheet();
-          handleCardAction(deskCard);
+          if (blockedDate(deskCard)) handleCardAction(deskCard);
+          else openDeskDetail(deskCard, { detail });
         });
       },
     }
@@ -349,8 +355,9 @@ async function handleCardAction(desk) {
     return;
   }
   if (desk.status === "not_started") {
+    let res;
     try {
-      await api.checkIn(desk.desk_id, state.stock.date);
+      res = await api.checkIn(desk.desk_id, state.stock.date);
     } catch (err) {
       if (err.code === "EARLIER_DAY_OPEN" && err.data.openDate) {
         setStockDate(err.data.openDate);
@@ -359,9 +366,8 @@ async function handleCardAction(desk) {
       throw err;
     }
     toast(`${desk.display_name} ${t("stock.checkedInToast")}`, "success");
-    await refreshCards();
-    const updated = currentCards.find((d) => d.desk_id === desk.desk_id);
-    openDeskDetail(updated);
+    // The response carries the day: open it directly. The list refreshes when the user goes back.
+    openDeskDetail({ ...desk, status: res.detail.status }, { detail: res.detail });
   } else {
     openDeskDetail(desk);
   }
@@ -374,12 +380,12 @@ export async function openDeskDay(deskId, date) {
   await window.switchView("stock", { sub: deskId, params: { date } });
 }
 
-async function openDeskDetail(deskCard, { fromRoute = false, tab, step } = {}) {
-  if (deskCard.status === "not_started") return handleCardAction(deskCard);
+async function openDeskDetail(deskCard, { fromRoute = false, tab, step, detail } = {}) {
+  if (deskCard.status === "not_started" && !detail) return handleCardAction(deskCard);
   const closeStep = step === "close" ? "close" : undefined;
   if (!fromRoute) go(pathFor("stock", deskCard.desk_id, { date: state.stock.date, step: closeStep }), { parent: pathFor("stock") });
   hideFab();
-  await mountDay(deskCard, state.stock.date, dayHooks(deskCard), { tab: tab === "history" ? "history" : undefined, step: closeStep });
+  await mountDay(deskCard, state.stock.date, dayHooks(deskCard), { tab: tab === "history" ? "history" : undefined, step: closeStep, detail });
 }
 
 // What the day screen needs from this file: the SKU picker (shared with
@@ -396,9 +402,7 @@ function dayHooks(deskCard) {
 // Reloads the day screen after something changed server-side (a transfer, an
 // added SKU, a reopen) so every number on it is the saved one.
 async function reloadDeskDetail(deskCard) {
-  await syncCurrentCards();
-  const updatedCard = currentCards.find((d) => d.desk_id === deskCard.desk_id) ?? deskCard;
-  await mountDay(updatedCard, state.stock.date, dayHooks(updatedCard));
+  await Promise.all([syncCurrentCards(), mountDay(deskCard, state.stock.date, dayHooks(deskCard))]);
 }
 
 

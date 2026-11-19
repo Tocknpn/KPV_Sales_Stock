@@ -97,7 +97,7 @@ export async function mountDay(deskCard, date, hooks = {}, opts = {}) {
   // First open of a case: show its shape while loading. A reload keeps the
   // current screen instead, so numbers do not flash away after a save.
   if (!document.getElementById("day-screen")) document.getElementById("view-root").innerHTML = skeletonTable(8, 4);
-  const detail = await api.deskDetail(deskCard.desk_id, date);
+  const detail = opts.detail ?? (await api.deskDetail(deskCard.desk_id, date));
   const rows = detail.rows.map((r) => ({ ...r }));
   const screen = {
     deskCard,

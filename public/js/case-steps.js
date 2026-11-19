@@ -18,3 +18,14 @@ export function cardBodyAction(status) {
   if (status === "not_started") return "checkIn";
   return "openingSheet";
 }
+
+// The status icon on the home card: which glyph and tint a badge shows.
+// alert (not checked in) = red triangle, pending (checked in) = amber clock, done = green check.
+const STATUS_ICONS = {
+  alert: { icon: "triangle", tone: "red" },
+  pending: { icon: "clock", tone: "amber" },
+  done: { icon: "check", tone: "green" },
+};
+export function statusIcon(badge) {
+  return STATUS_ICONS[badge] ?? STATUS_ICONS.alert;
+}
