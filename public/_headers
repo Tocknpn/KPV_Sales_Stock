@@ -1,0 +1,4 @@
+/dist/*
+  Cache-Control: no-cache
+/css/*
+  Cache-Control: no-cache

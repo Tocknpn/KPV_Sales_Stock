@@ -10,7 +10,8 @@
 <link rel="icon" href="data:," />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Lao:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Lao:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Lao:wght@400;500;600;700&display=swap" /></noscript>
 <link rel="stylesheet" href="/css/app.css" />
 </head>
 <body class="bg-canvas text-gray-900 antialiased">
@@ -19,7 +20,7 @@
     <div id="mode-banner" role="status" class="hidden"></div>
 
     <header id="topbar" class="sticky top-0 z-30 border-b border-hairline bg-canvas/95 px-4 pb-3 pt-[calc(env(safe-area-inset-top)+12px)] backdrop-blur">
-      <div id="topbar-slot"></div>
+      <div id="topbar-slot" class="min-h-[52px]"></div>
     </header>
 
     <!-- View container -->
@@ -56,6 +57,6 @@
     </nav>
   </div>
 
-  <script src="/js/app.js" type="module"></script>
+  <script src="/dist/app.js" type="module"></script>
 </body>
 </html>

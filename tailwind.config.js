@@ -5,8 +5,8 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["Plus Jakarta Sans", "Noto Sans Lao", "sans-serif"],
-        lao: ["Noto Sans Lao", "Plus Jakarta Sans", "sans-serif"],
+        sans: ["Plus Jakarta Sans", "Noto Sans Lao", "Leelawadee UI", "Lao UI", "Noto Sans Lao UI", "system-ui", "sans-serif"],
+        lao: ["Noto Sans Lao", "Plus Jakarta Sans", "Leelawadee UI", "Lao UI", "Noto Sans Lao UI", "system-ui", "sans-serif"],
       },
       colors: {
         // HSL(0, 100%, L) ramp anchored at 600 = the brand hex #990000
