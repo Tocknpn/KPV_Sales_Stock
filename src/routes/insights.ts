@@ -5,10 +5,11 @@ import { assertBranchAccess } from "../auth";
 import { businessDate, addDays, isValidMonth, monthRange } from "../time";
 import { buildDashboard, buildReport, AGING_LOOKBACK_DAYS } from "../logic";
 import { resolveGoldPrice, priceOn } from "../goldPrice";
-import { loadBranchStatuses } from "../replenishment";
+import { loadBranchStatuses, loadBranchData } from "../replenishment";
 import { buildCaseHistory, buildIssueGrid } from "../caseHistory";
+import { buildExecutive, PERIODS, type PeriodDays } from "../executive";
 import type { CaseDayRow } from "../caseHistory";
-import type { Desk, DeskDay, SessionUser } from "../types";
+import type { Desk, DeskDay, DocumentRecord, SessionUser } from "../types";
 
 const r = newRouter();
 
@@ -65,6 +66,67 @@ r.get("/dashboard", async (c) => {
     }),
   });
 });
+
+// Executive overview (the CEO dashboard and the report's position / stock-out /
+// case tables). period = 7 | 30 | 90 rolling days ending today.
+r.get("/executive", async (c) => {
+  const store = storeFor(c);
+  const user = c.get("user");
+  const today = businessDate(c.env);
+  const asked = Number(c.req.query("days"));
+  const periodDays: PeriodDays = (PERIODS as readonly number[]).includes(asked) ? (asked as PeriodDays) : 30;
+  const branchId = scopeBranch(user, c.req.query("branchId") || undefined);
+  const [skus, types, branches, desks, rules, config, goldRow] = await Promise.all([
+    store.skus(),
+    store.skuTypes(),
+    store.branches(),
+    store.desks(),
+    store.rules(),
+    store.config(),
+    store.goldPrice(),
+  ]);
+  const branchIds = branchId ? [branchId] : branches.map((b) => b.branch_id);
+  const from = addDays(today, -(periodDays - 1));
+  const [data, latestDays, ledger, proposals] = await Promise.all([
+    loadBranchData(store, branchIds, today, { skus, rules, config, desks }),
+    store.latestDeskDays({ branchId }),
+    store.ledger({ from: addDays(from, -periodDays), to: today, branchId }),
+    liveProposals(store, branchId, addDays(today, -PROPOSAL_LOOKBACK_DAYS)),
+  ]);
+  const gold = resolveGoldPrice(goldRow, config, today);
+  return c.json({
+    ...buildExecutive({
+      today,
+      periodDays,
+      skus,
+      types,
+      branches,
+      desks,
+      statuses: data.statuses,
+      latestDays,
+      latestRows: data.latestRows,
+      ledger,
+      proposals,
+      config,
+      lakPerBaht: gold.lakPerBaht,
+      branchIds,
+    }),
+    priceStale: gold.stale,
+  });
+});
+
+// Long enough to cover any lead time + warning margin a branch sets.
+const PROPOSAL_LOOKBACK_DAYS = 120;
+
+async function liveProposals(store: ReturnType<typeof storeFor>, branchId: string | undefined, dateFrom: string) {
+  const out: DocumentRecord[] = [];
+  for (let page = 1; page <= 20; page++) {
+    const { rows, total } = await store.documents({ branchId, kind: "proposal", statusIn: ["pending", "approved"], dateFrom, page, pageSize: 100 });
+    out.push(...rows);
+    if (out.length >= total || rows.length === 0) break;
+  }
+  return out;
+}
 
 r.get("/report", async (c) => {
   const store = storeFor(c);

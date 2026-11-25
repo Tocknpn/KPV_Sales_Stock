@@ -1,34 +1,20 @@
-import { api } from "../api.js";
-import { state, branchName, deskById } from "../state.js";
-import { renderDonut, renderCapacityBar, categoryColor } from "../charts.js";
-import { openActionSheet } from "../ui.js";
-import { fmtBaht, fmtInt, fmtLak, fmtLakSigned, fmtUsd, escapeHtml, fmtRunway } from "../util.js";
+// Executive dashboard: a briefing that answers management's questions in
+// order (how much, how long, what needs a decision, what is stuck, what sells,
+// which cases). Every figure comes from GET /api/executive, the same payload
+// the report's tables read, so the two screens cannot disagree.
+import { state, branchName } from "../state.js";
+import { ribbonHtml, dailyColumnsHtml, barTrack, attachTips, bandFill, BAR_COLOR } from "../charts.js";
+import { fmtBaht, fmtInt, fmtLak, fmtUsd, escapeHtml } from "../util.js";
 import { t, tf, productName } from "../i18n.js";
 import { skuLabel } from "../sku-groups.js";
-import { isAdmin } from "../session.js";
+import { isManager } from "../session.js";
 import { skeletonDashboard } from "../skeleton.js";
+import { loadExecutive, execFiltersHtml, bindExecFilters, fmtDays } from "./exec-data.js";
 
-// The category filter lists the SKU types the admin maintains in Settings.
-let categoryOptions = [];
-// Category filter value is the English type name (what master_sku.category
-// holds); the label is the Lao name.
-let categoryLabels = new Map();
-const categoryLabel = (c) => categoryLabels.get(c) ?? c;
-
-function deskLabel(deskId) {
-  const d = deskById(deskId);
-  return d ? `${deskId} · ${d.display_name}` : deskId;
-}
+const BANDS = ["critical", "warning", "ok", "long", "no_sales", "unknown"];
+const esc = escapeHtml;
 
 export async function mountDashboard() {
-  try {
-    const types = (await api.skuTypes()).types.filter((ty) => ty.active);
-    categoryOptions = types.map((ty) => ty.name_en);
-    categoryLabels = new Map(types.map((ty) => [ty.name_en, productName(ty.name_en, ty.name_lo)]));
-  } catch {
-    categoryOptions = [];
-  }
-  if (state.dashboard.category && !categoryOptions.includes(state.dashboard.category)) state.dashboard.category = null;
   renderTopbar();
   await refreshDashboard();
 }
@@ -38,436 +24,376 @@ function renderTopbar() {
   el.innerHTML = `
     <div>
       <h1 class="text-lg font-extrabold text-gray-900">${t("dashboard.title")}</h1>
-      <p class="text-[11px] font-medium text-gray-600">${t("dashboard.subtitle")}</p>
+      <p class="text-[11px] font-medium text-gray-600">${t("exec.subtitle")}</p>
     </div>
-    <div class="mt-3 flex gap-2">
-      <button id="period-select" class="chip flex-1 justify-between border-hairline bg-white text-gray-700">
-        <span id="period-label">${state.dashboard.period === "mtd" ? t("dashboard.mtd") : t("dashboard.today")}</span>
-        <svg class="h-3.5 w-3.5 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
-      </button>
-      <button id="branch-select" class="chip flex-1 justify-between border-hairline bg-white text-gray-700">
-        <span id="branch-label" class="truncate">${state.dashboard.branch ? branchName(state.dashboard.branch) : t("documents.allBranches")}</span>
-        <svg class="h-3.5 w-3.5 shrink-0 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
-      </button>
-      <button id="desk-select" class="chip flex-1 justify-between border-hairline bg-white text-gray-700">
-        <span id="desk-label" class="truncate">${state.dashboard.desk ? deskLabel(state.dashboard.desk) : t("documents.allDesks")}</span>
-        <svg class="h-3.5 w-3.5 shrink-0 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
-      </button>
-    </div>
-    <div class="mt-2 flex gap-2">
-      <button id="category-select" class="chip flex-1 justify-between border-hairline bg-white text-gray-700">
-        <span id="category-label" class="truncate">${state.dashboard.category ? escapeHtml(categoryLabel(state.dashboard.category)) : t("dashboard.allCategories")}</span>
-        <svg class="h-3.5 w-3.5 shrink-0 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
-      </button>
-      <button id="stock-select" class="chip flex-1 justify-between border-hairline bg-white text-gray-700">
-        <span id="stock-label" class="truncate">${state.dashboard.stockFlag === "over" ? t("dashboard.overstock") : state.dashboard.stockFlag === "low" ? t("dashboard.lowStockFlag") : t("dashboard.allStock")}</span>
-        <svg class="h-3.5 w-3.5 shrink-0 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
-      </button>
-    </div>
-  `;
-
-  document.getElementById("period-select").addEventListener("click", () => {
-    const options = [
-      { label: t("dashboard.today"), value: "today", selected: state.dashboard.period === "today" },
-      { label: t("dashboard.mtd"), value: "mtd", selected: state.dashboard.period === "mtd" },
-    ];
-    openActionSheet(t("dashboard.filterByPeriod"), options, (opt) => {
-      state.dashboard.period = opt.value;
-      document.getElementById("period-label").textContent = opt.label;
-      refreshDashboard();
-    });
-  });
-
-  document.getElementById("branch-select").addEventListener("click", () => {
-    const options = [{ label: t("documents.allBranches"), value: null }, ...state.meta.branches.map((b) => ({ label: branchName(b.branch_id), value: b.branch_id }))];
-    openActionSheet(
-      t("documents.filterByBranch"),
-      options.map((o) => ({ ...o, selected: o.value === state.dashboard.branch })),
-      (opt) => {
-        state.dashboard.branch = opt.value;
-        state.dashboard.desk = null;
-        document.getElementById("branch-label").textContent = opt.label;
-        document.getElementById("desk-label").textContent = t("documents.allDesks");
-        refreshDashboard();
-      }
-    );
-  });
-
-  document.getElementById("desk-select").addEventListener("click", () => {
-    const pool = state.dashboard.branch ? state.meta.desks.filter((d) => d.branch_id === state.dashboard.branch) : state.meta.desks;
-    const options = [{ label: t("documents.allDesks"), value: null }, ...pool.map((d) => ({ label: `${d.desk_id} · ${d.display_name}`, value: d.desk_id }))];
-    openActionSheet(
-      t("documents.filterByDesk"),
-      options.map((o) => ({ ...o, selected: o.value === state.dashboard.desk })),
-      (opt) => {
-        state.dashboard.desk = opt.value;
-        document.getElementById("desk-label").textContent = opt.label;
-        refreshDashboard();
-      }
-    );
-  });
-
-  document.getElementById("category-select").addEventListener("click", () => {
-    const options = [{ label: t("dashboard.allCategories"), value: null }, ...categoryOptions.map((c) => ({ label: categoryLabel(c), value: c }))];
-    openActionSheet(
-      t("dashboard.filterByCategory"),
-      options.map((o) => ({ ...o, selected: o.value === state.dashboard.category })),
-      (opt) => {
-        state.dashboard.category = opt.value;
-        document.getElementById("category-label").textContent = opt.label;
-        refreshDashboard();
-      }
-    );
-  });
-
-  document.getElementById("stock-select").addEventListener("click", () => {
-    const options = [
-      { label: t("dashboard.allStock"), value: null },
-      { label: t("dashboard.lowStockFlag"), value: "low" },
-      { label: t("dashboard.overstock"), value: "over" },
-    ];
-    openActionSheet(
-      t("dashboard.filterByStock"),
-      options.map((o) => ({ ...o, selected: o.value === state.dashboard.stockFlag })),
-      (opt) => {
-        state.dashboard.stockFlag = opt.value;
-        document.getElementById("stock-label").textContent = opt.label;
-        refreshDashboard();
-      }
-    );
-  });
+    ${execFiltersHtml()}`;
+  bindExecFilters(() => refreshDashboard());
 }
 
 async function refreshDashboard() {
   const root = document.getElementById("view-root");
   root.innerHTML = skeletonDashboard();
-  const data = await api.dashboard({
-    period: state.dashboard.period,
-    branchId: state.dashboard.branch ?? undefined,
-    deskId: state.dashboard.desk ?? undefined,
-    category: state.dashboard.category ?? undefined,
-    stockFlag: state.dashboard.stockFlag ?? undefined,
-  });
+  let data;
+  try {
+    data = await loadExecutive();
+  } catch (err) {
+    root.innerHTML = `<div class="card px-4 py-8 text-center">
+      <p class="text-sm font-semibold text-gray-700">${t("exec.loadError")}</p>
+      <p class="mt-1 text-xs text-gray-500">${esc(err?.message ?? "")}</p>
+      <button id="exec-retry" class="btn-secondary mt-4">${t("exec.retry")}</button></div>`;
+    document.getElementById("exec-retry").addEventListener("click", refreshDashboard);
+    return;
+  }
+  if (!root.isConnected) return;
   render(root, data);
 }
 
-// Admin "All branches": today's case checks per branch, worst first. Computed from the
-// cards of every branch (spec 3.4) so it matches what each branch sees.
-async function loadCaseHealth() {
-  let desks;
-  try {
-    ({ desks } = await api.deskCards(undefined, undefined));
-  } catch {
+// Report deep links: the dashboard's "see all" goes to the matching table.
+function openReport(tab, posFilter = "all") {
+  state.report.tab = tab;
+  state.report.posFilter = posFilter;
+  window.switchView("report");
+}
+
+const lines = (k) => (k === 1 ? t("exec.line1") : tf("exec.lines", { n: k }));
+const bandLabel = (band, slowDays) => tf(`exec.band.${band}`, { d: slowDays });
+const n = (v) => `<span class="font-extrabold text-gray-900 tnum">${v}</span>`;
+const shortDate = (iso) => `${Number(iso.slice(8))}/${Number(iso.slice(5, 7))}`;
+
+function sectionHead(question, aside = "") {
+  return `<div class="mb-2.5 mt-8 flex items-end justify-between gap-3">
+    <h2 class="text-[17px] font-extrabold leading-snug text-gray-900">${question}</h2>${aside}</div>`;
+}
+
+function segmented(name, options, current) {
+  return `<div class="flex shrink-0 rounded-lg bg-gray-100 p-0.5" role="group">
+    ${options
+      .map(
+        ([value, label]) =>
+          `<button type="button" data-seg-${name}="${value}" aria-pressed="${value === current}" class="focus-ring rounded-md px-2.5 py-1 text-[11px] font-bold ${
+            value === current ? "bg-white text-brand-700 shadow-card" : "text-gray-600"
+          }">${label}</button>`
+      )
+      .join("")}
+  </div>`;
+}
+
+function statusPill(band) {
+  const cls = band === "critical" ? "bg-danger-bg text-danger" : "bg-warning-bg text-warning";
+  return `<span class="status-pill shrink-0 ${cls}">${band === "critical" ? "!" : "•"} ${t(`exec.band.${band}`)}</span>`;
+}
+
+// ---------------------------------------------------------------------------
+function render(root, d) {
+  const h = d.headline;
+  if (h.lines === 0) {
+    root.innerHTML = `<div class="card mt-2 px-5 py-10 text-center text-sm font-medium text-gray-600">${t("exec.noData")}</div>`;
     return;
   }
-  const el = document.getElementById("case-health");
-  if (!el) return;
-  const byBranch = new Map();
-  for (const d of desks) {
-    const s = byBranch.get(d.branch_id) ?? { branch_id: d.branch_id, cases: 0, checked: 0, behind: 0, overdue: 0 };
-    s.cases++;
-    if (d.tier === "done_today") s.checked++;
-    if (d.tier === "behind_1") s.behind++;
-    if (d.tier === "overdue") s.overdue++;
-    byBranch.set(d.branch_id, s);
-  }
-  const ratio = (r) => r.checked / (r.cases || 1);
-  const rows = [...byBranch.values()].sort((a, b) => b.overdue - a.overdue || b.behind - a.behind || ratio(a) - ratio(b));
-  if (!rows.length) return;
-  const worst = (r) =>
-    r.overdue
-      ? { label: t("dashboard.worstOverdue"), cls: "bg-danger-bg text-danger", bar: "border-l-danger" }
-      : r.behind
-      ? { label: t("dashboard.worstBehind"), cls: "bg-warning-bg text-warning", bar: "border-l-amber-500" }
-      : { label: t("dashboard.worstOk"), cls: "bg-success-bg text-success", bar: "border-l-success" };
-  el.innerHTML = `
-    <h2 class="mb-3 mt-5 text-sm font-extrabold text-gray-900">${t("dashboard.caseHealth")}</h2>
-    <div class="card divide-y divide-hairline p-0">
-      ${rows
-        .map((r) => {
-          const w = worst(r);
-          const detail = [tf("dashboard.checkedOfTotal", { c: r.checked, n: r.cases }), r.behind ? tf("dashboard.behindN", { n: r.behind }) : "", r.overdue ? tf("dashboard.overdueN", { n: r.overdue }) : ""]
-            .filter(Boolean)
-            .join(" · ");
-          return `<div class="flex items-center justify-between gap-2 border-l-4 px-4 py-3 ${w.bar}">
-            <div class="min-w-0">
-              <div class="truncate text-sm font-extrabold text-gray-900">${escapeHtml(branchName(r.branch_id))}</div>
-              <div class="text-[11px] font-semibold text-gray-600">${escapeHtml(detail)}</div>
-            </div>
-            <span class="status-pill shrink-0 ${w.cls}">${w.label}</span>
-          </div>`;
-        })
-        .join("")}
-    </div>`;
+  root.innerHTML = `
+    ${heroHtml(d)}
+    ${decisionsHtml(d)}
+    ${whereHtml(d)}
+    ${slowHtml(d)}
+    ${fastHtml(d)}
+    ${casesHtml(d)}
+    <button id="exec-open-report" class="btn-secondary mt-8 w-full">${t("exec.openReport")}</button>
+  `;
+  root.querySelectorAll("[data-chart]").forEach(attachTips);
+  bind(root, d);
 }
 
-// Reorder panel: per branch, how many SKUs are Critical / Warning on branch-wide runway.
-// Tapping a count lists those SKUs under the branch.
-let reorderOpen = null; // "branchId|status"
-
-async function loadReorder() {
-  const branches = state.dashboard.branch
-    ? [state.dashboard.branch]
-    : isAdmin(state.user)
-    ? state.meta.branches.map((b) => b.branch_id)
-    : [state.user.branchId].filter(Boolean);
-  const results = await Promise.all(
-    branches.map((id) =>
-      api
-        .replenishment(id)
-        .then((res) => ({ branchId: id, rows: res.rows }))
-        .catch(() => null)
-    )
-  );
-  const el = document.getElementById("reorder-panel");
-  if (!el) return;
-  paintReorder(el, results.filter(Boolean));
-}
-
-function paintReorder(el, results) {
-  const countOf = (rows, status) => rows.filter((r) => r.status === status).length;
-  const pill = (branchId, rows, status, cls) => {
-    const n = countOf(rows, status);
-    const on = reorderOpen === `${branchId}|${status}`;
-    return `<button type="button" data-reorder="${escapeHtml(branchId)}|${status}" ${n ? "" : "disabled"} aria-expanded="${on}"
-      class="tap-target focus-ring min-w-0 rounded-xl px-3 text-xs font-extrabold ${n ? cls : "bg-gray-100 text-gray-500"} ${on ? "ring-2 ring-gray-900" : ""}">${t(`replen.status.${status}`)} · ${n}</button>`;
-  };
-  const listFor = (branchId, rows) => {
-    const [openBranch, openStatus] = (reorderOpen ?? "|").split("|");
-    if (openBranch !== branchId) return "";
-    const items = rows.filter((r) => r.status === openStatus);
-    return `<div class="divide-y divide-hairline border-t border-hairline px-4">
-      ${items
+function heroHtml(d) {
+  const h = d.headline;
+  const one = d.byBranch.length === 1;
+  const value = n(esc(fmtLak(h.value_lak)));
+  const first = one ? tf("exec.heroValueOne", { value, branch: esc(branchName(d.byBranch[0].branch_id)) }) : tf("exec.heroValue", { value, n: n(h.branches) });
+  const second = h.cover_days != null ? tf("exec.heroCover", { days: n(fmtDays(h.cover_days)) }) : t("exec.heroCoverNone");
+  const facts = [
+    [fmtBaht(h.baht, 2), t("rep.col.baht")],
+    [fmtInt(h.gram), "g"],
+    [fmtInt(h.pcs), t("exec.pcsUnit")],
+    ...(d.price.usdToLak > 0 ? [[fmtUsd(h.value_usd), "USD"]] : []),
+  ];
+  const bands = d.ribbon.filter((b) => b.lines > 0);
+  return `
+  <section aria-labelledby="exec-hero">
+    <p class="text-[11px] font-semibold text-gray-600">${esc(tf("exec.settled", { done: h.cases_done_today, n: h.cases }))}</p>
+    <h2 id="exec-hero" class="mt-1.5 text-[25px] font-medium leading-[1.25] tracking-[-0.01em] text-gray-800 md:text-[28px]">${first} ${second}</h2>
+    <dl class="mt-4 grid grid-cols-4 gap-2 border-y border-hairline py-3">
+      ${facts
         .map(
-          (r) => `<div class="flex items-center justify-between gap-2 py-2">
-        <div class="min-w-0">
-          <div class="truncate text-xs font-bold text-gray-900">${escapeHtml(r.name)}</div>
-          <div class="truncate text-[10px] text-gray-500">${escapeHtml(fmtRunway(r.runwayDays) ?? "")}${r.suggestedQty > 0 ? ` · ${escapeHtml(tf("replen.suggest", { n: r.suggestedQty }))}` : ""}</div>
-        </div>
-        <span class="status-pill shrink-0 ${openStatus === "critical" ? "bg-danger-bg text-danger" : "bg-warning-bg text-warning"}">${t(`replen.status.${openStatus}`)}</span>
-      </div>`
+          ([v, l]) => `<div class="min-w-0"><dt class="sr-only">${esc(l)}</dt><dd class="truncate text-sm font-extrabold text-gray-900 tnum">${esc(v)}</dd><div class="text-[10px] font-semibold text-gray-500">${esc(l)}</div></div>`
         )
         .join("")}
-    </div>`;
-  };
-  el.innerHTML = `
-    <div class="card mt-4 p-0">
-      <div class="px-4 pb-2 pt-4">
-        <h2 class="text-sm font-extrabold text-gray-900">${t("dashboard.reorder")}</h2>
-        <p class="text-[11px] text-gray-500">${t("dashboard.reorderSubtitle")}</p>
-      </div>
-      ${
-        results.length
-          ? results
-              .map(
-                ({ branchId, rows }) => `
-        <div class="border-t border-hairline">
-          <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
-            <div class="min-w-0 truncate text-sm font-extrabold text-gray-900">${escapeHtml(branchName(branchId))}</div>
-            <div class="flex gap-2">${pill(branchId, rows, "critical", "bg-danger-bg text-danger")}${pill(branchId, rows, "warning", "bg-warning-bg text-warning")}</div>
-          </div>
-          ${listFor(branchId, rows)}
-        </div>`
-              )
-              .join("")
-          : `<div class="border-t border-hairline px-4 py-3 text-[11px] text-gray-500">${t("dashboard.reorderNone")}</div>`
-      }
-    </div>`;
-  el.querySelectorAll("[data-reorder]").forEach((btn) =>
-    btn.addEventListener("click", () => {
-      reorderOpen = reorderOpen === btn.dataset.reorder ? null : btn.dataset.reorder;
-      paintReorder(el, results);
-    })
-  );
-}
+    </dl>
+    <p class="mt-2 text-[11px] font-medium text-gray-500">${esc(tf("exec.priceLine", { price: fmtInt(d.price.lakPerBaht) }))}${d.priceStale ? ` <span class="font-bold text-warning">${t("exec.priceStale")}</span>` : ""}</p>
 
-function watchlistRow(item, kind) {
-  return `
-    <div class="flex items-center justify-between gap-2 py-1.5">
-      <div class="min-w-0">
-        <div class="truncate text-xs font-bold text-gray-900">${escapeHtml(skuLabel(item))}</div>
-        <div class="truncate text-[10px] text-gray-500">${escapeHtml(item.category)} · ${escapeHtml(deskLabel(item.desk_id))}</div>
-      </div>
-      <span class="status-pill shrink-0 ${kind === "over" ? "bg-danger-bg text-danger" : "bg-warning-bg text-warning"}" title="${t("dashboard.stockVsReorder")}">${fmtInt(item.closing)} / ${fmtInt(item.reorder_level)}</span>
-    </div>`;
-}
-
-function agingRow(item) {
-  return `
-    <div class="flex items-center justify-between gap-2 py-1.5">
-      <div class="min-w-0">
-        <div class="truncate text-xs font-bold text-gray-900">${escapeHtml(skuLabel(item))}</div>
-        <div class="truncate text-[10px] text-gray-500">${escapeHtml(item.category)} · ${escapeHtml(deskLabel(item.desk_id))}</div>
-      </div>
-      <span class="status-pill shrink-0 bg-gray-100 text-gray-600">${fmtInt(item.estDays)} ${t("dashboard.days")}</span>
-    </div>`;
-}
-
-function transitRow(item) {
-  return `
-    <div class="flex items-center justify-between gap-2 py-1.5">
-      <div class="min-w-0">
-        <div class="truncate text-xs font-bold text-gray-900">${fmtInt(item.qty)} × ${escapeHtml(skuLabel(item))}</div>
-        <div class="truncate text-[10px] text-gray-500">${escapeHtml(item.from_desk_id)} → ${escapeHtml(item.to_desk_id)}</div>
-      </div>
-      <span class="status-pill shrink-0 bg-warning-bg text-warning">${item.sent_date.slice(5)}</span>
-    </div>`;
-}
-
-function render(root, data) {
-  const { portfolio, transit, capacity, donut, branchCards, movement, watchlist, aging } = data;
-  const allDone = portfolio.desksTotal > 0 && portfolio.desksDoneToday === portfolio.desksTotal;
-  root.innerHTML = `
-    <div class="card bg-gradient-to-br from-brand-600 to-brand-800 p-5 text-white shadow-pop">
-      <div class="flex items-center justify-between gap-2">
-        <span class="text-[11px] font-semibold uppercase tracking-wide text-white/70">${t("dashboard.totalGold")}</span>
-        <span class="status-pill ${allDone ? "bg-white text-brand-700" : "bg-white/15 text-white"}">${portfolio.desksDoneToday}/${portfolio.desksTotal} ${t("dashboard.desksDone")}</span>
-      </div>
-      <div class="mt-1.5 flex items-baseline gap-2">
-        <span class="text-3xl font-extrabold">${fmtBaht(portfolio.total_baht_gold)}</span>
-        <span class="text-sm font-semibold text-white/80">Baht</span>
-      </div>
-      <div class="text-xs font-medium text-white/70">${fmtInt(portfolio.total_pcs)} pcs</div>
-      <div class="mt-3 flex items-center gap-4 border-t border-white/15 pt-3 text-sm font-bold">
-        <span>${fmtLak(portfolio.lak_value)} LAK</span>
-        ${portfolio.usdToLakRate > 0 ? `<span class="text-white/50">/</span><span>${fmtUsd(portfolio.usd_value)} USD</span>` : ""}
-      </div>
-      <div class="mt-3 flex items-center justify-between rounded-lg bg-white/10 px-3 py-2 text-[11px] font-semibold">
-        <span class="text-white/70">${t("dashboard.goldPrice")}</span>
-        <span>${portfolio.spotLakPerBaht > 0 ? `1 Baht = ${fmtInt(portfolio.spotLakPerBaht)} LAK` : t("dashboard.goldPriceMissing")}</span>
-      </div>
+    <div class="mt-5">
+      <div class="mb-2 text-xs font-bold text-gray-700">${t("exec.ribbonTitle")}</div>
+      <div data-chart>${ribbonHtml(
+        bands.map((b) => ({ band: b.band, pct: b.pct, tip: esc(`${bandLabel(b.band, d.slowDays)}: ${fmtLak(b.value_lak)} (${b.pct}%), ${lines(b.lines)}`) }))
+      )}</div>
+      <ul class="mt-3 divide-y divide-hairline">
+        ${bands
+          .map(
+            (b) => `<li><button type="button" data-band="${b.band}" class="focus-ring flex w-full items-center gap-2.5 py-2 text-left">
+              <span class="h-3 w-3 shrink-0 rounded-sm" style="background:${bandFill(b.band)}" aria-hidden="true"></span>
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-xs font-bold text-gray-900">${esc(bandLabel(b.band, d.slowDays))}</span>
+                <span class="block truncate text-[10px] text-gray-500">${esc(tf(`exec.bandHint.${b.band}`, { d: d.slowDays }))}</span>
+              </span>
+              <span class="shrink-0 text-right">
+                <span class="block text-xs font-extrabold text-gray-900 tnum">${esc(fmtLak(b.value_lak))}</span>
+                <span class="block text-[10px] text-gray-500 tnum">${esc(lines(b.lines))}</span>
+              </span>
+            </button></li>`
+          )
+          .join("")}
+      </ul>
+      ${h.cover_days != null && h.cover_basis_pct < 100 ? `<p class="mt-1 text-[10px] text-gray-500">${esc(tf("exec.coverBasis", { pct: Math.round(h.cover_basis_pct) }))}</p>` : ""}
     </div>
+  </section>`;
+}
 
-    <div id="reorder-panel"></div>
-
+function decisionsHtml(d) {
+  const c = d.decisions.counts;
+  const noAction = c.critical.none + c.warning.none;
+  const total = d.decisions.items.length;
+  const lead =
+    total === 0
+      ? `<p class="text-sm font-medium text-gray-700">${t("exec.decideNone")}</p>`
+      : noAction === 0
+      ? `<p class="text-sm font-medium text-gray-700">${t("exec.decideAllCovered")}</p>`
+      : `<p class="text-sm font-medium text-gray-700">${tf("exec.decideLead", { n: `<span class="text-lg font-extrabold text-danger tnum">${noAction}</span>` })}</p>`;
+  const tally = [
+    ["none", c.critical.none + c.warning.none, "text-danger"],
+    ["pending", c.critical.pending + c.warning.pending, "text-warning"],
+    ["approved", c.critical.approved + c.warning.approved, "text-success"],
+  ];
+  const rows = d.decisions.items.slice(0, 6);
+  return `
+  <section>
+    ${sectionHead(t("exec.q.decide"))}
+    ${lead}
     ${
-      transit.count > 0
-        ? `<div class="card mt-4 p-4">
-      <div class="mb-1 flex items-center justify-between">
-        <h2 class="text-sm font-extrabold text-gray-900">${t("dashboard.inTransit")}</h2>
-        <span class="text-[11px] font-bold text-warning">${fmtInt(transit.pcs)} pcs · ${fmtBaht(transit.baht)} Baht</span>
+      total
+        ? `<div class="card mt-3 p-0">
+      <div class="grid grid-cols-3 divide-x divide-hairline border-b border-hairline">
+        ${tally.map(([k, v, cls]) => `<div class="px-3 py-2.5"><div class="text-base font-extrabold tnum ${v ? cls : "text-gray-400"}">${v}</div><div class="text-[10px] font-semibold text-gray-600">${t(`exec.action.${k}`)}</div></div>`).join("")}
       </div>
-      <p class="mb-1 text-[11px] text-gray-500">${t("dashboard.inTransitSubtitle")}</p>
-      <div class="divide-y divide-hairline border-t border-hairline">${transit.items.map(transitRow).join("")}</div>
+      <ul class="divide-y divide-hairline">
+        ${rows
+          .map((it) => {
+            const left = it.position <= 0 ? tf("exec.outNow", { lead: it.lead_days }) : tf("exec.daysLeft", { d: fmtDays(it.runway_days), lead: it.lead_days });
+            const right =
+              it.action === "none"
+                ? it.suggested_qty > 0
+                  ? `<span class="text-[11px] font-bold text-gray-900">${esc(tf("exec.suggest", { n: it.suggested_qty }))}</span>`
+                  : ""
+                : `<span class="text-[11px] font-bold ${it.action === "approved" ? "text-success" : "text-warning"}">${t(`exec.action.${it.action}`)}</span>${it.action_doc ? `<span class="block text-[10px] text-gray-500">${esc(it.action_doc)}</span>` : ""}`;
+            return `<li class="flex items-center gap-3 px-4 py-2.5">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2"><span class="truncate text-xs font-bold text-gray-900">${esc(skuLabel(it))}</span></div>
+                <div class="truncate text-[10px] text-gray-500">${esc(branchName(it.branch_id))}, ${esc(left)}</div>
+              </div>
+              <div class="flex shrink-0 flex-col items-end gap-1 text-right">${statusPill(it.band)}${right}</div>
+            </li>`;
+          })
+          .join("")}
+      </ul>
+      <div class="flex flex-wrap gap-2 border-t border-hairline p-3">
+        ${total > rows.length || total > 0 ? `<button data-go="decide" class="btn-secondary flex-1 py-2 text-xs">${esc(tf("exec.seeAll", { n: total }))}</button>` : ""}
+        ${noAction > 0 && isManager(state.user) ? `<button data-go="documents" class="btn-primary flex-1 py-2 text-xs">${t("exec.makeProposal")}</button>` : ""}
+      </div>
     </div>`
         : ""
     }
+  </section>`;
+}
 
-    <div class="card mt-4 p-4">
-      <div class="mb-3 flex items-center justify-between">
-        <h2 class="text-sm font-extrabold text-gray-900">${t("dashboard.movement")}</h2>
-        <span class="text-[11px] text-gray-600">${state.dashboard.period === "mtd" ? t("dashboard.mtd") : t("dashboard.today")}</span>
-      </div>
-      <div class="grid grid-cols-2 gap-2.5">
-        <div class="rounded-xl bg-gray-50 p-3">
-          <div class="text-[10px] font-bold uppercase text-gray-600">${t("dashboard.stockIn")}</div>
-          <div class="mt-1 text-base font-extrabold text-success">${fmtLakSigned(movement.inLak)}</div>
-          <div class="text-[11px] text-success">+${fmtInt(movement.inPcs)} pcs</div>
-        </div>
-        <div class="rounded-xl bg-gray-50 p-3">
-          <div class="text-[10px] font-bold uppercase text-gray-600">${t("dashboard.stockOut")}</div>
-          <div class="mt-1 text-base font-extrabold text-warning">${fmtLakSigned(-movement.outLak)}</div>
-          <div class="text-[11px] text-warning">-${fmtInt(movement.outPcs)} pcs</div>
-        </div>
-      </div>
+function whereHtml(d) {
+  const mode = state.exec.where;
+  const list =
+    mode === "type"
+      ? d.byType.filter((x) => x.value_lak > 0).map((x) => ({ name: productName(x.name_en, x.name_lo), lo: true, ...x }))
+      : d.byBranch.map((x) => ({ name: branchName(x.branch_id), lo: false, ...x }));
+  const max = Math.max(1, ...list.map((x) => x.value_lak));
+  return `
+  <section>
+    ${sectionHead(t("exec.q.where"), segmented("where", [["branch", t("exec.byBranch")], ["type", t("exec.byType")]], mode))}
+    <p class="mb-2 text-[10px] text-gray-500">${t("exec.coverHint")}</p>
+    <div class="card p-0" data-chart>
+      <ul class="divide-y divide-hairline">
+        ${list
+          .map(
+            (x) => `<li class="px-4 py-3" tabindex="0" data-tip="${esc(`${x.name}: ${fmtLak(x.value_lak)} (${x.share_pct}%), ${fmtBaht(x.baht, 2)} ${t("rep.col.baht")}, ${fmtInt(x.pcs)} pcs`)}">
+            <div class="flex items-baseline justify-between gap-2">
+              <span ${x.lo ? 'lang="lo"' : ""} class="truncate text-xs font-bold text-gray-900">${esc(x.name)}</span>
+              <span class="shrink-0 text-xs font-extrabold text-gray-900 tnum">${esc(fmtLak(x.value_lak))} <span class="font-semibold text-gray-500">${x.share_pct}%</span></span>
+            </div>
+            <div class="mt-1.5">${barTrack((x.value_lak / max) * 100)}</div>
+            <div class="mt-1.5 flex items-center gap-3 text-[10px] font-semibold text-gray-600">
+              <span class="tnum">${x.cover_days != null ? esc(tf("exec.coverDays", { d: fmtDays(x.cover_days) })) : "–"}</span>
+              ${x.critical ? `<span class="text-danger tnum">${x.critical} ${t("exec.band.critical")}</span>` : ""}
+              ${x.warning ? `<span class="text-warning tnum">${x.warning} ${t("exec.band.warning")}</span>` : ""}
+            </div>
+          </li>`
+          )
+          .join("")}
+      </ul>
     </div>
+  </section>`;
+}
 
-    <div class="card mt-4 p-4">
-      <div class="mb-1 flex items-center justify-between">
-        <h2 class="text-sm font-extrabold text-gray-900">${t("dashboard.watchlist")}</h2>
-        <span class="text-[11px] text-gray-600">${watchlist.overCount + watchlist.lowCount}</span>
-      </div>
-      <p class="mb-2 text-[11px] text-gray-500">${t("dashboard.watchlistSubtitle")}</p>
-      <div class="border-t border-hairline pt-2">
-        <div class="mb-1 text-[10px] font-bold uppercase text-warning">${t("dashboard.lowStockFlag")} (${watchlist.lowCount})</div>
-        ${watchlist.topLow.length ? watchlist.topLow.map((i) => watchlistRow(i, "low")).join("") : `<div class="py-1.5 text-[11px] text-gray-500">${t("dashboard.noLowStock")}</div>`}
-      </div>
-      <div class="mt-2 border-t border-hairline pt-2">
-        <div class="mb-1 text-[10px] font-bold uppercase text-danger">${t("dashboard.overstock")} (${watchlist.overCount})</div>
-        ${watchlist.topOver.length ? watchlist.topOver.map((i) => watchlistRow(i, "over")).join("") : `<div class="py-1.5 text-[11px] text-gray-500">${t("dashboard.noOverstock")}</div>`}
-      </div>
-    </div>
-
-    <div class="card mt-4 p-4">
-      <h2 class="text-sm font-extrabold text-gray-900">${t("dashboard.avgStockLife")}</h2>
-      <p class="mb-2 text-[11px] text-gray-500">${t("dashboard.avgStockLifeSubtitle")}</p>
-      <div class="flex items-baseline gap-1.5 border-b border-hairline pb-2">
-        <span class="text-2xl font-extrabold text-gray-900">${aging.avgDays ? fmtInt(aging.avgDays) : "–"}</span>
-        <span class="text-xs font-semibold text-gray-600">${t("dashboard.days")} ${t("dashboard.estimate")}</span>
-      </div>
-      <div class="pt-2">
-        ${aging.topAged.length ? aging.topAged.map(agingRow).join("") : `<div class="py-1.5 text-[11px] text-gray-500">${t("dashboard.noAgingData")}</div>`}
-      </div>
-    </div>
-
-    <div class="card mt-4 p-4">
-      <div class="mb-3 flex items-center justify-between">
-        <h2 class="text-sm font-extrabold text-gray-900">${t("dashboard.inventoryStatus")}</h2>
-        <span class="text-[11px] text-gray-600">${fmtInt(capacity.reduce((s, c) => s + c.count, 0))} ${t("dashboard.lines")}</span>
-      </div>
-      <div id="capacity-bar"></div>
-    </div>
-
-    <div class="card mt-4 p-4">
-      <h2 class="mb-3 text-sm font-extrabold text-gray-900">${t("dashboard.goldByType")}</h2>
-      <div id="donut-chart"></div>
-    </div>
-
-    <div id="case-health"></div>
-
-    <h2 class="mb-3 mt-5 text-sm font-extrabold text-gray-900">${t("dashboard.branches")}</h2>
-    <div id="branch-cards" class="grid grid-cols-1 gap-3 md:grid-cols-2"></div>
-  `;
-
-  if (isAdmin(state.user) && !state.dashboard.branch) loadCaseHealth();
-  reorderOpen = null;
-  loadReorder();
-
-  const statusLabel = { in_stock: t("dashboard.inStock"), low_stock: t("dashboard.lowStockFlag"), depleted: t("dashboard.depleted") };
-  renderCapacityBar(
-    document.getElementById("capacity-bar"),
-    capacity.map((c) => ({ label: statusLabel[c.key], pct: c.pct, count: c.count, color: { success: "#10b981", warning: "#f59e0b", danger: "#ee552b" }[c.color] })),
-    t("dashboard.lines")
-  );
-
-  const donutEl = document.getElementById("donut-chart");
-  if (donut.length === 0) {
-    donutEl.innerHTML = `<div class="py-6 text-center text-xs text-gray-500">${t("dashboard.noGold")}</div>`;
-  } else {
-    renderDonut(
-      donutEl,
-      donut.map((d, i) => ({ label: d.category, pct: d.pct, value: d.baht, color: categoryColor(d.category, i) })),
-      { centerLabel: "Baht", centerValue: fmtBaht(donut.reduce((s, d) => s + d.baht, 0)) }
-    );
+function slowHtml(d) {
+  const s = d.slow;
+  if (s.count === 0) {
+    return `<section>${sectionHead(t("exec.q.slow"))}<p class="text-sm font-medium text-gray-700">${esc(tf("exec.slowNone", { d: d.slowDays }))}</p></section>`;
   }
-
-  const cardsEl = document.getElementById("branch-cards");
-  cardsEl.innerHTML = branchCards
-    .map((b) => {
-      const done = b.desksTotal > 0 && b.desksDoneToday === b.desksTotal;
-      return `
-      <div class="card p-4">
-        <div class="flex items-center justify-between gap-2">
-          <div class="min-w-0">
-            <div class="truncate text-sm font-extrabold text-gray-900">${escapeHtml(b.name)}</div>
-            <div lang="lo" class="lao truncate text-[10px] text-gray-600">${escapeHtml(b.name_lo ?? "")}</div>
+  return `
+  <section>
+    ${sectionHead(t("exec.q.slow"))}
+    <p class="text-sm font-medium text-gray-700">${tf("exec.slowLead", { value: n(esc(fmtLak(s.value_lak))), d: d.slowDays })}</p>
+    ${s.excess_lak > 0 ? `<p class="mt-0.5 text-xs text-gray-600">${esc(tf("exec.slowExcess", { value: fmtLak(s.excess_lak), d: d.slowDays }))}</p>` : ""}
+    <div class="card mt-3 p-0">
+      <ul class="divide-y divide-hairline">
+        ${s.items
+          .slice(0, 5)
+          .map(
+            (it) => `<li class="flex items-center gap-3 px-4 py-2.5">
+          <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style="background:${bandFill(it.band)}" aria-hidden="true"></span>
+          <div class="min-w-0 flex-1">
+            <div class="truncate text-xs font-bold text-gray-900">${esc(skuLabel(it))}</div>
+            <div class="truncate text-[10px] text-gray-500">${esc(branchName(it.branch_id))}, ${esc(it.band === "no_sales" ? t("exec.band.no_sales") : tf("exec.lasts", { d: fmtDays(it.runway_days) }))}</div>
           </div>
-          <span class="status-pill shrink-0 ${done ? "bg-success-bg text-success" : "bg-gray-100 text-gray-600"}">${b.desksDoneToday}/${b.desksTotal} ${t("dashboard.desksDone")}</span>
-        </div>
-        <div class="mt-2.5 flex items-baseline gap-1">
-          <span class="text-lg font-extrabold text-gray-900">${fmtBaht(b.baht)}</span>
-          <span class="text-[11px] font-semibold text-gray-600">Baht · ${fmtInt(b.pcs)} pcs · ${fmtLak(b.lakValue)}</span>
-        </div>
-        ${b.lowCount > 0 ? `<div class="mt-1 text-[11px] font-bold text-danger">⚠ ${b.lowCount} ${t("dashboard.lowStockFlag")}</div>` : ""}
-        <button data-review="${b.branch_id}" class="btn-secondary mt-3 w-full py-2 text-xs">${t("dashboard.viewDocuments")}</button>
-      </div>`;
-    })
-    .join("");
+          <div class="shrink-0 text-right">
+            <div class="text-xs font-extrabold text-gray-900 tnum">${esc(fmtLak(it.value_lak))}</div>
+            ${it.excess_lak > 0 ? `<div class="text-[10px] font-semibold text-gray-500 tnum">${esc(tf("exec.excess", { value: fmtLak(it.excess_lak) }))}</div>` : ""}
+          </div>
+        </li>`
+          )
+          .join("")}
+      </ul>
+      ${s.count > 5 ? `<div class="border-t border-hairline p-3"><button data-go="slow" class="btn-secondary w-full py-2 text-xs">${esc(tf("exec.seeAll", { n: s.count }))}</button></div>` : ""}
+    </div>
+  </section>`;
+}
 
-  cardsEl.querySelectorAll("[data-review]").forEach((btn) =>
-    btn.addEventListener("click", () => {
-      state.documents.branch = btn.dataset.review;
-      window.switchView("documents");
+function fastHtml(d) {
+  const f = d.flow;
+  const days = d.period.days;
+  const change =
+    f.change_pct == null
+      ? t("exec.flowNoPrev")
+      : f.change_pct >= 0
+      ? tf("exec.flowUp", { pct: Math.abs(f.change_pct), days })
+      : tf("exec.flowDown", { pct: Math.abs(f.change_pct), days });
+  const top = d.stockOut.slice(0, state.exec.top);
+  const max = Math.max(1, ...top.map((x) => x.sold));
+  const split = [
+    ["grid.retail", f.retail],
+    ["grid.wholesale", f.wholesale],
+    ["grid.withdraw", f.withdraw],
+    ["grid.destock", f.returned],
+  ];
+  return `
+  <section>
+    ${sectionHead(t("exec.q.fast"), segmented("top", [["5", t("exec.top5")], ["10", t("exec.top10")]], String(state.exec.top)))}
+    ${
+      f.sold === 0 && f.returned === 0
+        ? `<p class="text-sm font-medium text-gray-700">${t("exec.noOut")}</p>`
+        : `<p class="text-sm font-medium text-gray-700">${tf("exec.flowLead", { pcs: n(fmtInt(f.sold)), days, value: n(esc(fmtLak(f.sold_lak))) })}</p>
+    <p class="mt-0.5 text-xs font-semibold ${f.change_pct == null ? "text-gray-500" : f.change_pct >= 0 ? "text-success" : "text-warning"}">${esc(change.replace("{days}", days))}</p>
+    <div class="card mt-3 p-4">
+      <div class="mb-2 text-xs font-bold text-gray-700">${t("exec.dailyTitle")}</div>
+      <div data-chart>${dailyColumnsHtml(
+        d.daily.map((x) => ({ label: shortDate(x.date), value: x.sold_lak, tip: esc(`${shortDate(x.date)}: ${fmtLak(x.sold_lak)}, ${fmtInt(x.sold)} pcs`) })),
+        { avgLabel: esc(tf("exec.avgPerDay", { value: fmtLak(f.sold_lak / days) })) }
+      )}</div>
+      <div class="mt-3 grid grid-cols-4 gap-2 border-t border-hairline pt-3">
+        ${split.map(([k, v]) => `<div><div class="text-sm font-extrabold text-gray-900 tnum">${fmtInt(v)}</div><div class="truncate text-[10px] font-semibold text-gray-500">${t(k)}</div></div>`).join("")}
+      </div>
+    </div>
+    <div class="card mt-3 p-0" data-chart>
+      <ol class="divide-y divide-hairline">
+        ${top
+          .map((x, i) => {
+            const move = f.prev_sold === 0 ? "" : x.prev_rank == null ? t("exec.rankNew") : x.prev_rank === i + 1 ? "" : tf("exec.rankWas", { n: x.prev_rank });
+            return `<li class="flex items-center gap-3 px-4 py-2.5" tabindex="0" data-tip="${esc(`${skuLabel(x)}: ${fmtInt(x.sold)} pcs, ${fmtLak(x.sold_lak)}, ${fmtBaht(x.sold_baht, 2)} ${t("rep.col.baht")}`)}">
+            <span class="w-5 shrink-0 text-right text-xs font-extrabold text-gray-400 tnum">${i + 1}</span>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-baseline justify-between gap-2">
+                <span class="truncate text-xs font-bold text-gray-900">${esc(skuLabel(x))}</span>
+                <span class="shrink-0 text-xs font-extrabold text-gray-900 tnum">${esc(tf("exec.pcs", { n: fmtInt(x.sold) }))}</span>
+              </div>
+              <div class="mt-1">${barTrack((x.sold / max) * 100, BAR_COLOR)}</div>
+              <div class="mt-1 flex justify-between text-[10px] font-medium text-gray-500"><span class="tnum">${esc(fmtLak(x.sold_lak))}</span><span>${esc(move)}</span></div>
+            </div>
+          </li>`;
+          })
+          .join("")}
+      </ol>
+      ${d.stockOut.length > top.length ? `<div class="border-t border-hairline p-3"><button data-go="out" class="btn-secondary w-full py-2 text-xs">${esc(tf("exec.seeAll", { n: d.stockOut.length }))}</button></div>` : ""}
+    </div>`
+    }
+  </section>`;
+}
+
+function casesHtml(d) {
+  const top = d.cases.filter((c) => c.sold > 0).slice(0, 5);
+  if (!top.length) return "";
+  const max = Math.max(1, ...top.map((c) => c.sold_lak));
+  return `
+  <section>
+    ${sectionHead(t("exec.q.cases"))}
+    <div class="card p-0" data-chart>
+      <ol class="divide-y divide-hairline">
+        ${top
+          .map(
+            (c, i) => `<li class="flex items-center gap-3 px-4 py-2.5" tabindex="0" data-tip="${esc(`${c.display_name}: ${fmtInt(c.sold)} pcs, ${fmtLak(c.sold_lak)}`)}">
+          <span class="w-5 shrink-0 text-right text-xs font-extrabold text-gray-400 tnum">${i + 1}</span>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-baseline justify-between gap-2">
+              <span class="truncate text-xs font-bold text-gray-900">${esc(c.display_name)} <span class="font-semibold text-gray-500">${esc(c.desk_id)}</span></span>
+              <span class="shrink-0 text-xs font-extrabold text-gray-900 tnum">${esc(fmtLak(c.sold_lak))}</span>
+            </div>
+            <div class="mt-1">${barTrack((c.sold_lak / max) * 100)}</div>
+            <div class="mt-1 truncate text-[10px] font-medium text-gray-500">${esc(branchName(c.branch_id))}, ${esc(tf("exec.caseLine", { held: fmtLak(c.held_lak), pct: Math.round(c.turn_pct) }))}</div>
+          </div>
+        </li>`
+          )
+          .join("")}
+      </ol>
+      ${d.cases.length > top.length ? `<div class="border-t border-hairline p-3"><button data-go="cases" class="btn-secondary w-full py-2 text-xs">${esc(tf("exec.seeAll", { n: d.cases.length }))}</button></div>` : ""}
+    </div>
+  </section>`;
+}
+
+function bind(root, d) {
+  root.querySelector("#exec-open-report")?.addEventListener("click", () => openReport("position"));
+  root.querySelectorAll("[data-band]").forEach((b) => b.addEventListener("click", () => openReport("position", b.dataset.band)));
+  root.querySelectorAll("[data-go]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const go = b.dataset.go;
+      if (go === "documents") window.switchView("documents");
+      else if (go === "decide") openReport("position", "decide");
+      else if (go === "slow") openReport("position", "slow");
+      else openReport(go);
+    })
+  );
+  root.querySelectorAll("[data-seg-where]").forEach((b) =>
+    b.addEventListener("click", () => {
+      state.exec.where = b.dataset.segWhere;
+      render(root, d);
+    })
+  );
+  root.querySelectorAll("[data-seg-top]").forEach((b) =>
+    b.addEventListener("click", () => {
+      state.exec.top = Number(b.dataset.segTop);
+      render(root, d);
     })
   );
 }
+
+export { BANDS };

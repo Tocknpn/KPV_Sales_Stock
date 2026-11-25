@@ -115,6 +115,7 @@ export const api = {
   documentPrintHtml: async (id) => (await send(`/documents/${id}/print`)).text(),
 
   dashboard: (params) => request(`/dashboard?${query(params)}`),
+  executive: (params) => request(`/executive?${query(params)}`),
   report: (params) => request(`/report?${query(params)}`),
   reportGrid: (branch, month) => request(`/report/grid?${query({ branch, month })}`),
 

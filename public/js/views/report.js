@@ -7,6 +7,7 @@ import { t } from "../i18n.js";
 import { skuLabel } from "../sku-groups.js";
 import { openDeskDay } from "./stock.js";
 import { skeletonTable } from "../skeleton.js";
+import { mountExecReport, reportTabsHtml, bindReportTabs } from "./report-exec.js";
 
 function deskLabel(deskId) {
   const d = deskById(deskId);
@@ -18,7 +19,14 @@ function monthLabel(period) {
   return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "short", year: "numeric" });
 }
 
+// Tabs: position / stock out / cases read the executive overview
+// (report-exec.js); "movement" is the month movement + issue grid below.
 export async function mountReport() {
+  if (!state.report.tab) state.report.tab = "position";
+  if (state.report.tab !== "movement") {
+    unmountReport();
+    return mountExecReport(mountReport);
+  }
   gridCache = { key: null, data: null };
   renderTopbar();
   await refreshReport();
@@ -31,6 +39,7 @@ function renderTopbar() {
       <h1 class="text-lg font-extrabold text-gray-900">${t("report.title")}</h1>
       <p class="text-[11px] font-medium text-gray-600">${t("report.subtitle")}</p>
     </div>
+    ${reportTabsHtml()}
     <div class="mt-3 flex gap-2">
       <button id="period-select" class="chip flex-1 justify-between border-hairline bg-white text-gray-700">
         <span id="period-label">${monthLabel(state.report.period)}</span>
@@ -51,6 +60,8 @@ function renderTopbar() {
         class="input-filled pl-9" />
     </div>
   `;
+
+  bindReportTabs(mountReport);
 
   document.getElementById("period-select").addEventListener("click", () => {
     const options = [0, -1, -2, -3].map((offset) => {

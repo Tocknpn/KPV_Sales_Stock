@@ -21,7 +21,9 @@ export const state = {
   view: "stock",
   stock: { date: null, branch: null, filter: "all" },
   documents: { branch: null, desk: null, dateFrom: null, dateTo: null, createdBy: null, page: 1, view: getStoredDocView() },
-  report: { period: null, branch: null, desk: null, q: "", view: "cards" },
+  report: { period: null, branch: null, desk: null, q: "", view: "cards", tab: "position", posFilter: "all", search: "", sort: {} },
+  // Executive dashboard + the report's position / stock-out / case tabs share one period and branch.
+  exec: { days: 30, branch: null, top: 5, where: "branch" },
   dashboard: { period: "today", branch: null, desk: null, category: null, stockFlag: null },
 };
 

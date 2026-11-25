@@ -104,3 +104,21 @@
   .success-pop, .success-check, .card-flash { animation: none; }
   .success-check { stroke-dasharray: none; }
 }
+
+/* Chart tooltip (executive dashboard). */
+.chart-tip {
+  display: none;
+  position: absolute;
+  z-index: 20;
+  max-width: 240px;
+  pointer-events: none;
+  border-radius: 0.5rem;
+  background: #1f2937;
+  color: #fff;
+  padding: 0.375rem 0.5rem;
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+}
+.tnum { font-variant-numeric: tabular-nums; }
