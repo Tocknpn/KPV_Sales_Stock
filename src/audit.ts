@@ -19,6 +19,7 @@ const PRIMARY_KEYS: Record<string, string[]> = {
   master_sku: ["sku_id"],
   sku_type: ["type_id"],
   sku_weight: ["weight_id"],
+  sku_unit: ["unit"],
   desk_days: ["desk_id", "ledger_date"],
   daily_stock_ledger: ["id"],
   transfers: ["id"],

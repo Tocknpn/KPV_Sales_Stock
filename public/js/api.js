@@ -83,6 +83,9 @@ export const api = {
   skuWeights: () => request(`/sku-weights`),
   createSkuWeight: (payload) => post(`/sku-weights`, payload),
   updateSkuWeight: (weightId, payload) => patch(`/sku-weights/${encodeURIComponent(weightId)}`, payload),
+  skuUnits: () => request(`/sku-units`),
+  createSkuUnit: (payload) => post(`/sku-units`, payload),
+  updateSkuUnit: (unit, payload) => patch(`/sku-units/${encodeURIComponent(unit)}`, payload),
 
   deskCards: (date, branchId) => request(`/stock/desks?${query({ date, branchId })}`),
   // date may be "latest" = the desk's most recent recorded day.

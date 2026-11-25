@@ -7,6 +7,7 @@ import { state } from "../state.js";
 import { toast } from "../ui.js";
 import { icon, escapeHtml, fmtInt } from "../util.js";
 import { t, tf, productName } from "../i18n.js";
+import { sizeBuilderHtml, mountSizeBuilder } from "../size-builder.js";
 import { groupSkusByType, filterSkus, toggleSelection, skuSizeLabel, skuLabel, weightLabel } from "../sku-groups.js";
 import { skeletonGrid } from "../skeleton.js";
 
@@ -236,41 +237,39 @@ export function bindOpeningInputs(root, onChange) {
 // branch: the case's branch; the new SKU is carried there.
 async function renderCreateSkuFormInto(container, onCreated, onCancel, branch) {
   container.innerHTML = skeletonGrid(3);
-  const [{ types }, { weights }] = await Promise.all([api.skuTypes(), api.skuWeights()]);
+  const [{ types }, { units }] = await Promise.all([api.skuTypes(), api.skuUnits()]);
   const activeTypes = types.filter((ty) => ty.active);
-  const activeWeights = weights.filter((w) => w.active);
   container.innerHTML = `
     <button id="sku-back" class="mb-2 text-xs font-bold text-gray-500">&larr; ${t("login.back")}</button>
     <label for="sku-name" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuNameLabel")}</label>
     <input id="sku-name" type="text" maxlength="120" lang="lo" class="input-filled lao" />
     <p class="mt-1 text-[11px] text-gray-500">${t("settings.skuNameHint")}</p>
-    <div class="mt-3 grid grid-cols-2 gap-2">
-      <div class="min-w-0">
-        <label for="sku-type" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuTypeLabel")}</label>
-        <select id="sku-type" lang="lo" class="input-filled">
-          ${activeTypes.map((ty) => `<option value="${ty.type_id}">${escapeHtml(productName(ty.name_en, ty.name_lo))}</option>`).join("")}
-        </select>
-      </div>
-      <div class="min-w-0">
-        <label for="sku-weight" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuWeightLabel")}</label>
-        <select id="sku-weight" lang="lo" class="input-filled">
-          ${activeWeights.map((w) => `<option value="${w.weight_id}">${escapeHtml(w.name_en || weightLabel(w.gram_value))}</option>`).join("")}
-        </select>
-      </div>
-    </div>
+    <div class="mt-3">${sizeBuilderHtml("sku")}</div>
+    <label for="sku-type" class="mb-1.5 mt-3 block text-xs font-bold text-gray-600">${t("settings.skuTypeLabel")}</label>
+    <select id="sku-type" lang="lo" class="input-filled">
+      ${activeTypes.map((ty) => `<option value="${ty.type_id}">${escapeHtml(productName(ty.name_en, ty.name_lo))}</option>`).join("")}
+    </select>
     <button id="create-sku-submit" class="btn-primary mt-4 w-full">${t("stock.createNewSku")}</button>
   `;
   container.querySelector("#sku-back").addEventListener("click", onCancel);
-  container.querySelector("#create-sku-submit").addEventListener("click", async () => {
+  const nameEl = container.querySelector("#sku-name");
+  const size = mountSizeBuilder(container, "sku", units, { nameOf: () => nameEl.value });
+  nameEl.addEventListener("input", size.refresh);
+  container.querySelector("#create-sku-submit").addEventListener("click", async (e) => {
     const name = container.querySelector("#sku-name").value.trim();
     if (!name) return toast(t("stock.needSkuName"), "error");
-    if (!activeTypes.length || !activeWeights.length) return toast(t("settings.needTypeAndWeight"), "error");
-    const sku = await api.createSku({
-      name,
-      type_id: container.querySelector("#sku-type").value,
-      weight_id: container.querySelector("#sku-weight").value,
-      branchId: branch,
-    });
+    if (!activeTypes.length || !units.some((u) => u.active)) return toast(t("settings.needTypeAndUnit"), "error");
+    const parts = size.read();
+    if (!parts) return;
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    let sku;
+    try {
+      sku = await api.createSku({ name, type_id: container.querySelector("#sku-type").value, size: parts, branchId: branch });
+    } catch (err) {
+      btn.disabled = false;
+      throw err;
+    }
     onCreated(sku);
   });
 }

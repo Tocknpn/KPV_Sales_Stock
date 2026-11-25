@@ -11,6 +11,7 @@ import type {
   MasterSku,
   SkuType,
   SkuWeight,
+  SkuUnit,
   DeskDay,
   DeskStatus,
   LedgerRow,
@@ -199,6 +200,9 @@ export interface Store {
   skuWeights(): Promise<SkuWeight[]>;
   createSkuWeight(weight: Partial<SkuWeight> & Pick<SkuWeight, "weight_id" | "name_en" | "gram_value">): Promise<SkuWeight>;
   updateSkuWeight(weightId: string, patch: Partial<SkuWeight>): Promise<SkuWeight | null>;
+  skuUnits(): Promise<SkuUnit[]>;
+  createSkuUnit(unit: Partial<SkuUnit> & Pick<SkuUnit, "unit" | "gram_value">): Promise<SkuUnit>;
+  updateSkuUnit(unit: string, patch: Partial<SkuUnit>): Promise<SkuUnit | null>;
 
   deskDays(filter: DeskDayFilter): Promise<DeskDay[]>;
   // Each desk's most recent day (any status).
@@ -518,6 +522,26 @@ export class DemoStore implements Store {
     const before = { ...row };
     Object.assign(row, patch);
     this.log("sku_weight", "UPDATE", before, row);
+    return row;
+  }
+  async skuUnits() {
+    return this.db.skuUnits;
+  }
+  async createSkuUnit(unit: Partial<SkuUnit> & Pick<SkuUnit, "unit" | "gram_value">) {
+    this.guard();
+    if (this.db.skuUnits.some((u) => u.unit === unit.unit)) throw new StoreError("CONFLICT", "Unit already exists");
+    const row: SkuUnit = { active: true, sort_order: this.db.skuUnits.length + 1, ...unit };
+    this.db.skuUnits.push(row);
+    this.log("sku_unit", "INSERT", null, row);
+    return row;
+  }
+  async updateSkuUnit(unit: string, patch: Partial<SkuUnit>) {
+    this.guard();
+    const row = this.db.skuUnits.find((u) => u.unit === unit);
+    if (!row) return null;
+    const before = { ...row };
+    Object.assign(row, patch);
+    this.log("sku_unit", "UPDATE", before, row);
     return row;
   }
 
@@ -1391,6 +1415,16 @@ class SupabaseStore implements Store {
   }
   async updateSkuWeight(weightId: string, patch: Partial<SkuWeight>) {
     return this.patchOne<SkuWeight>(`sku_weight?weight_id=eq.${enc(weightId)}`, patch);
+  }
+  async skuUnits() {
+    return this.rest<SkuUnit[]>("sku_unit?select=*&order=sort_order");
+  }
+  async createSkuUnit(unit: Partial<SkuUnit> & Pick<SkuUnit, "unit" | "gram_value">) {
+    const [row] = await this.rest<SkuUnit[]>("sku_unit", { method: "POST", body: JSON.stringify({ active: true, sort_order: 0, ...unit }) });
+    return row;
+  }
+  async updateSkuUnit(unit: string, patch: Partial<SkuUnit>) {
+    return this.patchOne<SkuUnit>(`sku_unit?unit=eq.${enc(unit)}`, patch);
   }
 
   private dateFilters(f: LedgerFilter & { before?: string; after?: string }) {

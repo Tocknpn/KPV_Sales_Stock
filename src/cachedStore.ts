@@ -15,10 +15,10 @@ import type { Store } from "./store";
 export const SHARED_TTL_MS = 30_000;
 
 // Read once per request. Values are the memo key's table.
-const MEMO = ["desks", "skus", "skuTypes", "skuWeights", "branches", "config", "staffAccounts", "goldPrice", "rules", "branchSkus"] as const;
+const MEMO = ["desks", "skus", "skuTypes", "skuWeights", "skuUnits", "branches", "config", "staffAccounts", "goldPrice", "rules", "branchSkus"] as const;
 type MemoMethod = (typeof MEMO)[number];
 // Also shared across requests for 30 s (Supabase only).
-const SHARED: readonly MemoMethod[] = ["skus", "skuTypes", "skuWeights", "branches", "config"];
+const SHARED: readonly MemoMethod[] = ["skus", "skuTypes", "skuWeights", "skuUnits", "branches", "config"];
 
 // The writes that change a memoised list, and which lists they change.
 const INVALIDATES: Partial<Record<keyof Store, readonly MemoMethod[]>> = {
@@ -31,6 +31,8 @@ const INVALIDATES: Partial<Record<keyof Store, readonly MemoMethod[]>> = {
   updateSkuType: ["skuTypes"],
   createSkuWeight: ["skuWeights"],
   updateSkuWeight: ["skuWeights"],
+  createSkuUnit: ["skuUnits"],
+  updateSkuUnit: ["skuUnits"],
   updateConfig: ["config", "goldPrice"],
   upsertRule: ["rules"],
   deleteRules: ["rules"],
@@ -76,7 +78,7 @@ export function fresh(store: Store): Store {
   return freshViews.get(store) ?? store;
 }
 
-type Lookup = "skus" | "skuTypes" | "skuWeights" | "branches";
+type Lookup = "skus" | "skuTypes" | "skuWeights" | "skuUnits" | "branches";
 type ListOf<M extends Lookup> = Awaited<ReturnType<Store[M]>>;
 
 // A cached list that passes `ok`, re-read fresh once when the cached copy

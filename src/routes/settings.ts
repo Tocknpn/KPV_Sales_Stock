@@ -13,7 +13,8 @@ import type { NewSku, Store } from "../store";
 import { requireAdmin, requireManager, hashPassword, isValidPassword, normalizeUsername, isValidUsername, isManagerOf, MIN_PASSWORD } from "../auth";
 import { isLive } from "../time";
 import { skuSummary, staffAccountSummary } from "../logic";
-import type { MasterSku, SkuType, SkuWeight } from "../types";
+import type { MasterSku, SizePart, SkuType, SkuUnit, SkuWeight } from "../types";
+import { partsGrams, partsLabel, partsOf, readParts } from "../sizes";
 
 const r = newRouter();
 
@@ -152,6 +153,24 @@ function buildSku(input: Record<string, any>, types: SkuType[], weights: SkuWeig
   };
 }
 
+// The size of a SKU form's parts: the size with the same label, else a new one
+// (any role may add it, like the SKU). Its grams follow the units' grams.
+async function sizeFromBody(store: Store, input: unknown): Promise<SkuWeight> {
+  const units = await listHaving(store, "skuUnits", (l) =>
+    !Array.isArray(input) || input.every((p: SizePart) => l.some((u) => u.unit === String(p?.unit ?? "").trim()))
+  );
+  const parts = readParts(input, units);
+  if (typeof parts === "string") throw new HttpError(400, parts, "BAD_SIZE");
+  const name_en = partsLabel(parts);
+  const weights = await fresh(store).skuWeights();
+  const found = weights.find((w) => w.name_en.trim() === name_en);
+  if (found) return found;
+  const gram_value = partsGrams(parts, units)!;
+  const one = parts.length === 1 ? parts[0] : null;
+  const weight_id = `W_${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+  return store.createSkuWeight({ weight_id, name_en, qty: one?.qty ?? null, unit: one?.unit ?? null, parts, gram_value, sort_order: weights.length + 1 });
+}
+
 // POST /skus: any role. The new SKU is carried, with its avg/day and lead
 // time, in the branch given: a staff / manager's own; an admin names one or
 // sends allBranches (decided 2026-11-17: the admin's tick decides).
@@ -159,6 +178,7 @@ r.post("/skus", async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
+  if (body.size !== undefined) body.weight_id = (await sizeFromBody(store, body.size)).weight_id;
   const [types, weights] = await Promise.all([
     listHaving(store, "skuTypes", (l) => l.some((t) => t.type_id === body.type_id)),
     listHaving(store, "skuWeights", (l) => l.some((w) => w.weight_id === body.weight_id)),
@@ -292,8 +312,9 @@ r.patch("/skus/:id", async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
-  const catalogue = ["name", "name_lo", "name_en", "type_id", "weight_id", "active"].some((k) => body[k] !== undefined);
+  const catalogue = ["name", "name_lo", "name_en", "type_id", "weight_id", "size", "active"].some((k) => body[k] !== undefined);
   if (catalogue && user.role !== "admin") throw new HttpError(403, "Only an admin can rename an SKU or change its type, size or status", "ROLE_DENIED");
+  if (body.size !== undefined) body.weight_id = (await sizeFromBody(store, body.size)).weight_id;
   const patch: Partial<MasterSku> = {};
   const nameInput = body.name ?? body.name_lo ?? body.name_en;
   if (nameInput !== undefined) {
@@ -480,6 +501,63 @@ r.patch("/sku-weights/:id", requireAdmin, async (c) => {
   }
   await audit(store, c.get("user"), "sku_weight.update", weight.weight_id, patch as Record<string, unknown>);
   return c.json(weight);
+});
+
+// Units (migration 20): a name and the grams in 1 of it. Admin only. The name
+// never changes (a size's label is made of it); a wrong one is turned off and
+// a new one added. Changing the grams recalculates every size made with the
+// unit and each SKU of those sizes.
+r.get("/sku-units", async (c) => c.json({ units: await storeFor(c).skuUnits() }));
+
+function readUnitGrams(body: Record<string, any>) {
+  const g = Number(body.gram_value);
+  if (!(g > 0) || g > 100_000_000) throw new HttpError(400, "Enter the grams in 1 unit, above 0", "BAD_UNIT");
+  return Math.round(g * 10000) / 10000;
+}
+
+r.post("/sku-units", requireAdmin, async (c) => {
+  const store = storeFor(c);
+  const body = await readBody(c);
+  const unit = String(body.unit ?? "").trim().replace(/\s+/g, " ");
+  if (!unit || unit.length > 30 || /\d/.test(unit)) throw new HttpError(400, "Type a unit name (no digits, up to 30 letters)", "BAD_UNIT");
+  const gram_value = readUnitGrams(body);
+  const units = await fresh(store).skuUnits();
+  if (units.some((u) => u.unit === unit)) throw new HttpError(409, "That unit already exists", "UNIT_EXISTS");
+  const row = await store.createSkuUnit({ unit, gram_value, sort_order: units.length + 1 });
+  await audit(store, c.get("user"), "sku_unit.create", unit, { gram_value });
+  return c.json(row);
+});
+
+r.patch("/sku-units/:unit", requireAdmin, async (c) => {
+  const store = storeFor(c);
+  const body = await readBody(c);
+  const name = c.req.param("unit") ?? "";
+  const units = await fresh(store).skuUnits();
+  if (!units.some((u) => u.unit === name)) throw new HttpError(404, "Unit not found", "NOT_FOUND");
+  const patch: Partial<SkuUnit> = {};
+  if (body.gram_value !== undefined) patch.gram_value = readUnitGrams(body);
+  if (body.active !== undefined) patch.active = Boolean(body.active);
+  if (Object.keys(patch).length === 0) throw new HttpError(400, "Nothing to change", "NOTHING_TO_CHANGE");
+  const row = await store.updateSkuUnit(name, patch);
+  if (!row) throw new HttpError(404, "Unit not found", "NOT_FOUND");
+  let resized = 0;
+  if (patch.gram_value !== undefined) {
+    const after = units.map((u) => (u.unit === name ? row : u));
+    const skus = await fresh(store).skus();
+    for (const w of await fresh(store).skuWeights()) {
+      const parts = partsOf(w);
+      if (!parts.some((p) => p.unit === name)) continue;
+      const gram_value = partsGrams(parts, after);
+      if (gram_value === null || gram_value === Number(w.gram_value)) continue;
+      await store.updateSkuWeight(w.weight_id, { gram_value, ...(w.parts ? {} : { parts }) });
+      for (const s of skus.filter((x) => x.weight_id === w.weight_id)) {
+        await store.updateSku(s.sku_id, { std_gram_weight: gram_value, baht_weight: bahtOfGrams(gram_value) });
+      }
+      resized++;
+    }
+  }
+  await audit(store, c.get("user"), "sku_unit.update", name, { ...patch, sizes_recalculated: resized });
+  return c.json({ ...row, resized });
 });
 
 // ---------------------------------------------------------------------------

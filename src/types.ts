@@ -48,6 +48,22 @@ export interface SkuWeight {
   // conversion, gram_value is what every calculation uses.
   qty?: number | null;
   unit?: string | null;
+  // The size's parts, biggest unit first (migration 20): "4 ບາດ 2 ສະຫຼຶງ".
+  parts?: SizePart[] | null;
+  gram_value: number;
+  active: boolean;
+  sort_order: number;
+}
+
+export interface SizePart {
+  unit: string;
+  qty: number;
+}
+
+// A unit and the grams in 1 of it (ບາດ = 15.244 g), set by the admin
+// (migration 20). Sizes are built from these.
+export interface SkuUnit {
+  unit: string;
   gram_value: number;
   active: boolean;
   sort_order: number;

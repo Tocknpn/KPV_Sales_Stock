@@ -74,7 +74,9 @@ end $$;
 create or replace function guard_master_data() returns trigger
 language plpgsql as $$
 begin
-  if tg_op = 'INSERT' and tg_table_name = 'master_sku' then
+  -- Any role may add a SKU, and the size it needs (sizes are made from the
+  -- admin's units, migration 20).
+  if tg_op = 'INSERT' and tg_table_name in ('master_sku', 'sku_weight') then
     perform kpv_require('{admin,manager,staff}');
     return new;
   end if;
@@ -138,7 +140,8 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['master_sku', 'sku_type', 'sku_weight', 'system_config'] loop
+  foreach t in array array['master_sku', 'sku_type', 'sku_weight', 'sku_unit', 'system_config'] loop
+    continue when to_regclass(t) is null;
     execute format('drop trigger if exists trg_guard_master_data on %I', t);
     execute format(
       'create trigger trg_guard_master_data before insert or update or delete on %I

@@ -10,6 +10,7 @@ import type {
   MasterSku,
   SkuType,
   SkuWeight,
+  SkuUnit,
   DeskDay,
   LedgerRow,
   DocumentRecord,
@@ -30,6 +31,7 @@ export interface DemoData {
   staffAccounts: StaffAccount[];
   skuTypes: SkuType[];
   skuWeights: SkuWeight[];
+  skuUnits: SkuUnit[];
   skus: MasterSku[];
   deskDays: DeskDay[];
   ledger: LedgerRow[];
@@ -198,6 +200,15 @@ export function buildDemoData(today: string): DemoData {
     { weight_id: "G_1", name_en: "1 ກລາມ", qty: 1, unit: "ກລາມ", gram_value: 1, active: true, sort_order: 5 },
     { weight_id: "G_3_75", name_en: "3.75 ກລາມ", qty: 3.75, unit: "ກລາມ", gram_value: 3.75, active: true, sort_order: 6 },
     { weight_id: "KG_1", name_en: "1 ກິໂລ", qty: 1, unit: "ກິໂລ", gram_value: 1000, active: true, sort_order: 7 },
+  ].map((w) => ({ ...w, parts: [{ unit: w.unit, qty: w.qty }] }));
+
+  // Units the sizes are built from (migration 20), biggest first.
+  const skuUnits: SkuUnit[] = [
+    { unit: "ກິໂລ", gram_value: 1000, active: true, sort_order: 1 },
+    { unit: "ບາດ", gram_value: 15.244, active: true, sort_order: 2 },
+    { unit: "ສະຫຼຶງ", gram_value: 3.811, active: true, sort_order: 3 },
+    { unit: "ກລາມ", gram_value: 1, active: true, sort_order: 4 },
+    { unit: "ຫຸນ", gram_value: 0.3811, active: true, sort_order: 5 },
   ];
 
   const skus: MasterSku[] = [
@@ -377,6 +388,7 @@ export function buildDemoData(today: string): DemoData {
     staffAccounts,
     skuTypes,
     skuWeights,
+    skuUnits,
     skus,
     deskDays,
     ledger,
