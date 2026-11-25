@@ -27,9 +27,8 @@ describe("caseSteps", () => {
 
 describe("cardBodyAction", () => {
   it("a done card body opens the read-only day", () => expect(cardBodyAction("done")).toBe("day"));
-  it("not_started checks in", () => expect(cardBodyAction("not_started")).toBe("checkIn"));
-  it("other statuses keep the opening-balance sheet", () => {
-    for (const s of ["opening", "check_in", "final_stock"]) expect(cardBodyAction(s)).toBe("openingSheet");
+  it("every other status opens the day in view mode, never a step", () => {
+    for (const s of ["not_started", "opening", "check_in", "final_stock"]) expect(cardBodyAction(s)).toBe("view");
   });
 });
 

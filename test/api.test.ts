@@ -518,11 +518,10 @@ describe("numbers agree across screens", () => {
       db.goldPrice = null;
       const before = (await call(admin, "GET", "/dashboard?deskId=IT-D01")).json.portfolio;
       expect(before.lak_value).toBe(before.total_baht_gold * 32500000);
-      const res = await call(admin, "POST", "/settings/config", { spotLakPerBaht: 40000000, usdToLakRate: 20000 });
+      const res = await call(admin, "POST", "/settings/config", { spotLakPerBaht: 40000000 });
       expect(res.status).toBe(200);
       const after = (await call(admin, "GET", "/dashboard?deskId=IT-D01")).json.portfolio;
       expect(after.lak_value).toBe(before.total_baht_gold * 32500000);
-      expect(after.usd_value).toBe(after.lak_value / 20000);
     } finally {
       db.goldPrice = saved;
     }

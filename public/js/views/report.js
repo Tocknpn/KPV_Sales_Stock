@@ -24,7 +24,6 @@ function monthLabel(period) {
 export async function mountReport() {
   if (!state.report.tab) state.report.tab = "position";
   if (state.report.tab !== "movement") {
-    unmountReport();
     return mountExecReport(mountReport);
   }
   gridCache = { key: null, data: null };
@@ -201,7 +200,7 @@ async function renderGrid(root) {
 }
 
 function render(root, data) {
-  const { kpi, items, ledgerRows, audit, netClosingLak } = data;
+  const { kpi, items, ledgerRows, audit } = data;
   const byDeskSku = new Map(items.map((it) => [it.key, it]));
   const avgOf = (r) => byDeskSku.get(`${r.desk_id}__${r.sku_id}`);
 
@@ -355,29 +354,4 @@ function render(root, data) {
       state.report.view = btn.dataset.toggle;
     })
   );
-
-  renderFooter(netClosingLak);
-}
-
-function renderFooter(netClosingLak) {
-  let footer = document.getElementById("report-footer");
-  if (!footer) {
-    footer = document.createElement("div");
-    footer.id = "report-footer";
-    footer.className = "fixed inset-x-0 bottom-[72px] z-20 mx-auto max-w-[430px] px-4";
-    document.body.appendChild(footer);
-  }
-  footer.innerHTML = `
-    <div class="flex items-center justify-between rounded-2xl bg-gray-900 px-4 py-3 text-white shadow-pop">
-      <div>
-        <div class="text-[10px] font-semibold uppercase text-white/50">${t("report.netClosing")}</div>
-        <div class="text-base font-extrabold">${fmtLak(netClosingLak)}</div>
-      </div>
-    </div>`;
-}
-
-// The sticky footer lives outside #view-root (so it floats above the bottom
-// nav), so app.js calls this before mounting any other view.
-export function unmountReport() {
-  document.getElementById("report-footer")?.remove();
 }

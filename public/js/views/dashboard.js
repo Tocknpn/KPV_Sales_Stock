@@ -4,7 +4,7 @@
 // the report's tables read, so the two screens cannot disagree.
 import { state, branchName } from "../state.js";
 import { ribbonHtml, dailyColumnsHtml, barTrack, attachTips, bandFill, BAR_COLOR } from "../charts.js";
-import { fmtBaht, fmtInt, fmtLak, fmtUsd, escapeHtml } from "../util.js";
+import { fmtBaht, fmtInt, fmtLak, escapeHtml } from "../util.js";
 import { t, tf, productName } from "../i18n.js";
 import { skuLabel } from "../sku-groups.js";
 import { isManager } from "../session.js";
@@ -113,14 +113,13 @@ function heroHtml(d) {
     [fmtBaht(h.baht, 2), t("rep.col.baht")],
     [fmtInt(h.gram), "g"],
     [fmtInt(h.pcs), t("exec.pcsUnit")],
-    ...(d.price.usdToLak > 0 ? [[fmtUsd(h.value_usd), "USD"]] : []),
   ];
   const bands = d.ribbon.filter((b) => b.lines > 0);
   return `
   <section aria-labelledby="exec-hero">
     <p class="text-[11px] font-semibold text-gray-600">${esc(tf("exec.settled", { done: h.cases_done_today, n: h.cases }))}</p>
     <h2 id="exec-hero" class="mt-1.5 text-[25px] font-medium leading-[1.25] tracking-[-0.01em] text-gray-800 md:text-[28px]">${first} ${second}</h2>
-    <dl class="mt-4 grid grid-cols-4 gap-2 border-y border-hairline py-3">
+    <dl class="mt-4 grid grid-cols-3 gap-2 border-y border-hairline py-3">
       ${facts
         .map(
           ([v, l]) => `<div class="min-w-0"><dt class="sr-only">${esc(l)}</dt><dd class="truncate text-sm font-extrabold text-gray-900 tnum">${esc(v)}</dd><div class="text-[10px] font-semibold text-gray-500">${esc(l)}</div></div>`

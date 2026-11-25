@@ -10,13 +10,12 @@ export function caseSteps(card) {
   return { checkIn: "active", close: "locked", badge: "alert", goToDate: null };
 }
 
-// What tapping the card body does: a done day opens read-only in the day screen
-// (sales, count, history, reopen); a not-started case checks in; otherwise the
-// opening-balance snapshot sheet.
+// What tapping the card body does. It never starts a step: a done day opens in
+// the day screen as usual (read-only, with Reopen for managers); every other
+// case opens the same day screen in view mode, without the action footer. Only
+// the card's Check in / Close day buttons open it with actions.
 export function cardBodyAction(status) {
-  if (status === "done") return "day";
-  if (status === "not_started") return "checkIn";
-  return "openingSheet";
+  return status === "done" ? "day" : "view";
 }
 
 // The status icon on the home card: which glyph and tint a badge shows.

@@ -504,7 +504,7 @@ r.post("/settings/config", requireAdmin, async (c) => {
   // spotLakPerBaht is intentionally not accepted: the gold price now comes from the gold_prices feed;
   // the spot_lak_per_baht column stays only as the silent fallback.
   const patch: Record<string, number | string> = {};
-  const fields = { safetyBufferDays: "safety_buffer_days", usdToLakRate: "usd_to_lak_rate" } as const;
+  const fields = { safetyBufferDays: "safety_buffer_days" } as const;
   for (const [key, column] of Object.entries(fields)) {
     if (body[key] === undefined) continue;
     const n = nonNegative(body[key]);

@@ -8,7 +8,7 @@ import { mountLogin } from "./views/login.js";
 import { mountStock, unmountStock } from "./views/stock.js";
 import { mountDocuments, unmountDocuments } from "./views/documents.js";
 import { mountDashboard } from "./views/dashboard.js";
-import { mountReport, unmountReport } from "./views/report.js";
+import { mountReport } from "./views/report.js";
 import { mountSettings } from "./views/settings/index.js";
 import { setSizeLabels } from "./sku-groups.js";
 
@@ -75,11 +75,10 @@ function setActiveNav(view) {
 async function switchView(view, opts = {}, { fromRoute = false } = {}) {
   if (!views[view]) view = "stock";
   if (!fromRoute) {
-    const params = view === "stock" && opts.sub ? { date: opts.params?.date, tab: opts.params?.tab, step: opts.params?.step } : {};
+    const params = view === "stock" && opts.sub ? { date: opts.params?.date, tab: opts.params?.tab, step: opts.params?.step, view: opts.params?.view } : {};
     go(pathFor(view, opts.sub ?? null, params), { parent: opts.sub ? pathFor(view) : null });
   }
   if (isSheetOpen()) closeSheet({ fromHistory: true });
-  if (state.view === "report" && view !== "report") unmountReport();
   if (state.view === "stock" && view !== "stock") unmountStock();
   if (state.view === "documents") unmountDocuments();
   state.view = view;

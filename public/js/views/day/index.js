@@ -7,6 +7,11 @@
 //   sticky footer    opening step:  [+ Add SKU] [✓ Confirm check-in]
 //                    check-in step: [+ Add SKU] [✓ Close day]
 //                    Done:          [Reopen]
+//                    view mode:     none (the case card's body was tapped,
+//                                   not its Check in / Close day button)
+//
+// Opening a case paints the top bar and a skeleton of the grid at once, from
+// the card's data, so the tap answers before the day has loaded.
 //
 // The single-mode grid fits a phone; the dynamic one (retail / wholesale /
 // return / withdraw) scrolls sideways with the SKU column pinned.
@@ -17,7 +22,7 @@ import { state } from "../../state.js";
 import { toast, openActionSheet, openSheet, closeSheet, successOverlay } from "../../ui.js";
 import { fmtBaht, fmtInt, fmtDate, escapeHtml, statusPillClasses } from "../../util.js";
 import { t } from "../../i18n.js";
-import { closingOf, groupKeyOf, renderRow, patchRow, headerHtml, gridTemplate, gridMinWidth, skuName } from "./row.js";
+import { closingOf, groupKeyOf, renderRow, patchRow, headerHtml, gridTemplate, gridMinWidth, columnsFor, skuName } from "./row.js";
 import { createSaveQueue, clampQty } from "./save-queue.js";
 import {
   tf,
@@ -30,7 +35,6 @@ import {
 import { renderHistory } from "./history.js";
 import { addPlan, addItems, STEP_CHANGED_CODES, nextDayNegativeText } from "./day-rules.js";
 import { replaceQuery } from "../../router.js";
-import { skeletonTable } from "../../skeleton.js";
 
 // After Undo on the History tab the day reloads; this brings the tab back.
 let resumeTab = null;
@@ -83,6 +87,9 @@ const canClose = (status) => status === "check_in" || status === "final_stock";
 // Screen state (one day screen at a time)
 // ---------------------------------------------------------------------------
 let S = null;
+// Bumped on every unmount, so a load that finishes after the user has left
+// (or opened another case) is dropped instead of painting over that screen.
+let mountSeq = 0;
 
 // Reloads the day once (several cells may fail with the same code at once).
 function reloadForStep(screen) {
@@ -91,13 +98,24 @@ function reloadForStep(screen) {
   Promise.resolve(screen.hooks.reload?.()).catch(() => {});
 }
 
+// opts: { detail?, load?: () => Promise<detail>, view?, tab?, step? }
 export async function mountDay(deskCard, date, hooks = {}, opts = {}) {
   await unmountDay();
+  const token = mountSeq;
   if (opts.tab) resumeTab = opts.tab;
-  // First open of a case: show its shape while loading. A reload keeps the
-  // current screen instead, so numbers do not flash away after a save.
-  if (!document.getElementById("day-screen")) document.getElementById("view-root").innerHTML = skeletonTable(8, 4);
-  const detail = opts.detail ?? (await api.deskDetail(deskCard.desk_id, date));
+  // First open of a case: its top bar and the grid's shape straight away. A
+  // reload keeps the current screen instead, so numbers do not flash away.
+  const fresh = !document.getElementById("day-screen");
+  if (fresh) showDayShell(deskCard, date, hooks);
+  let detail;
+  try {
+    detail = opts.detail ?? (await (opts.load ? opts.load() : api.deskDetail(deskCard.desk_id, date)));
+  } catch (err) {
+    if (token === mountSeq && fresh) hooks.onBack?.();
+    throw err;
+  }
+  if (token !== mountSeq) return;
+  const view = Boolean(opts.view);
   const rows = detail.rows.map((r) => ({ ...r }));
   const screen = {
     deskCard,
@@ -107,7 +125,11 @@ export async function mountDay(deskCard, date, hooks = {}, opts = {}) {
     rows,
     stored: new Map(rows.map((r) => [r.sku_id, { ...r }])),
     status: detail.status,
-    readOnly: !isEntryStep(detail.status),
+    // View mode: the same screen, read-only, without the action footer.
+    view,
+    // A case not checked in on this date shows its last recorded day instead.
+    shownDate: view && detail.date && detail.date !== date ? detail.date : null,
+    readOnly: view || !isEntryStep(detail.status),
     // The mode the day was opened in (the company setting at that moment).
     mode: detail.stock_out_mode === "single" ? "single" : "dynamic",
     tab: resumeTab ?? "stock",
@@ -117,7 +139,7 @@ export async function mountDay(deskCard, date, hooks = {}, opts = {}) {
     busy: false,
     // The home card's "② Close day" opens the screen with step=close: the close
     // sheet opens once the day has loaded (see consumeAutoClose).
-    autoClose: opts.step === "close",
+    autoClose: !view && opts.step === "close",
     queue: null,
     ctx: null,
   };
@@ -178,9 +200,41 @@ export async function mountDay(deskCard, date, hooks = {}, opts = {}) {
   };
 
   renderTopbar();
-  renderScreen();
+  renderScreen({ reveal: fresh });
   renderFooter();
   consumeAutoClose();
+}
+
+// The case's top bar (from the card) and a skeleton in the grid's own
+// columns, painted before the day loads. Back works straight away.
+export function showDayShell(deskCard, date, hooks = {}) {
+  $("#topbar-slot").innerHTML = topbarHtml(deskCard, date, `<span class="skeleton inline-block h-5 w-24 rounded-full"></span>`);
+  $("#day-back").addEventListener("click", () => (hooks.onBack ? hooks.onBack() : unmountDay()));
+  $("#day-totals").innerHTML = `<span class="skeleton inline-block h-4 w-40"></span>`;
+  const root = $("#view-root");
+  root.scrollTo({ top: 0 });
+  root.innerHTML = skeletonDay();
+}
+
+function skeletonDay() {
+  const mode = state.meta.config?.stock_out_mode === "single" ? "single" : "dynamic";
+  const cols = gridTemplate(mode);
+  const minW = gridMinWidth(mode);
+  const n = columnsFor(mode).length + 3;
+  const repeat = (k, html) => html.repeat(k);
+  const row = `<div class="grid gap-1.5 px-1 py-1" style="grid-template-columns:${cols}">${repeat(n, `<div class="skeleton h-[52px] rounded-xl"></div>`)}</div>`;
+  const group = (k) => `<div class="px-2 pb-1 pt-2.5"><div class="skeleton h-3 w-32"></div></div>${repeat(k, row)}`;
+  return `
+    <div role="status" aria-busy="true">
+      <span class="sr-only">${t("settings.loading")}</span>
+      <div class="mb-3 flex gap-1 rounded-xl bg-gray-100 p-1"><div class="skeleton h-11 flex-1 bg-white"></div><div class="h-11 flex-1"></div></div>
+      <div class="card overflow-hidden px-1.5 pb-2">
+        <div style="${minW ? `min-width:${minW}px` : ""}">
+          <div class="grid gap-1.5 border-b border-hairline px-1 pb-2 pt-3" style="grid-template-columns:${cols}">${repeat(n, `<div class="skeleton h-3"></div>`)}</div>
+          ${group(3)}${group(2)}
+        </div>
+      </div>
+    </div>`;
 }
 
 // step=close from the home card: open the close sheet once, then drop the flag
@@ -195,6 +249,7 @@ function consumeAutoClose() {
 export async function unmountDay() {
   const screen = S;
   S = null;
+  mountSeq++;
   document.getElementById("day-footer")?.remove();
   if (screen) {
     await screen.queue.flushAll().catch(() => {});
@@ -224,24 +279,35 @@ function totals() {
   return { pcs, baht, low };
 }
 
-function renderTopbar() {
-  const { deskCard, date, detail } = S;
-  const done = S.status === "done";
-  $("#topbar-slot").innerHTML = `
+// The top bar; `statusHtml` is the status line under the title (a skeleton
+// while the day loads).
+function topbarHtml(deskCard, date, statusHtml, { menu = false } = {}) {
+  return `
     <div class="flex items-center gap-2">
       <button id="day-back" aria-label="${t("login.back")}" class="focus-ring tap-target -ml-1.5 flex shrink-0 items-center justify-center rounded-full text-gray-600 active:bg-gray-100">
         <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
       </button>
       <div class="min-w-0 flex-1">
         <h1 class="truncate text-base font-extrabold text-gray-900">${escapeHtml(deskCard.display_name)} · ${fmtDate(date)}</h1>
-        <div class="flex min-w-0 items-center gap-2 text-xs text-gray-600">
-          <span class="status-pill shrink-0 px-2 py-0.5 ${statusPillClasses(done ? "done" : S.status === "opening" ? "opening" : "check_in")}">${done ? t("stock.statusDone") : S.status === "opening" ? t("stock.statusOpening") : t("day.statusOpen")}</span>
-          ${detail.lastActorName ? `<span class="min-w-0 truncate">👤 ${escapeHtml(detail.lastActorName)}</span>` : ""}
-        </div>
+        <div class="flex min-h-[22px] min-w-0 items-center gap-2 text-xs text-gray-600">${statusHtml}</div>
       </div>
-      <button id="day-menu" aria-label="${t("day.menu")}" class="focus-ring tap-target flex shrink-0 items-center justify-center rounded-full text-xl font-extrabold text-gray-600 active:bg-gray-100">⋯</button>
+      ${
+        menu
+          ? `<button id="day-menu" aria-label="${t("day.menu")}" class="focus-ring tap-target flex shrink-0 items-center justify-center rounded-full text-xl font-extrabold text-gray-600 active:bg-gray-100">⋯</button>`
+          : `<span class="tap-target shrink-0" aria-hidden="true"></span>`
+      }
     </div>
-    <div id="day-totals" class="mt-2 flex items-center justify-between gap-2 text-sm"></div>`;
+    <div id="day-totals" class="mt-2 flex min-h-[20px] items-center justify-between gap-2 text-sm"></div>`;
+}
+
+function renderTopbar() {
+  const { deskCard, date, detail } = S;
+  // A case not checked in on this date (view mode) reads "Not checked in",
+  // whatever the last recorded day it shows was.
+  const pill = S.shownDate ? "opening" : S.status === "done" ? "done" : S.status === "opening" ? "opening" : "check_in";
+  const label = { done: t("stock.statusDone"), opening: t("stock.statusOpening"), check_in: t("day.statusOpen") }[pill];
+  const actor = !S.shownDate && detail.lastActorName ? `<span class="min-w-0 truncate">👤 ${escapeHtml(detail.lastActorName)}</span>` : "";
+  $("#topbar-slot").innerHTML = topbarHtml(deskCard, date, `<span class="status-pill shrink-0 px-2 py-0.5 ${statusPillClasses(pill)}">${label}</span>${actor}`, { menu: true });
   $("#day-back").addEventListener("click", () => (S?.hooks.onBack ? S.hooks.onBack() : unmountDay()));
   $("#day-menu")?.addEventListener("click", openMenu);
   refreshTotals();
@@ -259,11 +325,12 @@ function refreshTotals() {
     </span>`;
 }
 
-function renderScreen() {
+// reveal: the first paint after the skeleton fades in instead of popping.
+function renderScreen({ reveal = false } = {}) {
   const root = $("#view-root");
   root.scrollTo({ top: 0 });
   root.innerHTML = `
-    <div id="day-screen" class="min-w-0">
+    <div id="day-screen" class="min-w-0 ${reveal ? "day-reveal" : ""}">
       <div role="tablist" aria-label="${t("day.menu")}" class="mb-3 flex gap-1 rounded-xl bg-gray-100 p-1">
         ${["stock", "history"]
           .map(
@@ -324,10 +391,13 @@ function renderNotices() {
   const { detail } = S;
   const parts = [];
 
-  if (S.status === "opening") {
+  if (S.view && (S.shownDate || S.status !== "done")) {
+    const text = S.shownDate ? tf("day.viewLatest", { date: fmtDate(S.shownDate) }) : tf("day.viewOnly", { checkIn: t("step.checkIn"), close: t("step.close") });
+    parts.push(`<p class="mb-3 rounded-lg bg-gray-100 px-3 py-2.5 text-sm font-semibold text-gray-700">${escapeHtml(text)}</p>`);
+  } else if (S.status === "opening") {
     parts.push(`<p class="mb-3 rounded-lg bg-brand-50 px-3 py-2.5 text-sm font-semibold text-brand-700">${t("day.openingHint")}</p>`);
   }
-  if (S.status === "done") {
+  if (S.status === "done" && !S.shownDate) {
     parts.push(`
       <p class="mb-3 rounded-lg bg-success-bg px-3 py-2.5 text-center text-sm font-bold text-success">
         ${
@@ -376,13 +446,21 @@ function groupRows() {
   return [...groups.entries()].sort(([a], [b]) => order.get(a) - order.get(b) || (a === "t:" ? "￿" : a).localeCompare(b === "t:" ? "￿" : b));
 }
 
-function groupMeta(list) {
-  const pcs = list.reduce((s, r) => s + closingOf(r), 0);
-  return `${fmtInt(pcs)} pcs`;
+// A group's pieces and gold weight, on the same basis as the totals in the top bar.
+export function groupMeta(list) {
+  let pcs = 0;
+  let baht = 0;
+  for (const r of list) {
+    const closing = closingOf(r);
+    pcs += closing;
+    baht += closing * (r.baht_weight_each || 0);
+  }
+  return `${fmtInt(pcs)} pcs · ${fmtBaht(baht, 2)} Baht`;
 }
 
 function rowView(r) {
-  return { status: S.status, mode: S.mode, problems: S.problems.get(r.sku_id) };
+  // View mode: no cell takes input, whatever the day's step.
+  return { status: S.view ? "view" : S.status, mode: S.mode, problems: S.problems.get(r.sku_id) };
 }
 
 function rowHtml(r) {
@@ -445,6 +523,11 @@ function renderFooter() {
     host.id = "day-footer";
     host.className = "fixed inset-x-0 z-20 mx-auto max-w-[430px] md:max-w-xl lg:max-w-2xl";
     document.body.appendChild(host);
+  }
+  // View mode has no actions: no footer at all.
+  if (S.view) {
+    host.remove();
+    return;
   }
   // Sit directly above the bottom nav, whatever its height on this device.
   host.style.bottom = `${document.getElementById("bottom-nav")?.offsetHeight ?? 0}px`;

@@ -407,10 +407,9 @@ export function buildExecutive(input: ExecutiveInput) {
   return {
     asOf: today,
     period: { days: periodDays, from, to: today, prevFrom, prevTo: addDays(from, -1) },
-    price: { lakPerBaht, usdToLak: config.usd_to_lak_rate },
+    price: { lakPerBaht },
     headline: {
       value_lak: round2(lak),
-      value_usd: config.usd_to_lak_rate > 0 ? round2(lak / config.usd_to_lak_rate) : 0,
       baht: round2(baht),
       gram: round2(gram),
       pcs,

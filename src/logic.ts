@@ -355,7 +355,6 @@ export function buildDeskDetail(
       baht: round2(totals.baht),
       gram: round2(totals.gram),
       valueLak: round2(totals.valueLak),
-      valueUsd: config.usd_to_lak_rate > 0 ? round2(totals.valueLak / config.usd_to_lak_rate) : 0,
     },
     criticalItems: rows.filter((r) => r.branch_status === "critical").length,
     stockHealth: {
@@ -629,9 +628,7 @@ export function buildDashboard(input: DashboardInput) {
       total_baht_gold: round2(baht),
       total_pcs: pcs,
       lak_value: round2(lak),
-      usd_value: config.usd_to_lak_rate > 0 ? round2(lak / config.usd_to_lak_rate) : 0,
       spotLakPerBaht: lakPerBaht,
-      usdToLakRate: config.usd_to_lak_rate,
       desksTotal: scopedDesks.length,
       desksDoneToday: scopedDesks.filter((d) => doneToday(d.desk_id)).length,
     },
@@ -853,7 +850,6 @@ export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus
       doneDays,
       totalDays: periodDays.length,
     },
-    netClosingLak: kpi.closing.lak,
   };
 }
 

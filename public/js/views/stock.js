@@ -1,15 +1,14 @@
 import { api } from "../api.js";
 import { state, branchName } from "../state.js";
 import { toast, openSheet, closeSheet, openActionSheet } from "../ui.js";
-import { fmtBaht, fmtInt, fmtDate, icon, escapeHtml, fmtClock, fmtLaosStamp, laosDateOf, flameIcon } from "../util.js";
-import { t, tf, productName } from "../i18n.js";
+import { fmtBaht, fmtInt, fmtDate, escapeHtml, fmtClock, fmtLaosStamp, laosDateOf, flameIcon } from "../util.js";
+import { t, tf } from "../i18n.js";
 import { renderCalendar } from "../calendar.js";
 import { isAdmin } from "../session.js";
-import { mountDay, unmountDay } from "./day/index.js";
+import { mountDay, unmountDay, showDayShell } from "./day/index.js";
 import { go, pathFor, backTo } from "../router.js";
 import { renderSkuPickerInto, openingRowsHtml, bindOpeningInputs } from "./sku-picker.js";
 import { skeletonCards, skeletonCalendar } from "../skeleton.js";
-import { skuSizeLabel } from "../sku-groups.js";
 import { caseSteps, cardBodyAction, statusIcon } from "../case-steps.js";
 
 function setStockDate(date) {
@@ -32,8 +31,10 @@ export async function mountStock(route = {}) {
   await refreshCards();
   if (!deskId) return;
   const card = currentCards.find((d) => d.desk_id === deskId);
-  // Opening a case that was never checked in that day would check it in: show the cards instead.
-  if (card && card.status !== "not_started") await openDeskDetail(card, { fromRoute: true, tab: route.params?.tab, step: route.params?.step });
+  const view = route.params?.view === "1";
+  // Opening a case that was never checked in that day would check it in: show
+  // the cards instead (view mode only looks, so it may open).
+  if (card && (view || card.status !== "not_started")) await openDeskDetail(card, { fromRoute: true, tab: route.params?.tab, step: route.params?.step, view });
   else go(pathFor("stock"), { replace: true });
 }
 
@@ -131,17 +132,63 @@ let currentCards = [];
 
 let currentToday = null;
 
-// showLoading=false re-renders in place without the spinner flash.
-async function refreshCards(showLoading = true) {
-  const root = document.getElementById("view-root");
-  if (showLoading) root.innerHTML = skeletonCards();
-  const { desks, branchSummary, today } = await api.deskCards(state.stock.date, state.stock.branch);
+// The last case list shown, per branch and date. Coming back from a case
+// paints it at once and then swaps in the fresh list (only if it changed), so
+// Back never shows skeleton cards for a list the user just saw.
+let cardsCache = null; // { key, sig, desks, branchSummary, today }
+// Where the list was scrolled when a case was opened; restored on the way back.
+let listScroll = null;
+
+function paintCards({ desks, branchSummary, today }) {
   currentCards = desks;
   currentToday = today;
   renderBadges(desks, branchSummary);
   renderBody(desks, branchSummary);
-  flashFinishedCard(desks);
+  if (listScroll != null) {
+    document.getElementById("view-root").scrollTop = listScroll;
+    listScroll = null;
+  }
 }
+
+// showLoading=false re-renders in place without the skeleton flash.
+async function refreshCards(showLoading = true) {
+  const root = document.getElementById("view-root");
+  const key = `${state.stock.branch}|${state.stock.date}`;
+  const cached = cardsCache?.key === key ? cardsCache : null;
+  if (cached) paintCards(cached);
+  else if (showLoading) root.innerHTML = skeletonCards();
+  const data = await api.deskCards(state.stock.date, state.stock.branch);
+  // The user may have switched date or branch while this loaded.
+  if (key !== `${state.stock.branch}|${state.stock.date}`) return;
+  const sig = JSON.stringify(data);
+  const unchanged = cached?.sig === sig && document.getElementById("desk-list");
+  cardsCache = { key, sig, ...data };
+  if (!unchanged) paintCards(data);
+  flashFinishedCard(data.desks);
+}
+
+// The day's data starts loading on pointerdown, 100–300 ms before the click
+// fires; opening the case picks it up while it is still fresh.
+const PREFETCH_MS = 5000;
+let prefetched = null; // { key, promise, at }
+
+function prefetchDetail(deskId, date) {
+  const key = `${deskId}|${date}`;
+  if (prefetched?.key === key && Date.now() - prefetched.at < PREFETCH_MS) return;
+  const promise = api.deskDetail(deskId, date);
+  promise.catch(() => {}); // the opener reports a failure, not this
+  prefetched = { key, promise, at: Date.now() };
+}
+
+function loadDetail(deskId, date) {
+  const p = prefetched;
+  prefetched = null;
+  if (p?.key === `${deskId}|${date}` && Date.now() - p.at < PREFETCH_MS) return p.promise;
+  return api.deskDetail(deskId, date);
+}
+
+// View mode of a case not checked in on this date shows its last recorded day.
+const detailDate = (desk, view) => (view && desk.status === "not_started" ? "latest" : state.stock.date);
 
 // Set by a finished check-in / close; consumed by the next card render.
 let pendingFlash = null;
@@ -321,16 +368,21 @@ function renderGrid(desks) {
 
   const root = document.getElementById("view-root");
   root.querySelectorAll("[data-card]").forEach((card) => {
+    const deskOf = () => currentCards.find((d) => d.desk_id === card.dataset.card);
+    card.addEventListener("pointerdown", (e) => {
+      const desk = deskOf();
+      if (!desk) return;
+      const btn = e.target.closest("[data-step]");
+      if (!btn) return prefetchDetail(desk.desk_id, detailDate(desk, cardBodyAction(desk.status) === "view"));
+      // A step button that checks in, or jumps to an earlier day, loads something else.
+      if (btn.disabled || blockedDate(desk) || desk.status === "not_started") return;
+      prefetchDetail(desk.desk_id, state.stock.date);
+    });
     card.addEventListener("click", (e) => {
       if (e.target.closest("[data-step]")) return;
-      const desk = currentCards.find((d) => d.desk_id === card.dataset.card);
-      // Not started today has no opening-balance row to show yet (it's only
-      // materialized on check-in), so tapping the card falls back to the
-      // same check-in + edit flow as the action button in that case.
-      const action = cardBodyAction(desk.status);
-      if (action === "checkIn") handleCardAction(desk);
-      else if (action === "day") openDeskDetail(desk);
-      else openOpeningBalanceSheet(desk);
+      const desk = deskOf();
+      // The card body only looks: the same day screen, without the action footer.
+      openDeskDetail(desk, { view: cardBodyAction(desk.status) === "view" });
     });
   });
   root.querySelectorAll("[data-step]:not([disabled])").forEach((btn) => {
@@ -343,48 +395,9 @@ function renderGrid(desks) {
   });
 }
 
-// Read-only snapshot shown when the card itself is tapped — just today's
-// opening balance per SKU, no inputs. "Check Stock" (the card's action
-// button) is the only way into the editable table.
-async function openOpeningBalanceSheet(deskCard) {
-  const detail = await api.deskDetail(deskCard.desk_id, state.stock.date);
-  const rows = detail.rows
-    .map(
-      (r) => `
-      <div class="flex items-center gap-2.5 px-4 py-3">
-        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">${icon(r.icon, "h-4 w-4")}</span>
-        <div class="min-w-0 flex-1">
-          <div class="truncate text-xs font-bold text-gray-900">${escapeHtml(productName(r.name_en, r.name_lo))}</div>
-          <div class="truncate text-[10px] text-gray-500">${escapeHtml([r.type_label || r.category, skuSizeLabel(r)].filter(Boolean).join(" · ") || r.sku_id)}</div>
-        </div>
-        <div class="shrink-0 text-right">
-          <div class="text-sm font-extrabold text-gray-900">${r.opening_qty}</div>
-          <div class="text-[9px] font-semibold uppercase text-gray-500">${t("stock.opening")}</div>
-        </div>
-      </div>`
-    )
-    .join("");
-
-  openSheet(
-    `
-    <p class="mb-3 rounded-lg bg-gray-50 px-3 py-2 text-center text-[11px] font-medium text-gray-500">${t("stock.openingBalanceHint")}</p>
-    ${detail.lastActorName ? `<p class="mb-3 text-center text-[11px] text-gray-500">${t("stock.lastActorPrefix")} ${escapeHtml(detail.lastActorName)}</p>` : ""}
-    <div class="card divide-y divide-hairline p-0">
-      ${rows || `<div class="py-6 text-center text-xs text-gray-500">—</div>`}
-    </div>
-    <button id="go-check-stock" class="btn-primary mt-4 w-full">${deskCard.status === "done" ? t("stock.viewDay") : t("stock.checkStock")}</button>
-  `,
-    {
-      title: `${deskCard.display_name} · ${deskCard.branch_name}`,
-      onMount: (body) => {
-        body.querySelector("#go-check-stock")?.addEventListener("click", () => {
-          closeSheet();
-          if (blockedDate(deskCard)) handleCardAction(deskCard);
-          else openDeskDetail(deskCard, { detail });
-        });
-      },
-    }
-  );
+// Remembers the list's scroll so Back lands where the user was.
+function rememberListScroll() {
+  if (document.getElementById("desk-list")) listScroll = document.getElementById("view-root").scrollTop;
 }
 
 async function handleCardAction(desk) {
@@ -396,19 +409,27 @@ async function handleCardAction(desk) {
     return;
   }
   if (desk.status === "not_started") {
+    // The tap answers at once: the case's top bar and grid skeleton show while
+    // the server opens the day.
+    const path = pathFor("stock", desk.desk_id, { date: state.stock.date });
+    rememberListScroll();
+    go(path, { parent: pathFor("stock") });
+    hideFab();
+    showDayShell(desk, state.stock.date, dayHooks(desk));
+    const stillHere = () => window.location.pathname + window.location.search === path;
     let res;
     try {
       res = await api.checkIn(desk.desk_id, state.stock.date);
     } catch (err) {
-      if (err.code === "EARLIER_DAY_OPEN" && err.data.openDate) {
-        setStockDate(err.data.openDate);
-        await refreshCards();
-      }
+      if (err.code === "EARLIER_DAY_OPEN" && err.data.openDate) setStockDate(err.data.openDate);
+      if (stillHere()) await backToGrid();
       throw err;
     }
     toast(`${desk.display_name} ${t("stock.checkedInToast")}`, "success");
+    // Went back while it opened: the list just needs the new status.
+    if (!stillHere()) return refreshCards(false);
     // The response carries the day: open it directly. The list refreshes when the user goes back.
-    openDeskDetail({ ...desk, status: res.detail.status }, { detail: res.detail });
+    openDeskDetail({ ...desk, status: res.detail.status }, { detail: res.detail, fromRoute: true });
   } else {
     openDeskDetail(desk);
   }
@@ -421,17 +442,28 @@ export async function openDeskDay(deskId, date) {
   await window.switchView("stock", { sub: deskId, params: { date } });
 }
 
-async function openDeskDetail(deskCard, { fromRoute = false, tab, step, detail } = {}) {
-  if (deskCard.status === "not_started" && !detail) return handleCardAction(deskCard);
-  const closeStep = step === "close" ? "close" : undefined;
-  if (!fromRoute) go(pathFor("stock", deskCard.desk_id, { date: state.stock.date, step: closeStep }), { parent: pathFor("stock") });
+// view: opened from the card body: the same day screen, read-only, no footer.
+async function openDeskDetail(deskCard, { fromRoute = false, tab, step, detail, view = false } = {}) {
+  if (deskCard.status === "not_started" && !detail && !view) return handleCardAction(deskCard);
+  const closeStep = !view && step === "close" ? "close" : undefined;
+  if (!fromRoute) {
+    rememberListScroll();
+    go(pathFor("stock", deskCard.desk_id, { date: state.stock.date, step: closeStep, view: view ? "1" : undefined }), { parent: pathFor("stock") });
+  }
   hideFab();
-  await mountDay(deskCard, state.stock.date, dayHooks(deskCard), { tab: tab === "history" ? "history" : undefined, step: closeStep, detail });
+  const date = detailDate(deskCard, view);
+  await mountDay(deskCard, state.stock.date, dayHooks(deskCard, view), {
+    tab: tab === "history" ? "history" : undefined,
+    step: closeStep,
+    view,
+    detail,
+    load: () => loadDetail(deskCard.desk_id, date),
+  });
 }
 
 // What the day screen needs from this file: the SKU picker (shared with
 // "New case") and a way back to the cards.
-function dayHooks(deskCard) {
+function dayHooks(deskCard, view = false) {
   return {
     onBack: backToGrid,
     // A finished check-in / close: back to the cards, then flash that card.
@@ -439,7 +471,7 @@ function dayHooks(deskCard) {
       pendingFlash = { deskId: deskCard.desk_id, kind };
       return backToGrid();
     },
-    reload: () => reloadDeskDetail(deskCard),
+    reload: () => reloadDeskDetail(deskCard, view),
     openSkuPicker: (excludeSkuIds, onAdd) => openSkuPickerSheet(excludeSkuIds, onAdd, deskCard.branch_id),
     askOpeningQtys,
   };
@@ -447,8 +479,12 @@ function dayHooks(deskCard) {
 
 // Reloads the day screen after something changed server-side (a transfer, an
 // added SKU, a reopen) so every number on it is the saved one.
-async function reloadDeskDetail(deskCard) {
-  await Promise.all([syncCurrentCards(), mountDay(deskCard, state.stock.date, dayHooks(deskCard))]);
+async function reloadDeskDetail(deskCard, view = false) {
+  const date = detailDate(deskCard, view);
+  await Promise.all([
+    syncCurrentCards(),
+    mountDay(deskCard, state.stock.date, dayHooks(deskCard, view), { view, load: () => api.deskDetail(deskCard.desk_id, date) }),
+  ]);
 }
 
 
