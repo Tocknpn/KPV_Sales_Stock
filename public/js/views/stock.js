@@ -34,7 +34,7 @@ export async function mountStock(route = {}) {
   const view = route.params?.view === "1";
   // Opening a case that was never checked in that day would check it in: show
   // the cards instead (view mode only looks, so it may open).
-  if (card && (view || card.status !== "not_started")) await openDeskDetail(card, { fromRoute: true, tab: route.params?.tab, step: route.params?.step, view });
+  if (card && (view || card.status !== "not_started")) await openDeskDetail(card, { fromRoute: true, tab: route.params?.tab, view });
   else go(pathFor("stock"), { replace: true });
 }
 
@@ -388,8 +388,9 @@ function renderGrid(desks) {
   root.querySelectorAll("[data-step]:not([disabled])").forEach((btn) => {
     btn.addEventListener("click", () => {
       const desk = currentCards.find((d) => d.desk_id === btn.closest("[data-card]").dataset.card);
-      // ① checks in (or opens the day, or jumps to the earlier open day); ② opens the day to close it.
-      if (btn.dataset.step === "close") openDeskDetail(desk, { step: "close" });
+      // ① checks in (or opens the day, or jumps to the earlier open day); ② opens the
+      // day's grid to finish entering it — the footer's Close day then confirms.
+      if (btn.dataset.step === "close") openDeskDetail(desk);
       else handleCardAction(desk);
     });
   });
@@ -443,18 +444,16 @@ export async function openDeskDay(deskId, date) {
 }
 
 // view: opened from the card body: the same day screen, read-only, no footer.
-async function openDeskDetail(deskCard, { fromRoute = false, tab, step, detail, view = false } = {}) {
+async function openDeskDetail(deskCard, { fromRoute = false, tab, detail, view = false } = {}) {
   if (deskCard.status === "not_started" && !detail && !view) return handleCardAction(deskCard);
-  const closeStep = !view && step === "close" ? "close" : undefined;
   if (!fromRoute) {
     rememberListScroll();
-    go(pathFor("stock", deskCard.desk_id, { date: state.stock.date, step: closeStep, view: view ? "1" : undefined }), { parent: pathFor("stock") });
+    go(pathFor("stock", deskCard.desk_id, { date: state.stock.date, view: view ? "1" : undefined }), { parent: pathFor("stock") });
   }
   hideFab();
   const date = detailDate(deskCard, view);
   await mountDay(deskCard, state.stock.date, dayHooks(deskCard, view), {
     tab: tab === "history" ? "history" : undefined,
-    step: closeStep,
     view,
     detail,
     load: () => loadDetail(deskCard.desk_id, date),

@@ -6,6 +6,9 @@
 //                    (row.js); numbers are typed straight into the cells
 //   sticky footer    opening step:  [+ Add SKU] [✓ Confirm check-in]
 //                    check-in step: [+ Add SKU] [✓ Close day]
+//                                   (saves, checks, then the totals sheet
+//                                   asks to confirm; the home card's
+//                                   "② Close day" only opens this grid)
 //                    Done:          [Reopen]
 //                    view mode:     none (the case card's body was tapped,
 //                                   not its Check in / Close day button)
@@ -137,9 +140,6 @@ export async function mountDay(deskCard, date, hooks = {}, opts = {}) {
     saveState: "",
     closing: false,
     busy: false,
-    // The home card's "② Close day" opens the screen with step=close: the close
-    // sheet opens once the day has loaded (see consumeAutoClose).
-    autoClose: !view && opts.step === "close",
     queue: null,
     ctx: null,
   };
@@ -202,7 +202,6 @@ export async function mountDay(deskCard, date, hooks = {}, opts = {}) {
   renderTopbar();
   renderScreen({ reveal: fresh });
   renderFooter();
-  consumeAutoClose();
 }
 
 // The case's top bar (from the card) and a skeleton in the grid's own
@@ -235,15 +234,6 @@ function skeletonDay() {
         </div>
       </div>
     </div>`;
-}
-
-// step=close from the home card: open the close sheet once, then drop the flag
-// and the URL parameter so a reload does not open it again.
-function consumeAutoClose() {
-  if (!S?.autoClose) return;
-  S.autoClose = false;
-  replaceQuery({ step: null });
-  if (canClose(S.status)) closeDay();
 }
 
 export async function unmountDay() {
