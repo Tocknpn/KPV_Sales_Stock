@@ -13,10 +13,12 @@ import settingsRoutes from "./routes/settings";
 import closedDayRoutes from "./routes/closedDays";
 import replenishmentRoutes from "./routes/replenishment";
 import auditRoutes from "./routes/audit";
+import { beat } from "./heartbeat";
+import type { Env } from "./types";
 
 // The SPA and the API are served from the same origin, so no CORS headers are
 // sent: other websites cannot call this API from a browser.
-const app = newRouter();
+export const app = newRouter();
 
 // Public + login routes first (each guards itself), then everything else
 // sits behind one requireAuth.
@@ -48,4 +50,10 @@ app.onError((err, c) => {
 
 app.notFound((c) => c.json({ error: "Not found", code: "NOT_FOUND" }, 404));
 
-export default app;
+// fetch serves the app; scheduled is the heartbeat cron (wrangler.jsonc).
+export default {
+  fetch: app.fetch,
+  scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(beat(env));
+  },
+};

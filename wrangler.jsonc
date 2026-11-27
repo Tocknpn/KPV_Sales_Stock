@@ -17,6 +17,9 @@
   // The outputs (public/dist, public/css) are not watched, so a build never
   // triggers another.
   "build": { "command": "npm run build", "watch_dir": ["src", "public/js"] },
+  // Heartbeat: every 3 days at 03:00 UTC write one row to Supabase so the
+  // free project is never paused for 7 days of no activity (src/heartbeat.ts).
+  "triggers": { "crons": ["0 3 */3 * *"] },
   "observability": {
     "enabled": true
   },

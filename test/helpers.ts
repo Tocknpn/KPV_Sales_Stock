@@ -1,5 +1,5 @@
 // Drives the real Hono app against a fresh in-memory demo store.
-import app from "../src/index";
+import { app } from "../src/index";
 import { resetDemoStore, getStore } from "../src/store";
 import { DEMO_ADMIN_ID, DEMO_MANAGER, DEMO_STAFF, DEMO_USERNAMES } from "../src/demoData";
 
