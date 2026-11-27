@@ -1,6 +1,6 @@
 -- Heartbeat (added 2026-11-27). Idempotent; safe to re-run.
 --
--- Supabase pauses a free project after 7 days with no activity. The Worker's
+-- Supabase pauses a free project after 7 days with no activity. The
 -- GitHub Action (daily) and the Worker cron (every 3 days) update this one
 -- row, so the project never goes 7 days quiet. Nothing in the app reads it.
 create table if not exists heartbeat (
