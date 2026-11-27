@@ -27,6 +27,7 @@ const INVALIDATES: Partial<Record<keyof Store, readonly MemoMethod[]>> = {
   updateStaffAccount: ["staffAccounts"],
   createSkus: ["skus", "branchSkus"],
   updateSku: ["skus", "branchSkus"],
+  updateSkusOfWeight: ["skus", "branchSkus"],
   createSkuType: ["skuTypes"],
   updateSkuType: ["skuTypes"],
   createSkuWeight: ["skuWeights"],

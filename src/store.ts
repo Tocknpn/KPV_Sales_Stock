@@ -194,6 +194,9 @@ export interface Store {
   // All-or-nothing: either every SKU is created or none is.
   createSkus(skus: NewSku[]): Promise<MasterSku[]>;
   updateSku(skuId: string, patch: Partial<MasterSku>): Promise<MasterSku | null>;
+  // Every SKU of one size in one request (a unit's 200+ SKUs one by one ran
+  // past the Worker's subrequest limit). Returns how many changed.
+  updateSkusOfWeight(weightId: string, patch: Partial<MasterSku>): Promise<number>;
   skuTypes(): Promise<SkuType[]>;
   createSkuType(type: Partial<SkuType> & Pick<SkuType, "type_id" | "name_en">): Promise<SkuType>;
   updateSkuType(typeId: string, patch: Partial<SkuType>): Promise<SkuType | null>;
@@ -484,6 +487,11 @@ export class DemoStore implements Store {
     Object.assign(row, patch);
     this.log("master_sku", "UPDATE", before, row);
     return row;
+  }
+  async updateSkusOfWeight(weightId: string, patch: Partial<MasterSku>) {
+    let n = 0;
+    for (const s of this.db.skus.filter((x) => x.weight_id === weightId)) if (await this.updateSku(s.sku_id, patch)) n++;
+    return n;
   }
   async skuTypes() {
     return this.db.skuTypes;
@@ -1396,6 +1404,10 @@ class SupabaseStore implements Store {
   }
   async updateSku(skuId: string, patch: Partial<MasterSku>) {
     return this.patchOne<MasterSku>(`master_sku?sku_id=eq.${enc(skuId)}`, patch);
+  }
+  async updateSkusOfWeight(weightId: string, patch: Partial<MasterSku>) {
+    const rows = await this.rest<{ sku_id: string }[]>(`master_sku?weight_id=eq.${enc(weightId)}&select=sku_id`, { method: "PATCH", body: JSON.stringify(patch) });
+    return rows.length;
   }
   async skuTypes() {
     return this.rest<SkuType[]>("sku_type?select=*&order=sort_order");

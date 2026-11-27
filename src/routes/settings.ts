@@ -19,8 +19,13 @@ import { partsGrams, partsLabel, partsOf, readParts } from "../sizes";
 const r = newRouter();
 
 // Every SKU is gold (decided 2026-11-17): its Baht weight follows its size.
+// A Baht is the grams set for the unit ບາດ in Settings > Units, so a 1 ບາດ
+// size stays 1 Baht when the admin changes it (15.244 until a ບາດ unit exists).
 export const GRAMS_PER_BAHT = 15.244;
-const bahtOfGrams = (g: number | null | undefined) => (g && g > 0 ? Math.round((g / GRAMS_PER_BAHT) * 10000) / 10000 : 0);
+const BAHT_UNIT = "ບາດ";
+const perBahtOf = (units: SkuUnit[]) => Number(units.find((u) => u.unit === BAHT_UNIT)?.gram_value) || GRAMS_PER_BAHT;
+const gramsPerBaht = async (store: Store) => perBahtOf(await store.skuUnits());
+const bahtOfGrams = (g: number | null | undefined, perBaht: number) => (g && g > 0 ? Math.round((g / perBaht) * 10000) / 10000 : 0);
 // Same limits as replenishment rules (the engine reads only rules).
 const MAX_RULE_MIN = 999_999;
 const MAX_RULE_LEAD = 9999.9;
@@ -117,7 +122,7 @@ type BuiltSku = { sku: NewSku; avg: number | null; lead: number | null };
 // Validates one SKU input (form or CSV line). Returns the SKU or an error text.
 // Purity, price, group and fixed reorder level are no longer asked for and are
 // ignored if sent (decided 2026-11-17).
-function buildSku(input: Record<string, any>, types: SkuType[], weights: SkuWeight[]): BuiltSku | string {
+function buildSku(input: Record<string, any>, types: SkuType[], weights: SkuWeight[], perBaht: number): BuiltSku | string {
   const name = skuNameOf(input);
   if (!name) return "name is required";
   const typeKey = String(input.type ?? "").trim().toLowerCase();
@@ -145,7 +150,7 @@ function buildSku(input: Record<string, any>, types: SkuType[], weights: SkuWeig
       weight_id: weight?.weight_id ?? null,
       std_gram_weight: weight?.gram_value ?? null,
       purity: null,
-      baht_weight: bahtOfGrams(weight?.gram_value),
+      baht_weight: bahtOfGrams(weight?.gram_value, perBaht),
       unit_cost_lak: 0,
       unit_price_lak: 0,
       reorder_level: 0,
@@ -191,7 +196,7 @@ r.post("/skus", async (c) => {
     listHaving(store, "skuWeights", (l) => l.some((w) => w.weight_id === body.weight_id)),
   ]);
   if (!body.weight_id) throw new HttpError(400, "name, type_id and weight_id are required", "BAD_SKU");
-  const built = buildSku(body, types, weights);
+  const built = buildSku(body, types, weights, await gramsPerBaht(store));
   if (typeof built === "string") throw new HttpError(400, built, "BAD_SKU");
   const hasPlan = built.avg !== null || built.lead !== null;
   const carriedIn = await targetBranches(store, user, body.branchId, body.allBranches);
@@ -251,8 +256,9 @@ r.post("/skus/import", async (c) => {
   if (body.dryRun === true) return c.json(summary);
 
   // New SKUs: one all-or-nothing create, then carried + values in their row's branch.
+  const perBaht = await gramsPerBaht(store);
   const built = plan.newSkus.map((n) => {
-    const b = buildSku({ name: n.name, type_id: n.type.type_id, weight_id: n.weight.weight_id }, types, weights);
+    const b = buildSku({ name: n.name, type_id: n.type.type_id, weight_id: n.weight.weight_id }, types, weights, perBaht);
     if (typeof b === "string") throw new HttpError(500, b, "IMPORT_INVALID");
     return { n, sku: b.sku };
   });
@@ -268,7 +274,7 @@ r.post("/skus/import", async (c) => {
     const p: Partial<MasterSku> = {};
     if (ch.name) Object.assign(p, { name_en: ch.name, name_lo: ch.name });
     if (ch.type) Object.assign(p, { type_id: ch.type.type_id, category: ch.type.name_en });
-    if (ch.weight) Object.assign(p, { weight_id: ch.weight.weight_id, std_gram_weight: ch.weight.gram_value, baht_weight: bahtOfGrams(ch.weight.gram_value) });
+    if (ch.weight) Object.assign(p, { weight_id: ch.weight.weight_id, std_gram_weight: ch.weight.gram_value, baht_weight: bahtOfGrams(ch.weight.gram_value, perBaht) });
     await store.updateSku(skuId, p);
   }
   for (const x of plan.rules) await writeSkuRule(store, x.sku_id, [x.branch_id], x.avg, x.lead);
@@ -353,7 +359,7 @@ r.patch("/skus/:id", async (c) => {
       if (!weight) throw new HttpError(400, "Unknown weight_id", "BAD_SKU");
       patch.weight_id = weight.weight_id;
       patch.std_gram_weight = weight.gram_value;
-      patch.baht_weight = bahtOfGrams(weight.gram_value);
+      patch.baht_weight = bahtOfGrams(weight.gram_value, await gramsPerBaht(store));
     }
   }
   if (Object.keys(patch).length === 0 && !plan) throw new HttpError(400, "Nothing to change", "NOTHING_TO_CHANGE");
@@ -503,9 +509,7 @@ r.patch("/sku-weights/:id", requireAdmin, async (c) => {
   if (!weight) throw new HttpError(404, "Weight not found", "NOT_FOUND");
   // Keep each SKU's gram weight equal to its size definition.
   if (patch.gram_value !== undefined) {
-    for (const s of (await fresh(store).skus()).filter((x) => x.weight_id === weight.weight_id)) {
-      await store.updateSku(s.sku_id, { std_gram_weight: weight.gram_value, baht_weight: bahtOfGrams(weight.gram_value) });
-    }
+    await store.updateSkusOfWeight(weight.weight_id, { std_gram_weight: weight.gram_value, baht_weight: bahtOfGrams(weight.gram_value, await gramsPerBaht(store)) });
   }
   await audit(store, c.get("user"), "sku_weight.update", weight.weight_id, patch as Record<string, unknown>);
   return c.json(weight);
@@ -548,20 +552,25 @@ r.patch("/sku-units/:unit", requireAdmin, async (c) => {
   if (Object.keys(patch).length === 0) throw new HttpError(400, "Nothing to change", "NOTHING_TO_CHANGE");
   const row = await store.updateSkuUnit(name, patch);
   if (!row) throw new HttpError(404, "Unit not found", "NOT_FOUND");
+  // Two requests per size at most (the size, then all its SKUs at once). The
+  // SKUs are rewritten even when the size already had the new grams, so a save
+  // that stopped half way is finished by saving again. ບາດ is the Baht, so
+  // changing it re-weighs every size's SKUs.
   let resized = 0;
   if (patch.gram_value !== undefined) {
     const after = units.map((u) => (u.unit === name ? row : u));
-    const skus = await fresh(store).skus();
+    const perBaht = perBahtOf(after);
     for (const w of await fresh(store).skuWeights()) {
       const parts = partsOf(w);
-      if (!parts.some((p) => p.unit === name)) continue;
-      const gram_value = partsGrams(parts, after);
-      if (gram_value === null || gram_value === Number(w.gram_value)) continue;
-      await store.updateSkuWeight(w.weight_id, { gram_value, ...(w.parts ? {} : { parts }) });
-      for (const s of skus.filter((x) => x.weight_id === w.weight_id)) {
-        await store.updateSku(s.sku_id, { std_gram_weight: gram_value, baht_weight: bahtOfGrams(gram_value) });
+      const usesUnit = parts.some((p) => p.unit === name);
+      if (!usesUnit && name !== BAHT_UNIT) continue;
+      const gram_value = usesUnit ? partsGrams(parts, after) : Number(w.gram_value);
+      if (gram_value === null || !(gram_value > 0)) continue;
+      if (gram_value !== Number(w.gram_value) || !w.parts) {
+        await store.updateSkuWeight(w.weight_id, { gram_value, ...(w.parts ? {} : { parts }) });
+        resized++;
       }
-      resized++;
+      await store.updateSkusOfWeight(w.weight_id, { std_gram_weight: gram_value, baht_weight: bahtOfGrams(gram_value, perBaht) });
     }
   }
   await audit(store, c.get("user"), "sku_unit.update", name, { ...patch, sizes_recalculated: resized });

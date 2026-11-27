@@ -95,5 +95,12 @@ describe("units", () => {
     expect(weights.find((w: any) => w.weight_id === "BAHT_2").gram_value).toBe(30);
     const after = (await call(admin, "GET", "/skus?all=1")).json.skus.find((s: any) => s.sku_id === sku.sku_id);
     expect(after.std_gram_weight).toBe(67.622);
+    // ບາດ is the Baht: a 1 ບາດ SKU stays 1 Baht at 15 g.
+    const all = (await call(admin, "GET", "/skus?all=1")).json.skus;
+    expect(all.find((s: any) => s.weight_id === "BAHT_1").baht_weight).toBe(1);
+    // Saving the same grams again changes no size but still rewrites the SKUs.
+    const again = await call(admin, "PATCH", `/sku-units/${encodeURIComponent("ບາດ")}`, { gram_value: 15 });
+    expect(again.status).toBe(200);
+    expect(again.json.resized).toBe(0);
   });
 });
