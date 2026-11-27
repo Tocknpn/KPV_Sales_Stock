@@ -119,6 +119,22 @@ describe('master data guard', () => {
     await db.query(`update staff_accounts set password_plain = 'pw-a' where id = $1`, [staffMM]);
     await db.query(`update staff_accounts set password_plain = 'pw-c' where id = $1`, [staffMM]);
   });
+
+  it('a Sales Sup (manager) may add staff to their own branch only', async () => {
+    await asActor(db, mgrMM);
+    await account('B-MM', 'New MM', 'staff');
+    await expectPgError(account('B-VTC', 'Other branch', 'staff'), 'ROLE_DENIED');
+    await expectPgError(account('B-MM', 'Another sup', 'manager'), 'ROLE_DENIED');
+    await expectPgError(account(null, 'Boss', 'admin'), 'ROLE_DENIED');
+    await expectPgError(db.query(`update staff_accounts set role = 'manager' where id = $1`, [staffMM]), 'ROLE_DENIED');
+    await asActor(db, staffMM);
+    await expectPgError(account('B-MM', 'By staff', 'staff'), 'ROLE_DENIED');
+  });
+
+  it('an admin may change a saved user role and branch', async () => {
+    await asActor(db, admin);
+    await db.query(`update staff_accounts set role = 'manager', branch_id = 'B-VTC' where id = $1`, [staffMM]);
+  });
 });
 
 describe('branch values guard', () => {
@@ -169,8 +185,9 @@ describe('staff account guard', () => {
     await expectPgError(db.query(`update staff_accounts set failed_attempts = 0 where id = $1`, [staffTS]), 'ROLE_DENIED');
     await expectPgError(db.query(`update staff_accounts set failed_attempts = 0 where id = $1`, [mgrTS]), 'ROLE_DENIED');
     await expectPgError(db.query(`update staff_accounts set failed_attempts = 0 where id = $1`, [admin]), 'ROLE_DENIED');
+    // Since 2026-11-27 a Sales Sup may add staff to their own branch, never another.
     await expectPgError(
-      db.query(`insert into staff_accounts (branch_id, display_name, pin_hash, role) values ('B-MM','n','h','staff')`),
+      db.query(`insert into staff_accounts (branch_id, display_name, pin_hash, role) values ('B-VTC','n','h','staff')`),
       'ROLE_DENIED',
     );
   });

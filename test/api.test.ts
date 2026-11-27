@@ -5,7 +5,7 @@
 //   IT-D01  Done today
 //   VT-D01  in final count today
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DEMO_STAFF } from "../src/demoData";
+import { DEMO_STAFF, DEMO_ADMIN_ID } from "../src/demoData";
 import { getStore } from "../src/store";
 import { TODAY, YESTERDAY, TOMORROW, freshApp, call, login, creds, asAdmin, asStaff, asManager, on, closeDay, checkIn } from "./helpers";
 
@@ -776,9 +776,25 @@ describe("branch manager", () => {
     expect((await call(admin, "POST", "/stock/desk/MM-D02/reopen", { date: YESTERDAY, reason: "old fix" })).status).toBe(200);
   });
 
-  it("cannot create users or change master data", async () => {
+  it("can add staff to their own branch only (Sales Sup, 2026-11-27)", async () => {
     const manager = await asManager("B-MM");
-    expect((await call(manager, "POST", "/users", { displayName: "X", username: "xxx", branchId: "B-MM", password: "111111" })).status).toBe(403);
+    const other = await call(manager, "POST", "/users", { displayName: "X", username: "xxx", branchId: "B-VTC", password: "111111" });
+    expect(other.status).toBe(403);
+    expect((await call(manager, "POST", "/users", { displayName: "X", username: "xxy", role: "manager", password: "111111" })).status).toBe(403);
+    expect((await call(manager, "POST", "/users", { displayName: "X", username: "xxz", role: "admin", password: "111111" })).status).toBe(403);
+    const ok = await call(manager, "POST", "/users", { displayName: "New MM", username: "newmm", password: "111111" });
+    expect(ok.status).toBe(200);
+    const session = await login(ok.json.id, "111111");
+    const me = (await call(session, "GET", "/auth/me")).json.user;
+    expect(me.role).toBe("staff");
+    expect(me.branchId).toBe("B-MM");
+    // ...and cannot then change that person's role or branch
+    expect((await call(manager, "PATCH", `/users/${ok.json.id}`, { role: "manager" })).status).toBe(403);
+    expect((await call(manager, "PATCH", `/users/${ok.json.id}`, { branchId: "B-VTC" })).status).toBe(403);
+  });
+
+  it("cannot change users or master data", async () => {
+    const manager = await asManager("B-MM");
     expect((await call(manager, "PATCH", `/users/${DEMO_STAFF["B-MM"]}`, { password: "111111" })).status).toBe(403);
     expect((await call(manager, "PATCH", `/users/${DEMO_STAFF["B-MM"]}`, { username: "hacked" })).status).toBe(403);
     expect((await call(manager, "PATCH", "/skus/GB-001", { active: false })).status).toBe(403);
@@ -810,6 +826,32 @@ describe("branch manager", () => {
     expect((await call(session, "GET", "/auth/me")).json.user.role).toBe("manager");
     const summary = (await call(admin, "GET", "/settings/summary")).json.staff;
     expect(summary.roleCounts.manager).toBe(2);
+  });
+
+  it("admin changes a saved user's role and branch (2026-11-27)", async () => {
+    const admin = await asAdmin();
+    const created = await call(admin, "POST", "/users", { displayName: "Moves", username: "moves", branchId: "B-MM", password: "333333" });
+    const id = created.json.id;
+    const before = await login(id, "333333");
+    expect((await call(admin, "PATCH", `/users/${id}`, { role: "manager", branchId: "B-IT" })).status).toBe(200);
+    // the old session ends: the token carried the old role and branch
+    expect((await call(before, "GET", "/auth/me")).status).toBe(401);
+    let me = (await call(await login(id, "333333"), "GET", "/auth/me")).json.user;
+    expect(me.role).toBe("manager");
+    expect(me.branchId).toBe("B-IT");
+    // to admin: the branch is dropped; back to staff needs a branch
+    expect((await call(admin, "PATCH", `/users/${id}`, { role: "admin" })).status).toBe(200);
+    me = (await call(await login(id, "333333"), "GET", "/auth/me")).json.user;
+    expect(me.branchId).toBeNull();
+    expect((await call(admin, "PATCH", `/users/${id}`, { role: "staff" })).json.code).toBe("BAD_BRANCH");
+    expect((await call(admin, "PATCH", `/users/${id}`, { role: "staff", branchId: "B-VT" })).status).toBe(200);
+    expect((await call(admin, "PATCH", `/users/${id}`, { role: "boss" })).json.code).toBe("BAD_ROLE");
+  });
+
+  it("admin cannot change their own role", async () => {
+    const admin = await asAdmin();
+    const res = await call(admin, "PATCH", `/users/${DEMO_ADMIN_ID}`, { role: "staff", branchId: "B-MM" });
+    expect(res.json.code).toBe("SELF_ROLE");
   });
 });
 

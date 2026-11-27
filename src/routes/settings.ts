@@ -13,7 +13,7 @@ import type { NewSku, Store } from "../store";
 import { requireAdmin, requireManager, hashPassword, isValidPassword, normalizeUsername, isValidUsername, isManagerOf, MIN_PASSWORD } from "../auth";
 import { isLive } from "../time";
 import { skuSummary, staffAccountSummary } from "../logic";
-import type { MasterSku, SizePart, SkuType, SkuUnit, SkuWeight } from "../types";
+import type { MasterSku, SizePart, SkuType, SkuUnit, SkuWeight, StaffAccount } from "../types";
 import { partsGrams, partsLabel, partsOf, readParts } from "../sizes";
 
 const r = newRouter();
@@ -635,12 +635,20 @@ async function checkUsername(store: Store, raw: unknown, selfId: string | null) 
   }
   return username;
 }
-r.post("/users", requireAdmin, async (c) => {
+const roleOf = (v: unknown): StaffAccount["role"] => (v === "admin" ? "admin" : v === "manager" ? "manager" : "staff");
+
+// An admin adds anyone. A Sales Sup (role "manager") adds staff to their own
+// branch only (decided 2026-11-27).
+r.post("/users", requireManager, async (c) => {
   const store = storeFor(c);
+  const me = c.get("user");
   const body = await readBody(c);
   const display_name = String(body.displayName ?? "").trim();
-  const role = body.role === "admin" ? "admin" : body.role === "manager" ? "manager" : "staff";
-  const branch_id = role === "admin" ? null : String(body.branchId ?? "");
+  const supervisor = me.role === "manager";
+  const role = supervisor ? "staff" : roleOf(body.role);
+  if (supervisor && body.role !== undefined && body.role !== "staff") throw new HttpError(403, "A Sales Sup can only add staff", "ROLE_DENIED");
+  if (supervisor && body.branchId !== undefined && body.branchId !== me.branchId) throw new HttpError(403, "A Sales Sup can only add staff to their own branch", "ROLE_DENIED");
+  const branch_id = role === "admin" ? null : supervisor ? me.branchId : String(body.branchId ?? "");
   if (!display_name) throw new HttpError(400, "Name is required", "BAD_USER");
   const username = await checkUsername(store, body.username, null);
   if (!isValidPassword(body.password)) throw new HttpError(400, `Password must be at least ${MIN_PASSWORD} characters`, "BAD_PASSWORD");
@@ -680,10 +688,28 @@ r.patch("/users/:id", requireManager, async (c) => {
       changes.push("username");
     }
   }
-  if (body.branchId !== undefined && account.role !== "admin") {
-    const hasBranch = (l: { branch_id: string }[]) => l.some((b) => b.branch_id === body.branchId);
-    if (!hasBranch(await listHaving(store, "branches", hasBranch))) throw new HttpError(400, "Unknown branch", "BAD_BRANCH");
-    patch.branch_id = body.branchId;
+  // Role (title) and branch: admin only (the Sales Sup check above refuses
+  // both). An admin has no branch; everyone else needs one.
+  if (body.role !== undefined && body.role !== "staff" && body.role !== "manager" && body.role !== "admin") {
+    throw new HttpError(400, "role must be staff, manager or admin", "BAD_ROLE");
+  }
+  const role = body.role !== undefined ? roleOf(body.role) : account.role;
+  if (role !== account.role) {
+    if (account.id === me.accountId) throw new HttpError(409, "You cannot change your own role", "SELF_ROLE");
+    if (account.role === "admin" && accounts.filter((a) => a.role === "admin" && a.active).length <= 1) {
+      throw new HttpError(409, "At least one admin must stay active", "LAST_ADMIN");
+    }
+    patch.role = role;
+    changes.push("role");
+  }
+  const branchId = role === "admin" ? null : body.branchId !== undefined ? String(body.branchId) : account.branch_id;
+  if (role !== "admin" && !branchId) throw new HttpError(400, "Choose a branch", "BAD_BRANCH");
+  if (branchId !== account.branch_id) {
+    if (branchId !== null) {
+      const hasBranch = (l: { branch_id: string }[]) => l.some((b) => b.branch_id === branchId);
+      if (!hasBranch(await listHaving(store, "branches", hasBranch))) throw new HttpError(400, "Choose a branch", "BAD_BRANCH");
+    }
+    patch.branch_id = branchId;
     changes.push("branch");
   }
   if (body.active !== undefined) {
@@ -716,7 +742,8 @@ r.patch("/users/:id", requireManager, async (c) => {
   // A person moved to another branch keeps no main cases of the old one.
   if (patch.branch_id !== undefined && patch.branch_id !== account.branch_id) await store.setMainCases(account.id, []);
   await store.updateStaffAccount(account.id, patch);
-  await audit(store, me, "user.update", account.display_name, { id: account.id, changes }, { branchId: account.branch_id });
+  const moved = { ...(patch.role !== undefined ? { role: patch.role } : {}), ...(patch.branch_id !== undefined ? { branch_id: patch.branch_id } : {}) };
+  await audit(store, me, "user.update", account.display_name, { id: account.id, changes, ...moved }, { branchId: account.branch_id });
   return c.json({ ok: true });
 });
 

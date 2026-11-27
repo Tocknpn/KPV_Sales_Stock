@@ -19,7 +19,7 @@ export async function renderUsers(root) {
   const manager = isBranchManager(state.user);
 
   root.innerHTML = `
-    ${admin ? `<button id="add-user" class="btn-primary mb-3 w-full py-2.5 text-xs">${t("users.add")}</button>` : ""}
+    ${admin || manager ? `<button id="add-user" class="btn-primary mb-3 w-full py-2.5 text-xs">${t("users.add")}</button>` : ""}
     <div class="card p-4">
       <div class="flex gap-2">
         <span class="status-pill bg-brand-100 text-brand-700">${t("settings.admins")} · ${staff.roleCounts.admin ?? 0}</span>
@@ -33,7 +33,7 @@ export async function renderUsers(root) {
     ${admin ? `<p class="mt-3 text-center text-[11px] text-gray-500">${t("users.hint")}</p>` : manager ? `<p class="mt-3 text-center text-[11px] text-gray-500">${t("users.hintManager")}</p>` : ""}
   `;
 
-  root.querySelector("#add-user")?.addEventListener("click", () => openUserForm(null, root));
+  root.querySelector("#add-user")?.addEventListener("click", () => (admin ? openUserForm(null, root) : openAddStaffSheet(root)));
   if (admin) wirePasswordRows(root);
   root.querySelectorAll("[data-user]").forEach((btn) =>
     btn.addEventListener("click", () => openUserForm(staff.accounts.find((a) => a.id === btn.dataset.user), root))
@@ -189,19 +189,17 @@ function openUserForm(existing, root) {
     <p class="mt-1.5 text-[11px] text-gray-500">${t("users.usernameHint")}</p>
 
     ${
-      existing
+      isSelf
         ? ""
         : `<label for="user-role" class="mb-1.5 mt-3 block text-xs font-bold text-gray-600">${t("users.role")}</label>
            <select id="user-role" class="input-filled">
-             <option value="staff">${t("settings.staffRole")}</option>
-             <option value="manager">${t("settings.managerRole")}</option>
-             <option value="admin">${t("settings.admins")}</option>
+             ${["staff", "manager", "admin"].map((r) => `<option value="${r}" ${(existing?.role ?? "staff") === r ? "selected" : ""}>${t(roleLabelKey(r))}</option>`).join("")}
            </select>`
     }
 
     ${
-      !existing || existing.role !== "admin"
-        ? `<div id="user-branch-wrap">
+      !(isSelf && existing.role === "admin")
+        ? `<div id="user-branch-wrap" class="${existing?.role === "admin" ? "hidden" : ""}">
              <label for="user-branch" class="mb-1.5 mt-3 block text-xs font-bold text-gray-600">${t("documents.branch")}</label>
              <select id="user-branch" class="input-filled">
                ${branches.map((b) => `<option value="${b.branch_id}" ${existing?.branch_id === b.branch_id ? "selected" : ""}>${escapeHtml(branchName(b.branch_id))}</option>`).join("")}
@@ -263,7 +261,7 @@ function openUserForm(existing, root) {
         if (branchSelect) {
           bindMainCases(body, branchSelect.value, cases);
           branchSelect.addEventListener("change", () => bindMainCases(body, branchSelect.value, cases));
-          if (existing && existing.role !== "admin") {
+          if (existing && existing.role !== "admin" && existing.branch_id) {
             api
               .userCases(existing.id)
               .then(({ deskIds }) => {
@@ -285,13 +283,18 @@ function openUserForm(existing, root) {
           if ((!existing || password) && password.length < MIN_PASSWORD) return toast(t("err.BAD_PASSWORD"), "error");
           const branchId = body.querySelector("#user-branch")?.value;
           if (existing) {
+            // Role (title) and branch can change after saving (2026-11-27).
+            const role = body.querySelector("#user-role")?.value ?? existing.role;
             const payload = {};
             if (displayName !== existing.display_name) payload.displayName = displayName;
             if (username !== existing.username) payload.username = username;
-            if (existing.role !== "admin" && branchId !== existing.branch_id) payload.branchId = branchId;
+            if (role !== existing.role) payload.role = role;
+            if (role !== "admin" && branchId !== existing.branch_id) payload.branchId = branchId;
             if (password) payload.password = password;
             if (Object.keys(payload).length) await api.updateUser(existing.id, payload);
-            if (existing.role !== "admin" && !sameSet(cases, casesBefore)) await api.setUserCases(existing.id, [...cases]);
+            const sameBranch = role !== "admin" && branchId === existing.branch_id;
+            if (sameBranch && !sameSet(cases, casesBefore)) await api.setUserCases(existing.id, [...cases]);
+            else if (role !== "admin" && !sameBranch && cases.size) await api.setUserCases(existing.id, [...cases]);
           } else {
             const role = body.querySelector("#user-role").value;
             const { id } = await api.createUser({ displayName, username, role, branchId: role === "admin" ? null : branchId, password });
@@ -314,7 +317,52 @@ function openUserForm(existing, root) {
   );
 }
 
-// A branch manager sets the main cases of a person in their branch, and can
+// A Sales Sup adds a staff account to their own branch (2026-11-27): name,
+// username, password and main cases. The role is always staff.
+function openAddStaffSheet(root) {
+  const branchId = state.user.branchId;
+  openSheet(
+    `
+    <label for="user-name" class="mb-1.5 block text-xs font-bold text-gray-600">${t("users.name")}</label>
+    <input id="user-name" type="text" maxlength="60" class="input-filled" />
+    <label for="user-username" class="mb-1.5 mt-3 block text-xs font-bold text-gray-600">${t("users.username")}</label>
+    <input id="user-username" type="text" maxlength="30" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="somchai" class="input-filled" />
+    <p class="mt-1.5 text-[11px] text-gray-500">${t("users.usernameHint")}</p>
+    <p class="mt-3 text-[11px] text-gray-600">${t("users.role")}: <b>${t("settings.staffRole")}</b> · ${escapeHtml(branchName(branchId))}</p>
+    ${mainCasesField()}
+    ${passwordField("user-password", "users.password")}
+    <p class="mt-1.5 text-[11px] text-gray-500">${t("users.passwordHint")}</p>
+    <button id="user-save" class="btn-primary mt-4 w-full">${t("settings.save")}</button>
+  `,
+    {
+      title: t("users.add"),
+      onMount: (body) => {
+        const cases = bindMainCases(body, branchId, new Set());
+        body.querySelector("#user-save").addEventListener("click", async (e) => {
+          const displayName = body.querySelector("#user-name").value.trim();
+          const username = body.querySelector("#user-username").value.trim().toLowerCase();
+          const password = body.querySelector("#user-password").value;
+          if (!displayName) return toast(t("users.needName"), "error");
+          if (!USERNAME_RE.test(username)) return toast(t("err.BAD_USERNAME"), "error");
+          if (password.length < MIN_PASSWORD) return toast(t("err.BAD_PASSWORD"), "error");
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          try {
+            const { id } = await api.createUser({ displayName, username, password });
+            if (cases.size) await api.setUserCases(id, [...cases]);
+          } finally {
+            btn.disabled = false;
+          }
+          closeSheet();
+          toast(t("settings.savedToast"), "success");
+          await renderUsers(root);
+        });
+      },
+    }
+  );
+}
+
+// A Sales Sup sets the main cases of a person in their branch, and can
 // unlock a locked staff account. Nothing else.
 function openUnlockSheet(existing, root) {
   const canUnlock = existing.role === "staff" && existing.locked;
@@ -339,11 +387,12 @@ function openUnlockSheet(existing, root) {
           })
           .catch(() => {});
         body.querySelector("#cases-save").addEventListener("click", async (e) => {
-          e.currentTarget.disabled = true;
+          const btn = e.currentTarget;
+          btn.disabled = true;
           try {
             if (!sameSet(cases, before)) await api.setUserCases(existing.id, [...cases]);
           } finally {
-            e.currentTarget.disabled = false;
+            btn.disabled = false;
           }
           closeSheet();
           toast(t("users.mainCasesSaved"), "success");

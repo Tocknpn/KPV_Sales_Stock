@@ -112,6 +112,14 @@ begin
       return new;
     end if;
   end if;
+  -- A Sales Sup (role 'manager') may add a staff account to their own branch
+  -- (decided 2026-11-27). Nothing else: no other role, no other branch.
+  if tg_op = 'INSERT' and kpv_actor_id() is not null then
+    select * into a from kpv_actor();
+    if found and a.role = 'manager' and new.role = 'staff' and new.branch_id is not distinct from a.branch_id then
+      return new;
+    end if;
+  end if;
   perform kpv_require('{admin}');
   if tg_op = 'DELETE' then return old; end if;
   return new;
