@@ -1,0 +1,58 @@
+name: Supabase Keep Alive
+
+# Supabase free tier pauses a project after 7 days without activity.
+# This calls heartbeat_beat() (migration 22), which updates the one row in
+# the `heartbeat` table. It runs DAILY so several missed or failed runs in a
+# row still stay well inside the 7 days.
+#
+# One-time setup: GitHub repo > Settings > Secrets and variables > Actions:
+#   SUPABASE_URL      = https://<project>.supabase.co
+#   SUPABASE_ANON_KEY = the anon / public key (Supabase > Project Settings > API)
+
+on:
+  schedule:
+    # 03:17 UTC daily (10:17 Laos). Off the top of the hour, where GitHub
+    # delays or drops scheduled runs under load.
+    - cron: '17 3 * * *'
+  workflow_dispatch: # "Run workflow" button on the Actions tab
+
+permissions:
+  contents: read
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Write heartbeat
+        env:
+          RAW_URL: ${{ secrets.SUPABASE_URL }}
+          API_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          set -u
+          CLEAN_URL="$(printf '%s' "${RAW_URL:-}" | tr -d '[:space:]')"
+          CLEAN_URL="${CLEAN_URL%/}"
+          API_KEY="$(printf '%s' "${API_KEY:-}" | tr -d '[:space:]')"
+          if [ -z "$CLEAN_URL" ] || [ -z "$API_KEY" ]; then
+            echo "::error::Missing GitHub secrets SUPABASE_URL / SUPABASE_ANON_KEY."
+            exit 1
+          fi
+
+          for attempt in 1 2 3 4 5 6; do
+            echo "--- Attempt $attempt ---"
+            if curl -f -sS -X POST "${CLEAN_URL}/rest/v1/rpc/heartbeat_beat" \
+                --connect-timeout 20 --max-time 60 \
+                --retry 3 --retry-delay 10 --retry-all-errors \
+                -H "apikey: ${API_KEY}" \
+                -H "Authorization: Bearer ${API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d '{"p_source": "github_actions"}'; then
+              echo
+              echo "Heartbeat OK."
+              exit 0
+            fi
+            echo "Attempt $attempt failed; waiting before retry..."
+            sleep $(( attempt * 30 ))
+          done
+          echo "::error::All heartbeat attempts failed. Check the Supabase project is not paused and the secrets are right."
+          exit 1
