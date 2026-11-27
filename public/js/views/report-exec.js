@@ -2,7 +2,7 @@
 // SKU line with runway, status and reorder action), stock out (every SKU that
 // went out in the period) and cases. Sortable, filterable, exportable.
 import { state, branchName } from "../state.js";
-import { fmtBaht, fmtInt, fmtLak, escapeHtml as esc, debounce } from "../util.js";
+import { fmtBaht, fmtInt, fmtLak, escapeHtml as esc, debounce, SHOW_VALUE, reorderChip } from "../util.js";
 import { t, tf, productName } from "../i18n.js";
 import { skuLabel } from "../sku-groups.js";
 import { loadXlsx } from "../sku-xlsx.js";
@@ -38,17 +38,17 @@ export function bindReportTabs(onSwitch) {
 const dash = "–";
 const num = (v, f = fmtInt) => (v == null ? dash : f(v));
 const days1 = (v) => (v == null ? dash : fmtDays(v));
-const POSITION_FILTERS = ["all", "decide", "noAction", "critical", "warning", "ok", "slow", "long", "no_sales", "unknown"];
+const POSITION_FILTERS = ["all", "decide", "order_now", "late", "ordered", "ok", "no_min"];
+const BAND_ORDER = ["order_now", "late", "ordered", "ok", "no_min"];
 
-function bandChip(band, slowDays) {
-  return `<span class="inline-flex items-center gap-1.5 whitespace-nowrap"><span class="h-2.5 w-2.5 rounded-sm" style="background:${bandFill(band)}" aria-hidden="true"></span>${esc(tf(`exec.band.${band}`, { d: slowDays }))}</span>`;
+function bandChip(r) {
+  const chip = reorderChip(r);
+  const text = chip ? chip.text : t(`exec.band.${r.band}`);
+  return `<span class="inline-flex items-center gap-1.5 whitespace-nowrap"><span class="h-2.5 w-2.5 rounded-sm" style="background:${bandFill(r.band)}" aria-hidden="true"></span>${esc(text)}</span>`;
 }
 
-function actionCell(r) {
-  if (!r.action) return dash;
-  const cls = r.action === "none" ? "text-danger" : r.action === "pending" ? "text-warning" : "text-success";
-  return `<span class="whitespace-nowrap font-bold ${cls}">${t(`exec.action.${r.action}`)}</span>${r.action_doc ? `<span class="block text-[10px] text-gray-500">${esc(r.action_doc)}</span>` : ""}`;
-}
+// Values only while SHOW_VALUE (decided 2026-11-27).
+const valueCols = (cols) => cols.filter((c) => SHOW_VALUE || !c.key.endsWith("_lak"));
 
 function typeNameOf(d) {
   const m = new Map(d.byType.map((x) => [x.type_key, productName(x.name_en, x.name_lo)]));
@@ -62,19 +62,17 @@ function columnsFor(tab, d) {
   if (tab === "position") {
     return [
       { key: "sku", label: t("rep.col.sku"), value: (r) => skuLabel(r), html: (r) => `<span class="block truncate font-bold text-gray-900">${esc(skuLabel(r))}</span>${multiBranch ? `<span class="block truncate text-[10px] text-gray-500">${esc(branchName(r.branch_id))}</span>` : ""}`, sticky: true },
-      { key: "band", label: t("rep.col.status"), value: (r) => tf(`exec.band.${r.band}`, { d: d.slowDays }), sortValue: (r) => ["critical", "warning", "ok", "long", "no_sales", "unknown"].indexOf(r.band), html: (r) => bandChip(r.band, d.slowDays) },
-      { key: "runway_days", label: t("rep.col.days"), num: true, value: (r) => r.runway_days, html: (r) => days1(r.runway_days) },
+      { key: "band", label: t("rep.col.status"), value: (r) => reorderChip(r)?.text ?? t(`exec.band.${r.band}`), sortValue: (r) => BAND_ORDER.indexOf(r.band), html: bandChip },
+      { key: "min_qty", label: t("rep.col.min"), num: true, value: (r) => r.min_qty, html: (r) => num(r.min_qty) },
+      { key: "short_by", label: t("rep.col.shortBy"), num: true, sum: true, value: (r) => r.short_by, html: (r) => (r.short_by ? `<span class="font-bold text-danger">${fmtInt(r.short_by)}</span>` : dash) },
       { key: "value_lak", label: t("rep.col.value"), num: true, sum: true, value: (r) => r.value_lak, html: (r) => fmtLak(r.value_lak) },
-      { key: "action", label: t("rep.col.action"), value: (r) => (r.action ? t(`exec.action.${r.action}`) : ""), sortValue: (r) => ({ none: 0, pending: 1, approved: 2 })[r.action] ?? 3, html: actionCell },
-      { key: "suggested_qty", label: t("rep.col.suggest"), num: true, sum: true, value: (r) => r.suggested_qty, html: (r) => (r.suggested_qty ? `<span class="font-bold text-gray-900">${fmtInt(r.suggested_qty)}</span>` : dash) },
+      { key: "eta", label: t("rep.col.eta"), value: (r) => r.eta ?? "", html: (r) => (r.eta ? `${esc(r.eta.slice(5))}${r.action_doc ? `<span class="block text-[10px] text-gray-500">${esc(r.action_doc)}</span>` : ""}` : dash) },
       { key: "on_hand", label: t("rep.col.onHand"), num: true, sum: true, value: (r) => r.on_hand, html: (r) => num(r.on_hand) },
       ...(multiBranch ? [{ key: "branch", label: t("rep.col.branch"), value: (r) => branchName(r.branch_id), html: (r) => esc(branchName(r.branch_id)) }] : []),
       { key: "type", label: t("rep.col.type"), value: (r) => typeName(r.type_key), html: (r) => `<span lang="lo">${esc(typeName(r.type_key))}</span>` },
       { key: "inbound", label: t("rep.col.inbound"), num: true, sum: true, value: (r) => r.inbound, html: (r) => (r.inbound ? num(r.inbound) : dash) },
-      { key: "avg_daily", label: t("rep.col.avg"), num: true, value: (r) => r.avg_daily, html: (r) => days1(r.avg_daily) },
       { key: "lead_days", label: t("rep.col.lead"), num: true, value: (r) => r.lead_days, html: (r) => num(r.lead_days) },
       { key: "sold", label: t("rep.col.sold"), num: true, sum: true, value: (r) => r.sold, html: (r) => num(r.sold) },
-      { key: "excess_lak", label: t("rep.col.excess"), num: true, sum: true, value: (r) => r.excess_lak, html: (r) => (r.excess_lak ? fmtLak(r.excess_lak) : dash) },
       { key: "baht", label: t("rep.col.baht"), num: true, sum: true, value: (r) => r.baht, html: (r) => fmtBaht(r.baht, 2) },
     ];
   }
@@ -112,15 +110,17 @@ function columnsFor(tab, d) {
   ];
 }
 
+function columnsShown(tab, d) {
+  return valueCols(columnsFor(tab, d));
+}
+
 function rowsFor(tab, d) {
   if (tab === "out") return d.stockOut.map((r, i) => ({ ...r, rank: i + 1 }));
   if (tab === "cases") return d.cases;
   const f = state.report.posFilter;
   return d.positions.filter((r) => {
     if (f === "all") return true;
-    if (f === "decide") return r.band === "critical" || r.band === "warning";
-    if (f === "noAction") return r.action === "none";
-    if (f === "slow") return (r.band === "long" || r.band === "no_sales") && r.position > 0;
+    if (f === "decide") return r.band === "order_now" || r.band === "late" || r.band === "ordered";
     return r.band === f;
   });
 }
@@ -133,12 +133,10 @@ function filterCount(d, f) {
   return n;
 }
 
-function filterLabel(f, slowDays) {
+function filterLabel(f) {
   if (f === "all") return t("rep.filter.all");
   if (f === "decide") return t("rep.filter.decide");
-  if (f === "noAction") return t("rep.filter.noAction");
-  if (f === "slow") return t("exec.q.slow").replace(/\?$/, "");
-  return tf(`exec.band.${f}`, { d: slowDays });
+  return t(`exec.band.${f}`);
 }
 
 function sorted(rows, cols, tab) {
@@ -258,7 +256,7 @@ export async function mountExecReport(onSwitch) {
   function paint() {
     if (!data) return;
     const d = data;
-    const cols = columnsFor(tab, d);
+    const cols = columnsShown(tab, d);
     const q = state.report.search.trim().toLowerCase();
     let rows = rowsFor(tab, d);
     if (q && tab !== "cases") rows = rows.filter((r) => skuLabel(r).toLowerCase().includes(q) || r.sku_id.toLowerCase().includes(q) || (r.name_en ?? "").toLowerCase().includes(q));

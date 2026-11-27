@@ -13,7 +13,7 @@ describe("sku xlsx", () => {
       "ຊື່ສິນຄ້າ* / name",
       "ປະເພດ* / type",
       "ນ້ຳໜັກ (ກຣາມ)* / grams",
-      "ຂາຍສະເລ່ຍ/ມື້ / avg_daily_sell",
+      "ສະຕັອກຂັ້ນຕ່ຳ (ຊິ້ນ) / min_qty",
       "ໄລຍະສັ່ງ (ມື້) / lead_time_days",
       "ສາຂາ / branch_id",
       "ນ້ຳໜັກ (ລາວ) / size_lo",
@@ -22,10 +22,10 @@ describe("sku xlsx", () => {
 
   it("export puts Lao size label", () => {
     const aoa = exportRowsToSheet(
-      [{ sku_id: "GB-001", name: "ທອງຄຳແທ່ງ 1 ບາດ", type: "ທອງຄຳແທ່ງ", grams: 15.244, avg_daily_sell: 2.5, lead_time_days: null, branch_id: null }],
+      [{ sku_id: "GB-001", name: "ທອງຄຳແທ່ງ 1 ບາດ", type: "ທອງຄຳແທ່ງ", grams: 15.244, min_qty: 13, lead_time_days: null, branch_id: null }],
       label
     );
-    expect(aoa).toEqual([SKU_HEADERS, ["GB-001", "ທອງຄຳແທ່ງ 1 ບາດ", "ທອງຄຳແທ່ງ", 15.244, 2.5, null, null, "1 ບາດ"]]);
+    expect(aoa).toEqual([SKU_HEADERS, ["GB-001", "ທອງຄຳແທ່ງ 1 ບາດ", "ທອງຄຳແທ່ງ", 15.244, 13, null, null, "1 ບາດ"]]);
     expect(exportRowsToSheet([], label)).toEqual([SKU_HEADERS]);
   });
 
@@ -36,7 +36,7 @@ describe("sku xlsx", () => {
     ];
     expect(sheetRowsToImport(aoa)).toEqual({
       error: null,
-      rows: [{ line: 2, sku_id: "", name: "ແຫວນໃໝ່", type: "ແຫວນ", grams: 3.811, avg_daily_sell: null, lead_time_days: null, branch_id: null }],
+      rows: [{ line: 2, sku_id: "", name: "ແຫວນໃໝ່", type: "ແຫວນ", grams: 3.811, min_qty: null, lead_time_days: null, branch_id: null }],
     });
   });
 

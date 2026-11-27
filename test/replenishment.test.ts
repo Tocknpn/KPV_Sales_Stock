@@ -1,129 +1,109 @@
 import { describe, expect, it } from "vitest";
-import { resolveParams, runwayStatus, needsReview, computeVelocity, buildBranchRows, heldBySku } from "../src/replenishment";
-import type { DeskDay, LedgerRow, MasterSku, ReplenishmentRule, SystemConfig } from "../src/types";
+import { resolveParams, reorderStatus, orderFor, computeVelocity, buildBranchRows, heldBySku } from "../src/replenishment";
+import type { DeskDay, DocumentRecord, LedgerRow, MasterSku, ReplenishmentRule, SystemConfig } from "../src/types";
 
 const config = { default_lead_time_days: 7, warning_margin_days: 3, velocity_window_days: 28 } as SystemConfig;
 const sku = { sku_id: "S1", type_id: "NECKLACES", group_name: "Snake" } as MasterSku;
 
 let n = 0;
-function rule(scope: ReplenishmentRule["scope"], key: string, branch: string | null, avg: number | null, lead: number | null): ReplenishmentRule {
-  return { id: `r${++n}`, scope, scope_key: key, branch_id: branch, avg_daily_sell: avg, lead_time_days: lead, updated_by: null, updated_at: "", is_seed: false };
+function rule(scope: ReplenishmentRule["scope"], key: string, branch: string | null, min: number | null, lead: number | null): ReplenishmentRule {
+  return { id: `r${++n}`, scope, scope_key: key, branch_id: branch, min_qty: min, lead_time_days: lead, updated_by: null, updated_at: "", is_seed: false };
 }
 
 describe("resolveParams", () => {
   it("the branch SKU rule beats the branch Type rule; other branches and company rules are ignored", () => {
-    const rules = [
-      rule("type", "NECKLACES", "B1", 1, null),
-      rule("sku", "S1", "B1", 5, null),
-    ];
-    expect(resolveParams(sku, rules, config, 9, "B1").avg).toEqual({ value: 5, source: "sku" });
-    expect(resolveParams(sku, rules.slice(0, 1), config, 9, "B1").avg).toEqual({ value: 1, source: "type" });
+    const rules = [rule("type", "NECKLACES", "B1", 1, null), rule("sku", "S1", "B1", 5, null)];
+    expect(resolveParams(sku, rules, config, "B1").min).toEqual({ value: 5, source: "sku" });
+    expect(resolveParams(sku, rules.slice(0, 1), config, "B1").min).toEqual({ value: 1, source: "type" });
     const ignored = [rule("group", "Snake", "B1", 3, 3), rule("sku", "S1", "B2", 6, 6), rule("type", "NECKLACES", null, 2, 2), rule("sku", "S1", null, 4, 4)];
-    const r = resolveParams(sku, ignored, config, null, "B1");
-    expect(r.avg).toEqual({ value: null, source: "none" });
+    const r = resolveParams(sku, ignored, config, "B1");
+    expect(r.min).toEqual({ value: null, source: "none" });
     expect(r.lead).toEqual({ value: 7, source: "default" });
   });
 
-  it("uses only the branch asked for", () => {
-    const rules = [rule("sku", "S1", "B-MM", 2, null), rule("sku", "S1", "B-VT", 5, null)];
-    expect(resolveParams(sku, rules, config, null, "B-MM").avg).toEqual({ value: 2, source: "sku" });
-    expect(resolveParams(sku, rules, config, null, "B-VT").avg).toEqual({ value: 5, source: "sku" });
-    expect(resolveParams(sku, [rule("sku", "S1", null, 3, null)], config, 1, "B-MM").avg).toEqual({ value: 1, source: "auto" });
-  });
-
-  it("avg and lead resolve independently", () => {
+  it("min and lead resolve independently", () => {
     const rules = [rule("sku", "S1", "B1", 5, null), rule("type", "NECKLACES", "B1", 99, 10)];
-    const r = resolveParams(sku, rules, config, null, "B1");
-    expect(r.avg).toEqual({ value: 5, source: "sku" });
+    const r = resolveParams(sku, rules, config, "B1");
+    expect(r.min).toEqual({ value: 5, source: "sku" });
     expect(r.lead).toEqual({ value: 10, source: "type" });
   });
 
-  it("no avg rule falls back to auto, no lead rule to the default", () => {
-    const r = resolveParams(sku, [], config, 4.5, "B1");
-    expect(r.avg).toEqual({ value: 4.5, source: "auto" });
-    expect(r.lead).toEqual({ value: 7, source: "default" });
+  it("a min of 0 is a value, not 'unset'", () => {
+    expect(resolveParams(sku, [rule("sku", "S1", "B1", 0, null)], config, "B1").min).toEqual({ value: 0, source: "sku" });
   });
+});
 
-  it("no avg rule and no auto velocity is none", () => {
-    expect(resolveParams(sku, [], config, null, "B1").avg).toEqual({ value: null, source: "none" });
+const proposal = (p: Partial<DocumentRecord> & { qty?: number; sku?: string }): DocumentRecord =>
+  ({
+    id: p.doc_no ?? "d",
+    doc_no: p.doc_no ?? "DOC-1",
+    kind: "proposal",
+    branch_id: p.branch_id ?? "B1",
+    status: p.status ?? "pending",
+    doc_date: p.doc_date ?? "2026-11-25",
+    rows: [{ sku_id: p.sku ?? "S1", qty: p.qty ?? 5 }],
+  }) as unknown as DocumentRecord;
+
+describe("reorderStatus (min stock, decided 2026-11-27)", () => {
+  const today = "2026-11-27";
+  it("no min = no alert", () => {
+    expect(reorderStatus({ position: 0, min: null, order: null, today })).toEqual({ status: "no_min", shortBy: 0 });
   });
+  it("above the min is ok; at or below it is order now, short by min - balance (at least 1)", () => {
+    expect(reorderStatus({ position: 6, min: 5, order: null, today })).toEqual({ status: "ok", shortBy: 0 });
+    expect(reorderStatus({ position: 5, min: 5, order: null, today })).toEqual({ status: "order_now", shortBy: 1 });
+    expect(reorderStatus({ position: 2, min: 5, order: null, today })).toEqual({ status: "order_now", shortBy: 3 });
+  });
+  it("a live proposal makes it ordered until proposal date + lead, then late", () => {
+    const order = orderFor([proposal({ doc_date: "2026-11-25" })], "B1", "S1", today, 7)!;
+    expect(order).toMatchObject({ doc_no: "DOC-1", eta: "2026-12-02", state: "pending" });
+    expect(reorderStatus({ position: 2, min: 5, order, today }).status).toBe("ordered");
+    expect(reorderStatus({ position: 2, min: 5, order, today: "2026-12-03" }).status).toBe("late");
+  });
+});
 
-  it("a manual 0 is a value, not 'unset'", () => {
-    expect(resolveParams(sku, [rule("sku", "S1", "B1", 0, null)], config, 5, "B1").avg).toEqual({ value: 0, source: "sku" });
+describe("orderFor", () => {
+  const today = "2026-11-27";
+  it("ignores another branch, another SKU, a rejected or old proposal", () => {
+    expect(orderFor([proposal({ branch_id: "B2" })], "B1", "S1", today, 7)).toBeNull();
+    expect(orderFor([proposal({ sku: "S2" })], "B1", "S1", today, 7)).toBeNull();
+    expect(orderFor([proposal({ status: "rejected" as any })], "B1", "S1", today, 7)).toBeNull();
+    // older than lead time + 30 days
+    expect(orderFor([proposal({ doc_date: "2026-10-01" })], "B1", "S1", today, 7)).toBeNull();
+  });
+  it("prefers an approved proposal over a pending one, then the newest", () => {
+    const ps = [proposal({ doc_no: "P", status: "pending", doc_date: "2026-11-26" }), proposal({ doc_no: "A", status: "approved", doc_date: "2026-11-20" })];
+    expect(orderFor(ps, "B1", "S1", today, 7)?.doc_no).toBe("A");
   });
 });
 
 describe("buildBranchRows and carried", () => {
   const fullSku = { sku_id: "S1", type_id: "NECKLACES", name_en: "S1", name_lo: "S1", category: "Necklaces", active: true } as MasterSku;
-  const fullConfig = { ...config, warning_margin_days: 3 } as SystemConfig;
   const desk = { desk_id: "D1", branch_id: "B1", active: true } as any;
   const transfer = { status: "in_transit", to_branch_id: "B1", from_branch_id: "B2", sku_id: "S1", qty: 3 } as any;
-  const build = (carried: string[], inTransit: any[]) =>
-    buildBranchRows({ branchId: "B1", skus: [fullSku], rules: [], config: fullConfig, desks: [desk], latestDays: [], latestRows: [], inTransit, velocity: [], carried: new Set(carried) });
+  const build = (carried: string[], inTransit: any[], rules: ReplenishmentRule[] = [], proposals: DocumentRecord[] = []) =>
+    buildBranchRows({ branchId: "B1", today: "2026-11-27", skus: [fullSku], rules, config, desks: [desk], latestDays: [], latestRows: [], inTransit, proposals, carried: new Set(carried) });
 
   it("carried off but inbound still shows", () => {
     const rows = build([], [transfer]);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ sku_id: "S1", onHand: 0, inbound: 3 });
+    expect(rows[0]).toMatchObject({ sku_id: "S1", onHand: 0, inbound: 3, status: "no_min" });
   });
 
-  it("carried off and empty is hidden", () => {
+  it("carried off and empty is hidden; carried and empty shows only with a min", () => {
     expect(build([], [])).toHaveLength(0);
+    expect(build(["S1"], [])).toHaveLength(0);
+    expect(build(["S1"], [], [rule("sku", "S1", "B1", 2, null)])[0]).toMatchObject({ status: "order_now", shortBy: 2, position: 0 });
+  });
+
+  it("a proposal naming the SKU turns order now into ordered", () => {
+    const [row] = build(["S1"], [], [rule("sku", "S1", "B1", 2, 7)], [proposal({ doc_date: "2026-11-26" })]);
+    expect(row).toMatchObject({ status: "ordered", order: { doc_no: "DOC-1", eta: "2026-12-03" } });
   });
 
   it("heldBySku sums on-hand and inbound for the branch", () => {
     const held = heldBySku([], [], [desk], [transfer], "B1");
     expect(held.get("S1")).toEqual({ onHand: 0, inbound: 3 });
-  });
-});
-
-const base = { margin: 3 };
-
-describe("runwayStatus", () => {
-  it("runway at or below lead is critical", () => {
-    const r = runwayStatus({ ...base, position: 14, avg: 2, lead: 7 });
-    expect(r).toMatchObject({ runwayDays: 7, status: "critical" });
-  });
-
-  it("lead < runway <= lead + margin is warning", () => {
-    expect(runwayStatus({ ...base, position: 15, avg: 2, lead: 7 }).status).toBe("warning");
-    expect(runwayStatus({ ...base, position: 20, avg: 2, lead: 7 }).status).toBe("warning");
-    expect(runwayStatus({ ...base, position: 21, avg: 2, lead: 7 }).status).toBe("ok");
-  });
-
-  it("position 0 with an avg is critical", () => {
-    expect(runwayStatus({ ...base, position: 0, avg: 2, lead: 7 })).toMatchObject({ status: "critical", runwayDays: 0 });
-  });
-
-  it("no avg is no data, whatever the stock (no fixed reorder level any more)", () => {
-    expect(runwayStatus({ ...base, position: 3, avg: null, lead: 7 })).toMatchObject({ status: "no_data", runwayDays: null });
-    expect(runwayStatus({ ...base, position: 0, avg: null, lead: 7 }).status).toBe("no_data");
-  });
-
-  it("an avg of 0 never alerts", () => {
-    expect(runwayStatus({ ...base, position: 0, avg: 0, lead: 7 })).toMatchObject({ status: "ok", runwayDays: null, suggestedQty: 0 });
-  });
-
-  it("suggested qty = ceil(avg x (lead + margin)) - position, never below 0", () => {
-    expect(runwayStatus({ ...base, position: 4, avg: 1.5, lead: 7 }).suggestedQty).toBe(11); // ceil(1.5 x 10) - 4
-  });
-  it("suggested qty rounds up and floors at 0", () => {
-    expect(runwayStatus({ ...base, position: 4, avg: 1.55, lead: 7 }).suggestedQty).toBe(12); // ceil(15.5)=16 - 4
-    expect(runwayStatus({ ...base, position: 100, avg: 1, lead: 7 }).suggestedQty).toBe(0);
-  });
-});
-
-describe("needsReview", () => {
-  it("flags a manual avg when auto differs by more than 50% with >= 14 in-stock days", () => {
-    expect(needsReview({ source: "sku", manual: 2, autoAvg: 3.1, inStockDays: 14 })).toBe(true);
-    expect(needsReview({ source: "type", manual: 2, autoAvg: 0.9, inStockDays: 20 })).toBe(true);
-  });
-  it("does not flag within 50%, with too few days, or without a manual rule", () => {
-    expect(needsReview({ source: "sku", manual: 2, autoAvg: 3, inStockDays: 14 })).toBe(false);
-    expect(needsReview({ source: "sku", manual: 2, autoAvg: 5, inStockDays: 13 })).toBe(false);
-    expect(needsReview({ source: "auto", manual: null, autoAvg: 5, inStockDays: 20 })).toBe(false);
-    expect(needsReview({ source: "sku", manual: 2, autoAvg: null, inStockDays: 20 })).toBe(false);
-    expect(needsReview({ source: "sku", manual: 0, autoAvg: 5, inStockDays: 20 })).toBe(false);
   });
 });
 

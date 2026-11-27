@@ -22,18 +22,18 @@ const r = newRouter();
 export const GRAMS_PER_BAHT = 15.244;
 const bahtOfGrams = (g: number | null | undefined) => (g && g > 0 ? Math.round((g / GRAMS_PER_BAHT) * 10000) / 10000 : 0);
 // Same limits as replenishment rules (the engine reads only rules).
-const MAX_RULE_AVG = 9_999_999;
+const MAX_RULE_MIN = 999_999;
 const MAX_RULE_LEAD = 9999.9;
 
-// Avg/day and lead time live only in per-branch SKU rules; a blank value
-// inherits (the branch's Type rule, then automatic velocity / default lead time).
+// Min stock and lead time live only in per-branch SKU rules; a blank value
+// inherits (the branch's Type rule, then no alert / the default lead time).
 async function writeSkuRule(store: Store, skuId: string, branchIds: string[], avg: number | null, lead: number | null) {
   for (const branch_id of branchIds) {
     await store.upsertRule({
       scope: "sku",
       scope_key: skuId,
       branch_id,
-      avg_daily_sell: avg == null ? null : Math.round(avg * 1000) / 1000,
+      min_qty: avg == null ? null : Math.round(avg),
       lead_time_days: lead == null ? null : Math.round(lead * 10) / 10,
     });
   }
@@ -41,9 +41,9 @@ async function writeSkuRule(store: Store, skuId: string, branchIds: string[], av
 
 // The two planning numbers of a form / CSV line: { avg, lead } (null = blank) or an error text.
 function planNumbers(input: Record<string, any>): { avg: number | null; lead: number | null } | string {
-  const avg = nonNegative(input.avg_daily_sell ?? input.avg_daily_sales);
+  const avg = nonNegative(input.min_qty);
   const lead = nonNegative(input.lead_time_days ?? input.order_lead_time_days);
-  if (Number.isNaN(avg) || (avg !== null && avg > MAX_RULE_AVG)) return `avg_daily_sell must be a number from 0 to ${MAX_RULE_AVG}`;
+  if (Number.isNaN(avg) || (avg !== null && (avg > MAX_RULE_MIN || !Number.isInteger(avg)))) return `min_qty must be a whole number from 0 to ${MAX_RULE_MIN}`;
   if (Number.isNaN(lead) || (lead !== null && lead > MAX_RULE_LEAD)) return `lead_time_days must be a number from 0 to ${MAX_RULE_LEAD}`;
   return { avg, lead };
 }
@@ -52,6 +52,12 @@ function planNumbers(input: Record<string, any>): { avg: number | null; lead: nu
 // the product only: a trailing size is dropped (the size is the SKU's weight).
 function skuNameOf(input: Record<string, any>) {
   return stripWeight(String(input.name ?? input.name_lo ?? input.name_en ?? "")).slice(0, 120);
+}
+
+// Optional free text shown under the name (length, ring sizes, mix notes).
+function detailOf(value: unknown): string | null {
+  const d = String(value ?? "").trim().slice(0, 200);
+  return d || null;
 }
 
 function slug(name: string) {
@@ -100,7 +106,7 @@ r.get("/skus", async (c) => {
           type_name: s.type_id ? typeById.get(s.type_id)?.name_en ?? null : null,
           weight_name: s.weight_id ? weightById.get(s.weight_id)?.name_en ?? null : null,
           carried: branchId ? carried.has(s.sku_id) : null,
-          plan: branchId ? { avg: rule?.avg_daily_sell ?? null, lead: rule?.lead_time_days ?? null } : null,
+          plan: branchId ? { min: rule?.min_qty ?? null, lead: rule?.lead_time_days ?? null } : null,
         };
       }),
   });
@@ -146,6 +152,7 @@ function buildSku(input: Record<string, any>, types: SkuType[], weights: SkuWeig
       avg_daily_sales: null,
       order_lead_time_days: null,
       group_name: null,
+      detail: detailOf(input.detail),
       icon: input.icon ? String(input.icon) : type.icon,
     },
     avg: plan.avg,
@@ -273,7 +280,7 @@ r.post("/skus/import", async (c) => {
       await audit(store, user, "sku.import_row", b.sku.sku_id, {
         branch_id: x.branch_id,
         before: null,
-        after: { name: b.n.name, type_id: b.n.type.type_id, weight_id: b.n.weight.weight_id, avg_daily_sell: x.avg, lead_time_days: x.lead },
+        after: { name: b.n.name, type_id: b.n.type.type_id, weight_id: b.n.weight.weight_id, min_qty: x.avg, lead_time_days: x.lead },
       });
     }
   }
@@ -287,8 +294,8 @@ r.post("/skus/import", async (c) => {
     if (ch?.type) Object.assign(before, { type_id: sku.type_id }), Object.assign(after, { type_id: ch.type.type_id });
     if (ch?.weight) Object.assign(before, { weight_id: sku.weight_id }), Object.assign(after, { weight_id: ch.weight.weight_id });
     if (rule) {
-      Object.assign(before, { avg_daily_sell: rule.before.avg, lead_time_days: rule.before.lead });
-      Object.assign(after, { avg_daily_sell: rule.avg, lead_time_days: rule.lead });
+      Object.assign(before, { min_qty: rule.before.avg, lead_time_days: rule.before.lead });
+      Object.assign(after, { min_qty: rule.avg, lead_time_days: rule.lead });
     }
     if (plan.carried.some((x) => x.sku_id === u.sku_id && x.branch_id === u.branch_id)) Object.assign(before, { carried: false }), Object.assign(after, { carried: true });
     await audit(store, user, "sku.import_row", u.sku_id, { branch_id: u.branch_id, before, after });
@@ -312,7 +319,7 @@ r.patch("/skus/:id", async (c) => {
   const store = storeFor(c);
   const user = c.get("user");
   const body = await readBody(c);
-  const catalogue = ["name", "name_lo", "name_en", "type_id", "weight_id", "size", "active"].some((k) => body[k] !== undefined);
+  const catalogue = ["name", "name_lo", "name_en", "detail", "type_id", "weight_id", "size", "active"].some((k) => body[k] !== undefined);
   if (catalogue && user.role !== "admin") throw new HttpError(403, "Only an admin can rename an SKU or change its type, size or status", "ROLE_DENIED");
   if (body.size !== undefined) body.weight_id = (await sizeFromBody(store, body.size)).weight_id;
   const patch: Partial<MasterSku> = {};
@@ -323,9 +330,10 @@ r.patch("/skus/:id", async (c) => {
     patch.name_en = name;
     patch.name_lo = name;
   }
+  if (body.detail !== undefined) patch.detail = detailOf(body.detail);
   if (body.active !== undefined) patch.active = Boolean(body.active);
   // Planning numbers: sent = set (blank = inherit); not sent = unchanged.
-  const planSent = body.avg_daily_sell !== undefined || body.lead_time_days !== undefined;
+  const planSent = body.min_qty !== undefined || body.lead_time_days !== undefined;
   const plan = planSent ? planNumbers(body) : null;
   if (typeof plan === "string") throw new HttpError(400, plan, "BAD_SKU");
   const planBranches = plan ? await targetBranches(store, user, body.branchId, body.allBranches) : [];
@@ -353,7 +361,7 @@ r.patch("/skus/:id", async (c) => {
   const sku = Object.keys(patch).length > 0 ? await store.updateSku(id, patch) : (await listHaving(store, "skus", (l) => l.some((s) => s.sku_id === id))).find((s) => s.sku_id === id) ?? null;
   if (!sku) throw new HttpError(404, "SKU not found", "NOT_FOUND");
   if (plan) await writeSkuRule(store, sku.sku_id, planBranches, plan.avg, plan.lead);
-  const changes = plan ? { ...patch, avg_daily_sell: plan.avg, lead_time_days: plan.lead, branch_ids: planBranches } : patch;
+  const changes = plan ? { ...patch, min_qty: plan.avg, lead_time_days: plan.lead, branch_ids: planBranches } : patch;
   await audit(store, user, "sku.update", sku.sku_id, changes as Record<string, unknown>);
   return c.json(sku);
 });

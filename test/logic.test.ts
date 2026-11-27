@@ -77,16 +77,14 @@ describe("carry forward", () => {
 });
 
 describe("reorder point", () => {
-  const config = { warning_margin_days: 3 };
-  const st = (avg: number | null, lead: number) => ({ avg: { value: avg }, lead: { value: lead } });
-  it("is avg/day x (lead time + warning margin), rounded up", () => {
-    expect(reorderPoint(st(2.5, 3), config)).toBe(15);
-    expect(reorderPoint(st(1.1, 7), config)).toBe(11);
+  const st = (min: number | null) => ({ min: { value: min } });
+  it("is the branch minimum (decided 2026-11-27)", () => {
+    expect(reorderPoint(st(15))).toBe(15);
   });
-  it("is 0 (not known) without an avg/day; no fixed level any more", () => {
-    expect(reorderPoint(st(null, 7), config)).toBe(0);
-    expect(reorderPoint(st(0, 7), config)).toBe(0);
-    expect(reorderPoint(undefined, config)).toBe(0);
+  it("is 0 without a minimum", () => {
+    expect(reorderPoint(st(null))).toBe(0);
+    expect(reorderPoint(st(0))).toBe(0);
+    expect(reorderPoint(undefined)).toBe(0);
   });
 });
 
@@ -172,20 +170,20 @@ describe("calendar", () => {
   });
 });
 
-describe("report: avg/lead/runway and the out split", () => {
+describe("report: min/lead/status and the out split", () => {
   const sku = (id: string) => ({ sku_id: id, name_en: id, name_lo: id, category: "", icon: "ring", baht_weight: 1, std_gram_weight: null, active: true }) as any;
   const cfg = {} as any;
   const run = (rows: LedgerRow[], statuses?: any) => buildReport(rows, [], [sku("GB-001")], {}, cfg, 0, statuses);
 
-  it("report items carry the branch's avg/day, lead time, runway and status", () => {
-    const statuses = new Map([["B-MM|GB-001", { status: "critical", position: 5, onHand: 5, avg: { value: 2 }, lead: { value: 5 }, runwayDays: 3, suggestedQty: 7 }]]) as any;
+  it("report items carry the branch's min, lead time, status and shortfall", () => {
+    const statuses = new Map([["B-MM|GB-001", { status: "order_now", position: 5, onHand: 5, min: { value: 7 }, lead: { value: 5 }, shortBy: 2 }]]) as any;
     const it = run([row({ closing_qty: 5 })], statuses).items[0];
-    expect(it).toMatchObject({ avg_daily_sell: 2, lead_time_days: 5, runway_days: 3, branch_status: "critical", suggested_qty: 7 });
+    expect(it).toMatchObject({ min_qty: 7, lead_time_days: 5, branch_status: "order_now", short_by: 2 });
   });
 
-  it("report item with no rule and no history shows no_data and null avg", () => {
+  it("report item with no rule shows no_min and null min", () => {
     const it = run([row()]).items[0];
-    expect(it).toMatchObject({ avg_daily_sell: null, lead_time_days: null, runway_days: null, branch_status: "no_data", suggested_qty: 0 });
+    expect(it).toMatchObject({ min_qty: null, lead_time_days: null, branch_status: "no_min", short_by: 0 });
   });
 
   it("report splits stock-out into retail, wholesale, return and withdraw", () => {

@@ -88,20 +88,22 @@ export interface MasterSku {
   order_lead_time_days: number | null;
   // Product family ("Snake Necklace"); lets one replenishment rule cover all sizes.
   group_name: string | null;
+  // Optional note under the name: length, ring sizes, mix (migration 21).
+  detail?: string | null;
   active: boolean;
   icon: string;
 }
 
 export type RuleScope = "sku" | "group" | "type";
 
-// Average daily sell and/or lead time for a SKU, group or type; company-wide
-// (branch_id null) or for one branch. A null value inherits.
+// Minimum stock (pcs) and/or lead time for a SKU or type of one branch
+// (migration 21 replaced the average daily sell). A null value inherits.
 export interface ReplenishmentRule {
   id: string;
   scope: RuleScope;
   scope_key: string;
   branch_id: string | null;
-  avg_daily_sell: number | null;
+  min_qty: number | null;
   lead_time_days: number | null;
   updated_by: string | null;
   updated_at: string;

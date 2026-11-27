@@ -228,12 +228,12 @@ export function buildDemoData(today: string): DemoData {
 
   // Replenishment rules: the per-SKU numbers above as SKU rules in every branch (what
   // migration 15 does for a live database), plus one Type rule for the necklaces.
-  const rule = (scope: ReplenishmentRule["scope"], scope_key: string, branch_id: string, avg: number | null, lead: number | null): ReplenishmentRule => ({
+  const rule = (scope: ReplenishmentRule["scope"], scope_key: string, branch_id: string, min: number | null, lead: number | null): ReplenishmentRule => ({
     id: `00000000-0000-0000-0000-${String(1000 + ruleSeq++).padStart(12, "0")}`,
     scope,
     scope_key,
     branch_id,
-    avg_daily_sell: avg,
+    min_qty: min,
     lead_time_days: lead,
     updated_by: null,
     updated_at: startedAt,
@@ -241,8 +241,8 @@ export function buildDemoData(today: string): DemoData {
   });
   let ruleSeq = 0;
   const rules: ReplenishmentRule[] = branches.flatMap((b) => [
-    ...skus.filter((s) => s.avg_daily_sales != null || s.order_lead_time_days != null).map((s) => rule("sku", s.sku_id, b.branch_id, s.avg_daily_sales, s.order_lead_time_days)),
-    rule("type", T.necklaces.type_id, b.branch_id, 1.5, 7),
+    ...skus.filter((s) => s.avg_daily_sales != null || s.order_lead_time_days != null).map((s) => rule("sku", s.sku_id, b.branch_id, s.avg_daily_sales != null ? Math.ceil(s.avg_daily_sales * 5) : null, s.order_lead_time_days)),
+    rule("type", T.necklaces.type_id, b.branch_id, 4, 7),
   ]);
   // Every branch carries every SKU to start with.
   const branchSkus: BranchSku[] = branches.flatMap((b) => skus.map((s) => ({ branch_id: b.branch_id, sku_id: s.sku_id, carried: true })));

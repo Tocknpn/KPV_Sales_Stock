@@ -274,7 +274,7 @@ function totals() {
     const closing = closingOf(r);
     pcs += closing;
     baht += closing * (r.baht_weight_each || 0);
-    if (r.branch_status === "critical") low++;
+    if (r.branch_status === "order_now" || r.branch_status === "late") low++;
   }
   return { pcs, baht, low };
 }

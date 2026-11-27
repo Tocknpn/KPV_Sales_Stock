@@ -85,14 +85,19 @@ describe("day grid", () => {
     }
   });
 
-  it("a row with an avg shows its runway line even when status is ok", () => {
-    const html = renderRow(row({ avg_daily_sales: 2.5, order_lead_time_days: 7, runway_days: 12, branch_status: "ok" }), { status: "check_in", mode: "dynamic" });
-    expect(html).toContain("2.5/ວັນ · ສັ່ງ 7 ວັນ · ພໍ ≈12 ວັນ");
+  it("a row at or below its minimum shows the order-now chip and the shortfall", () => {
+    const html = renderRow(row({ branch_status: "order_now", short_by: 3 }), { status: "check_in", mode: "dynamic" });
+    expect(html).toContain("data-order-chip");
+    expect(html).toContain("ສັ່ງ! ຂາດ 3");
+    expect(html).toContain("ສັ່ງດຽວນີ້! · ຂາດ 3");
   });
 
-  it("a row with no avg shows no runway line", () => {
-    const html = renderRow(row({ avg_daily_sales: null, order_lead_time_days: null, runway_days: null, branch_status: "no_data" }), { status: "check_in", mode: "dynamic" });
-    expect(html).not.toContain("/ວັນ");
-    expect(html).not.toContain("data-runway");
+  it("an ordered row shows its expected arrival; an ok row shows no chip", () => {
+    expect(renderRow(row({ branch_status: "ordered", short_by: 1, order_eta: "2026-12-02" }), { status: "check_in", mode: "dynamic" })).toContain("~2/12");
+    expect(renderRow(row({ branch_status: "ok" }), { status: "check_in", mode: "dynamic" })).not.toContain("data-order-chip");
+  });
+
+  it("shows the SKU's detail line", () => {
+    expect(renderRow(row({ detail: "ຍາວ15-17" }), { status: "check_in", mode: "dynamic" })).toContain("ຍາວ15-17");
   });
 });

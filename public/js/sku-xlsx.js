@@ -11,21 +11,21 @@ export const SKU_COLUMNS = [
   { key: "name", lo: "ຊື່ສິນຄ້າ*" },
   { key: "type", lo: "ປະເພດ*" },
   { key: "grams", lo: "ນ້ຳໜັກ (ກຣາມ)*" },
-  { key: "avg_daily_sell", lo: "ຂາຍສະເລ່ຍ/ມື້" },
+  { key: "min_qty", lo: "ສະຕັອກຂັ້ນຕ່ຳ (ຊິ້ນ)" },
   { key: "lead_time_days", lo: "ໄລຍະສັ່ງ (ມື້)" },
   { key: "branch_id", lo: "ສາຂາ" },
   // Export only: the size in Lao words, for checking. Ignored on import.
   { key: "size_lo", lo: "ນ້ຳໜັກ (ລາວ)" },
 ];
 export const SKU_HEADERS = SKU_COLUMNS.map((c) => `${c.lo} / ${c.key}`);
-const IMPORT_KEYS = ["sku_id", "name", "type", "grams", "avg_daily_sell", "lead_time_days", "branch_id"];
+const IMPORT_KEYS = ["sku_id", "name", "type", "grams", "min_qty", "lead_time_days", "branch_id"];
 const REQUIRED = ["name", "type", "grams"];
 
 // Export rows (GET /skus/export) -> array of arrays, header first.
 export function exportRowsToSheet(rows, sizeLabel) {
   return [
     SKU_HEADERS,
-    ...rows.map((r) => [r.sku_id, r.name, r.type, r.grams, r.avg_daily_sell, r.lead_time_days, r.branch_id, r.grams == null ? null : sizeLabel(r.grams) || null]),
+    ...rows.map((r) => [r.sku_id, r.name, r.type, r.grams, r.min_qty, r.lead_time_days, r.branch_id, r.grams == null ? null : sizeLabel(r.grams) || null]),
   ];
 }
 

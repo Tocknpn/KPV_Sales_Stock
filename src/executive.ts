@@ -10,18 +10,19 @@
 import { bahtOf, gramOf, valueLak, currentQty, soldOf, round2 } from "./logic";
 import { addDays } from "./time";
 import type { Branch, Desk, DeskDay, DocumentRecord, LedgerRow, MasterSku, SkuType, SystemConfig } from "./types";
-import type { ReplenishmentRow } from "./replenishment";
+import type { ReplenishmentRow, ReorderStatus } from "./replenishment";
 
 // Stock that lasts longer than this at its current selling rate is "too long".
 export const SLOW_DAYS = 90;
 export const PERIODS = [7, 30, 90] as const;
 export type PeriodDays = (typeof PERIODS)[number];
 
-// Where a branch's stock of one SKU sits on its runway.
-export type CoverBand = "critical" | "warning" | "ok" | "long" | "no_sales" | "unknown";
-export const COVER_BANDS: CoverBand[] = ["critical", "warning", "ok", "long", "no_sales", "unknown"];
+// Where a branch's stock of one SKU stands against its minimum (decided
+// 2026-11-27: the min-stock status itself; avg/day runway bands are gone).
+export type CoverBand = ReorderStatus;
+export const COVER_BANDS: CoverBand[] = ["order_now", "late", "ordered", "ok", "no_min"];
 
-// What has been done about a Critical / Warning SKU: nothing yet, a reorder
+// What has been done about a SKU at its minimum: nothing yet, a reorder
 // proposal waiting for approval, or an approved (ordered) proposal.
 export type ActionState = "none" | "pending" | "approved";
 
@@ -41,54 +42,15 @@ export interface ExecutiveInput {
   ledger: LedgerRow[];
   // Pending + approved reorder proposals (with rows) of the recent past.
   proposals: DocumentRecord[];
-  config: Pick<SystemConfig, "warning_margin_days" | "usd_to_lak_rate">;
+  config?: Pick<SystemConfig, "usd_to_lak_rate">;
   lakPerBaht: number;
   branchIds: string[];
 }
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
-export function coverBand(row: Pick<ReplenishmentRow, "status" | "runwayDays" | "avg" | "position">, slowDays = SLOW_DAYS): CoverBand {
-  if (row.status === "critical") return "critical";
-  if (row.status === "warning") return "warning";
-  if (row.status === "no_data") return "unknown";
-  // A manual average of 0 = "does not sell".
-  if ((row.avg.value ?? 0) <= 0) return row.position > 0 ? "no_sales" : "ok";
-  if (row.runwayDays != null && row.runwayDays > slowDays) return "long";
-  return "ok";
-}
-
-// The newest live proposal of the branch that orders this SKU and is still
-// inside its lead time + warning margin (after that the goods should be here,
-// so an older proposal no longer counts as action on today's shortage).
-export function actionFor(
-  proposals: DocumentRecord[],
-  branchId: string,
-  skuId: string,
-  today: string,
-  windowDays: number
-): { state: ActionState; doc_no: string | null; doc_date: string | null; qty: number } {
-  const since = addDays(today, -Math.max(0, Math.ceil(windowDays)));
-  let best: DocumentRecord | null = null;
-  let qty = 0;
-  for (const d of proposals) {
-    if (d.kind !== "proposal" || d.branch_id !== branchId) continue;
-    if (d.status !== "pending" && d.status !== "approved") continue;
-    if (d.doc_date < since || d.doc_date > today) continue;
-    const lineQty = (d.rows ?? []).filter((r) => r.sku_id === skuId).reduce((s, r) => s + Number(r.qty ?? 0), 0);
-    if (lineQty <= 0) continue;
-    // Approved beats pending; then the newest.
-    const better =
-      !best ||
-      (d.status === "approved" && best.status !== "approved") ||
-      (d.status === best.status && d.doc_date > best.doc_date);
-    if (better) {
-      best = d;
-      qty = lineQty;
-    }
-  }
-  if (!best) return { state: "none", doc_no: null, doc_date: null, qty: 0 };
-  return { state: best.status as ActionState, doc_no: best.doc_no, doc_date: best.doc_date, qty };
+export function coverBand(row: Pick<ReplenishmentRow, "status">): CoverBand {
+  return row.status;
 }
 
 interface Flow {
@@ -110,13 +72,12 @@ function addFlow(f: Flow, r: LedgerRow) {
 }
 
 export function buildExecutive(input: ExecutiveInput) {
-  const { today, periodDays, skus, types, branches, desks, statuses, latestDays, latestRows, ledger, proposals, config, lakPerBaht } = input;
+  const { today, periodDays, skus, types, branches, desks, statuses, latestDays, latestRows, ledger, lakPerBaht } = input;
   const inScope = new Set(input.branchIds);
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
   const typeById = new Map(types.map((t) => [t.type_id, t]));
   const branchById = new Map(branches.map((b) => [b.branch_id, b]));
   const deskById = new Map(desks.map((d) => [d.desk_id, d]));
-  const margin = config.warning_margin_days ?? 0;
   const from = addDays(today, -(periodDays - 1));
   const prevFrom = addDays(from, -periodDays);
   const value = (sku: MasterSku | undefined, qty: number) => valueLak(sku, qty, lakPerBaht);
@@ -181,11 +142,12 @@ export function buildExecutive(input: ExecutiveInput) {
     const sku = skuById.get(skuId);
     if (!sku) return [];
     const band = coverBand(st);
-    const avg = st.avg.value;
     const flow = flowBySku.get(key) ?? emptyFlow();
-    const action = band === "critical" || band === "warning" ? actionFor(proposals, branchId, skuId, today, st.lead.value + margin) : null;
-    // For long stock: what is held beyond SLOW_DAYS of sales.
-    const excessQty = band === "long" && avg ? Math.max(0, st.position - Math.ceil(avg * SLOW_DAYS)) : band === "no_sales" ? st.position : 0;
+    const below = band === "order_now" || band === "late" || band === "ordered";
+    const action: ActionState | null = below ? (st.order ? st.order.state : "none") : null;
+    // Over three times the minimum = held well beyond what the case needs.
+    const min = st.min.value;
+    const excessQty = min != null && min > 0 ? Math.max(0, st.position - min * 3) : 0;
     return [{
       ...skuFields(sku),
       branch_id: branchId,
@@ -195,21 +157,21 @@ export function buildExecutive(input: ExecutiveInput) {
       baht: round2(bahtOf(sku, st.position)),
       gram: round2(gramOf(sku, st.position)),
       value_lak: round2(value(sku, st.position)),
-      avg_daily: avg,
-      avg_source: st.avg.source,
+      min_qty: min,
+      min_source: st.min.source,
       lead_days: st.lead.value,
-      runway_days: st.runwayDays,
       status: st.status,
       band,
-      suggested_qty: st.suggestedQty,
+      short_by: st.shortBy,
+      eta: st.order?.eta ?? null,
       sold: flow.sold,
       returned: flow.returned,
       excess_qty: excessQty,
       excess_lak: round2(value(sku, excessQty)),
-      action: action?.state ?? null,
-      action_doc: action?.doc_no ?? null,
-      action_date: action?.doc_date ?? null,
-      action_qty: action?.qty ?? 0,
+      action,
+      action_doc: st.order?.doc_no ?? null,
+      action_date: st.order?.doc_date ?? null,
+      action_qty: st.order?.qty ?? 0,
     }];
   });
 
@@ -223,11 +185,6 @@ export function buildExecutive(input: ExecutiveInput) {
     baht += p.baht;
     gram += p.gram;
     lak += p.value_lak;
-    const sku = skuById.get(p.sku_id);
-    if (p.avg_daily && p.avg_daily > 0) {
-      coveredLak += p.value_lak;
-      dailyLak += value(sku, p.avg_daily);
-    }
   }
   // Days the stock lasts at the current selling rate, value-weighted: the
   // value of everything that sells, over the value sold per day.
@@ -240,25 +197,17 @@ export function buildExecutive(input: ExecutiveInput) {
     return { band, lines: mine.length, value_lak: round2(v), pct: lak > 0 ? r1((v / lak) * 100) : 0 };
   });
 
-  // --- Decisions: Critical / Warning, unanswered first -----------------------
-  const actionOrder: Record<ActionState, number> = { none: 0, pending: 1, approved: 2 };
+  // --- Decisions: at / below the minimum; order now, then late, then ordered --
+  const bandOrder: Record<string, number> = { order_now: 0, late: 1, ordered: 2 };
   const decisions = positions
-    .filter((p) => p.band === "critical" || p.band === "warning")
-    .sort(
-      (a, b) =>
-        actionOrder[a.action as ActionState] - actionOrder[b.action as ActionState] ||
-        (a.band === "critical" ? 0 : 1) - (b.band === "critical" ? 0 : 1) ||
-        (a.runway_days ?? 0) - (b.runway_days ?? 0)
-    );
-  const decisionCounts = {
-    critical: { none: 0, pending: 0, approved: 0 },
-    warning: { none: 0, pending: 0, approved: 0 },
-  };
-  for (const d of decisions) decisionCounts[d.band as "critical" | "warning"][d.action as ActionState]++;
+    .filter((p) => p.band === "order_now" || p.band === "late" || p.band === "ordered")
+    .sort((a, b) => bandOrder[a.band] - bandOrder[b.band] || b.short_by - a.short_by || a.sku_id.localeCompare(b.sku_id));
+  const decisionCounts = { order_now: 0, late: 0, ordered: 0 };
+  for (const d of decisions) decisionCounts[d.band as keyof typeof decisionCounts]++;
 
-  // --- Too long / not selling -----------------------------------------------
+  // --- Held well over the minimum -------------------------------------------
   const slow = positions
-    .filter((p) => (p.band === "long" || p.band === "no_sales") && p.position > 0)
+    .filter((p) => p.excess_qty > 0)
     .sort((a, b) => b.excess_lak - a.excess_lak || b.value_lak - a.value_lak);
   const slowLak = slow.reduce((s, p) => s + p.value_lak, 0);
   const slowExcessLak = slow.reduce((s, p) => s + p.excess_lak, 0);
@@ -351,14 +300,10 @@ export function buildExecutive(input: ExecutiveInput) {
       g.pcs += p.position;
       g.lak += p.value_lak;
       g.baht += p.baht;
-      if (p.avg_daily && p.avg_daily > 0) {
-        g.covered += p.value_lak;
-        g.daily += value(skuById.get(p.sku_id), p.avg_daily);
-      }
-      if (p.band === "critical") g.critical++;
-      if (p.band === "warning") g.warning++;
+      if (p.band === "order_now" || p.band === "late") g.critical++;
+      if (p.band === "ordered") g.warning++;
       if (p.action === "none") g.noAction++;
-      if (p.band === "long" || p.band === "no_sales") g.slowLak += p.value_lak;
+      if (p.excess_qty > 0) g.slowLak += p.value_lak;
       out.set(k, g);
     }
     return out;

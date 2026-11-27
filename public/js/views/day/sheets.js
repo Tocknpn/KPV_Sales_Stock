@@ -2,7 +2,7 @@
 // index.js:  { deskCard, date, detail, hooks, queue, row(sku), rowChanged(sku) }
 import { api } from "../../api.js";
 import { toast, openSheet, closeSheet, openActionSheet } from "../../ui.js";
-import { fmtDate, fmtLaosFull, fmtInt, fmtBaht, escapeHtml } from "../../util.js";
+import { fmtDate, fmtLaosFull, fmtInt, fmtBaht, escapeHtml, SHOW_VALUE } from "../../util.js";
 import { t } from "../../i18n.js";
 import { skuLabel } from "../../sku-groups.js";
 import { reopenRange } from "./day-rules.js";
@@ -114,7 +114,7 @@ export function openCaseInfoSheet(ctx) {
             })
             .join("")
         : "";
-      const total = init ? `${fmtBaht(init.total_baht, 2)} Baht · ${fmtInt(init.total_pcs)} ${t("day.caseInfoPcs")} · ≈ ₭${fmtInt(init.valueLak)}` : dash;
+      const total = init ? `${fmtBaht(init.total_baht, 2)} Baht · ${fmtInt(init.total_pcs)} ${t("day.caseInfoPcs")}${SHOW_VALUE ? ` · ≈ ₭${fmtInt(init.valueLak)}` : ""}` : dash;
       const item = (label, value) =>
         `<div class="flex justify-between gap-4 py-2"><dt class="text-gray-600">${label}</dt><dd class="text-right font-semibold text-gray-900">${value}</dd></div>`;
       body.innerHTML = `

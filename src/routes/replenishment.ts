@@ -1,4 +1,4 @@
-// Replenishment: branch-wide runway per SKU, and the average-daily-sell / lead-time
+// Replenishment: branch-wide runway per SKU, and the minimum-stock / lead-time
 // rules behind it. Reads: any logged-in user (staff see their own branch).
 // Rules: per branch (decided 2026-11-17, migration 15). Any logged-in user sets
 // their own branch's values; an admin names a branch or sends allBranches.
@@ -14,7 +14,7 @@ import type { ReplenishmentRule, RuleScope } from "../types";
 const r = newRouter();
 
 const SCOPES: RuleScope[] = ["sku", "type"];
-const MAX_AVG = 9_999_999;
+const MAX_MIN = 999_999;
 const MAX_LEAD = 9999.9;
 
 // undefined / null / "" = inherit (null). Otherwise a number in range, rounded to the column's precision.
@@ -82,13 +82,13 @@ r.put("/replenishment/rules", async (c) => {
   if (!SCOPES.includes(scope)) throw new HttpError(400, "scope must be sku or type", "BAD_RULE");
   const key = String(body.key ?? "").trim();
   if (!key || !(await validScopeKey(store, scope, key))) throw new HttpError(400, `Unknown ${scope}`, "BAD_RULE");
-  const avg = parseValue(body.avgDailySell, "avgDailySell", MAX_AVG, 3);
+  const avg = parseValue(body.minQty, "minQty", MAX_MIN, 0);
   const lead = parseValue(body.leadTimeDays, "leadTimeDays", MAX_LEAD, 1);
   const branchIds = await targetBranches(store, user, body.branchId, body.allBranches);
   let rule: ReplenishmentRule | null = null;
-  for (const branch_id of branchIds) rule = await store.upsertRule({ scope, scope_key: key, branch_id, avg_daily_sell: avg, lead_time_days: lead });
+  for (const branch_id of branchIds) rule = await store.upsertRule({ scope, scope_key: key, branch_id, min_qty: avg, lead_time_days: lead });
   await audit(store, user, rule ? "replenishment.rule" : "replenishment.rule_clear", `${scope}:${key}@${whereOf(body.allBranches, branchIds)}`, {
-    avg_daily_sell: avg,
+    min_qty: avg,
     lead_time_days: lead,
     branch_ids: branchIds,
   });
@@ -108,10 +108,10 @@ r.post("/replenishment/rules/bulk", async (c) => {
   if (body.scope !== "type") throw new HttpError(400, "scope must be type", "BAD_RULE");
   const key = String(body.key ?? "").trim();
   if (!key || !(await validScopeKey(store, "type", key))) throw new HttpError(400, "Unknown type", "BAD_RULE");
-  const avg = parseValue(body.avgDailySell, "avgDailySell", MAX_AVG, 3);
+  const avg = parseValue(body.minQty, "minQty", MAX_MIN, 0);
   const lead = parseValue(body.leadTimeDays, "leadTimeDays", MAX_LEAD, 1);
   const dryRun = body.dryRun === true;
-  if (!dryRun && avg === null && lead === null) throw new HttpError(400, "Give avgDailySell or leadTimeDays", "BAD_RULE");
+  if (!dryRun && avg === null && lead === null) throw new HttpError(400, "Give minQty or leadTimeDays", "BAD_RULE");
   const branchIds = await targetBranches(store, user, body.branchId, body.allBranches);
   const inBranches = new Set(branchIds);
 
@@ -128,7 +128,7 @@ r.post("/replenishment/rules/bulk", async (c) => {
       scope: "type",
       scope_key: key,
       branch_id,
-      avg_daily_sell: avg ?? existing?.avg_daily_sell ?? null,
+      min_qty: avg ?? existing?.min_qty ?? null,
       lead_time_days: lead ?? existing?.lead_time_days ?? null,
     });
   }
@@ -136,16 +136,16 @@ r.post("/replenishment/rules/bulk", async (c) => {
   let cleared = 0;
   const emptied: RuleTarget[] = [];
   for (const x of skuRules) {
-    const nextAvg = avg !== null ? null : x.avg_daily_sell;
+    const nextAvg = avg !== null ? null : x.min_qty;
     const nextLead = lead !== null ? null : x.lead_time_days;
-    if (nextAvg === x.avg_daily_sell && nextLead === x.lead_time_days) continue;
+    if (nextAvg === x.min_qty && nextLead === x.lead_time_days) continue;
     cleared++;
     if (nextAvg === null && nextLead === null) emptied.push({ scope: "sku", scope_key: x.scope_key, branch_id: x.branch_id });
-    else await store.upsertRule({ scope: "sku", scope_key: x.scope_key, branch_id: x.branch_id, avg_daily_sell: nextAvg, lead_time_days: nextLead });
+    else await store.upsertRule({ scope: "sku", scope_key: x.scope_key, branch_id: x.branch_id, min_qty: nextAvg, lead_time_days: nextLead });
   }
   if (emptied.length > 0) await store.deleteRules(emptied);
   await audit(store, user, "replenishment.bulk", `type:${key}@${whereOf(body.allBranches, branchIds)}`, {
-    avg_daily_sell: avg,
+    min_qty: avg,
     lead_time_days: lead,
     cleared,
     affected: preview.affected,

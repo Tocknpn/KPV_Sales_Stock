@@ -173,7 +173,7 @@ export interface RuleTarget {
   branch_id: string | null;
 }
 export interface RuleInput extends RuleTarget {
-  avg_daily_sell: number | null;
+  min_qty: number | null;
   lead_time_days: number | null;
 }
 
@@ -342,6 +342,7 @@ const SKU_DEFAULTS = {
   active: true,
   icon: "ring",
   group_name: null,
+  detail: null,
 };
 
 // ============================================================================
@@ -1121,7 +1122,7 @@ export class DemoStore implements Store {
     this.guard();
     this.assertMayEditRule(input.branch_id);
     const i = this.db.rules.findIndex((r) => this.sameRule(r, input));
-    if (input.avg_daily_sell === null && input.lead_time_days === null) {
+    if (input.min_qty === null && input.lead_time_days === null) {
       if (i >= 0) {
         const [gone] = this.db.rules.splice(i, 1);
         this.log("replenishment_rule", "DELETE", gone, null);
@@ -1131,7 +1132,7 @@ export class DemoStore implements Store {
     if (i >= 0) {
       const row = this.db.rules[i];
       const before = { ...row };
-      Object.assign(row, { avg_daily_sell: input.avg_daily_sell, lead_time_days: input.lead_time_days, updated_by: this.actorId(), updated_at: this.now() });
+      Object.assign(row, { min_qty: input.min_qty, lead_time_days: input.lead_time_days, updated_by: this.actorId(), updated_at: this.now() });
       this.log("replenishment_rule", "UPDATE", before, row);
       return row;
     }
@@ -1140,7 +1141,7 @@ export class DemoStore implements Store {
       scope: input.scope,
       scope_key: input.scope_key,
       branch_id: input.branch_id,
-      avg_daily_sell: input.avg_daily_sell,
+      min_qty: input.min_qty,
       lead_time_days: input.lead_time_days,
       updated_by: this.actorId(),
       updated_at: this.now(),
@@ -1712,11 +1713,11 @@ class SupabaseStore implements Store {
   }
   async upsertRule(input: RuleInput) {
     // The unique index is on an expression, so on_conflict cannot name it: look first.
-    if (input.avg_daily_sell === null && input.lead_time_days === null) {
+    if (input.min_qty === null && input.lead_time_days === null) {
       await this.deleteRules([input]);
       return null;
     }
-    const values = { avg_daily_sell: input.avg_daily_sell, lead_time_days: input.lead_time_days };
+    const values = { min_qty: input.min_qty, lead_time_days: input.lead_time_days };
     const [existing] = await this.rest<ReplenishmentRule[]>(`replenishment_rule?select=*&${this.ruleFilter(input)}`);
     if (existing) return this.patchOne<ReplenishmentRule>(`replenishment_rule?id=eq.${enc(existing.id)}`, values);
     const [row] = await this.rest<ReplenishmentRule[]>("replenishment_rule", {

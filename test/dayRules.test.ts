@@ -1,10 +1,10 @@
 // Pure helpers of the day screen (public/js/views/day/day-rules.js) and the
-// report table's velocity cells (public/js/util.js).
+// min-stock chip (public/js/util.js).
 import { describe, expect, it } from "vitest";
 // @ts-expect-error plain browser ES module without types
 import { addPlan, addItems, nextDayNegativeText, reopenRange, STEP_CHANGED_CODES } from "../public/js/views/day/day-rules.js";
 // @ts-expect-error plain browser ES module without types
-import { velocityCells } from "../public/js/util.js";
+import { reorderChip, fmtPlanLine } from "../public/js/util.js";
 
 const sku = (sku_id: string) => ({ sku_id });
 
@@ -66,13 +66,20 @@ describe("stale step codes", () => {
   });
 });
 
-describe("report velocity cells", () => {
-  it("rounds avg and runway to 1 decimal", () => {
-    expect(velocityCells({ avg_daily_sell: 1.23456, lead_time_days: 7, runway_days: 12.345 })).toEqual({ avg: "1.2", lead: "7", runway: "12.3" });
+describe("min-stock chip and plan line", () => {
+  it("order now names the shortfall; ok and no min show nothing", () => {
+    expect(reorderChip({ branch_status: "order_now", short_by: 2 })).toMatchObject({ status: "order_now", cls: expect.stringContaining("danger") });
+    expect(reorderChip({ branch_status: "ok" })).toBeNull();
+    expect(reorderChip({ status: "no_min" })).toBeNull();
   });
 
-  it("shows a dash when unknown", () => {
-    expect(velocityCells(undefined)).toEqual({ avg: "—", lead: "—", runway: "—" });
-    expect(velocityCells({ avg_daily_sell: null, lead_time_days: null, runway_days: null })).toEqual({ avg: "—", lead: "—", runway: "—" });
+  it("ordered is amber, late is red", () => {
+    expect(reorderChip({ status: "ordered", eta: "2026-12-02" })?.cls).toContain("warning");
+    expect(reorderChip({ status: "late", eta: "2026-12-02" })?.cls).toContain("danger");
+  });
+
+  it("plan line shows min and lead, or no min", () => {
+    expect(fmtPlanLine(5, 7)).toBe("ຂັ້ນຕ່ຳ 5 · ໄລຍະສັ່ງ 7 ມື້");
+    expect(fmtPlanLine(null, 7)).toBe("ບໍ່ມີຂັ້ນຕ່ຳ · ໄລຍະສັ່ງ 7 ມື້");
   });
 });

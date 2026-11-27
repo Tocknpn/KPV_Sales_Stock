@@ -1,6 +1,6 @@
 import { api } from "../../api.js";
 import { toast, openSheet, closeSheet } from "../../ui.js";
-import { icon, escapeHtml, fmtInt, ICONS, toggleSwitch, debounce } from "../../util.js";
+import { icon, escapeHtml, fmtInt, ICONS, toggleSwitch, debounce, reorderChip, fmtPlanLine } from "../../util.js";
 import { t, tf, productName } from "../../i18n.js";
 import { state } from "../../state.js";
 import { isAdmin } from "../../session.js";
@@ -11,7 +11,7 @@ import { skeletonList } from "../../skeleton.js";
 
 // The catalogue (name, type, size, active; Types and Sizes) is admin only.
 // Every logged-in user runs their own branch: which SKUs it carries, its
-// avg/day and lead time, and adding a SKU (decided 2026-11-17).
+// min stock and lead time, and adding a SKU (decided 2026-11-17).
 const canEditCatalogue = () => isAdmin(state.user);
 const canEditBranch = () => !!state.user;
 const canEdit = canEditCatalogue;
@@ -35,7 +35,7 @@ function skuBranch() {
 }
 // SKUs the branch does not carry are hidden until asked for.
 let showNotCarried = false;
-// The branch's avg/day + lead time rules and the defaults (Settings > SKU is
+// The branch's min stock + lead time rules and the defaults (Settings > SKU is
 // where they are set; per branch since 2026-11-17, migration 15).
 let plan = { rules: [], config: { defaultLeadTimeDays: 7, warningMarginDays: 3 } };
 // Runway status of each SKU in the branch shown (sku_id -> row).
@@ -340,7 +340,7 @@ async function renderSkuTab(body) {
     </div>
     <p class="mb-2 flex flex-wrap gap-x-3 px-1 text-[11px] font-medium text-gray-600">
       <span class="font-semibold">${fmtInt(skus.filter((s) => s.active).length)} ${t("settings.activeSkus")}</span>
-      <span>${escapeHtml(tf("replen.defaults", { lead: num(plan.config.defaultLeadTimeDays), margin: num(plan.config.warningMarginDays) }))}</span>
+      <span>${escapeHtml(tf("replen.defaults", { lead: num(plan.config.defaultLeadTimeDays) }))}</span>
     </p>
     <div id="sku-list-wrap"></div>
     ${
@@ -395,7 +395,7 @@ async function renderSkuTab(body) {
   loadStatuses().then(() => body.isConnected && renderSkuList(body, skus, types, weights, activeTypes, activeWeights));
 }
 
-const STATUS_RANK = { critical: 0, warning: 1, ok: 2, no_data: 3 };
+const STATUS_RANK = { order_now: 0, late: 1, ordered: 2, ok: 3, no_min: 4 };
 
 async function loadStatuses() {
   const branchId = skuBranch();
@@ -414,13 +414,13 @@ async function loadStatuses() {
 // The branch's rule of a SKU or a Type, if any (the API sends only that branch's).
 const ruleOf = (scope, key) => plan.rules.find((r) => r.scope === scope && r.scope_key === key) ?? null;
 
-// What applies to a SKU: its own value, else its Type's, else auto / the default.
+// What applies to a SKU: its own value, else its Type's, else no min / the default lead.
 function planOf(s) {
   const own = ruleOf("sku", s.sku_id);
   const type = s.type_id ? ruleOf("type", s.type_id) : null;
-  const avg = own?.avg_daily_sell ?? type?.avg_daily_sell ?? null;
+  const min = own?.min_qty ?? type?.min_qty ?? null;
   const lead = own?.lead_time_days ?? type?.lead_time_days ?? null;
-  return { own, type, avg, lead: lead ?? plan.config.defaultLeadTimeDays, leadSet: lead != null };
+  return { own, type, min, lead: lead ?? plan.config.defaultLeadTimeDays, leadSet: lead != null };
 }
 
 function visibleSkus(skus) {
@@ -523,29 +523,28 @@ function renderSkuList(body, skus, types, weights, activeTypes, activeWeights) {
   );
 }
 
-// "ຂາຍ/ມື້ 2 · ໄລຍະສັ່ງ 7 ມື້" for a Type header (blank parts = not set).
+// "ຂັ້ນຕ່ຳ 5 · ໄລຍະສັ່ງ 7 ມື້" for a Type header (blank parts = not set).
 function typePlanText(typeId) {
   const r = ruleOf("type", typeId);
   const parts = [];
-  if (r?.avg_daily_sell != null) parts.push(`${t("replen.avg")} ${num(r.avg_daily_sell)}`);
+  if (r?.min_qty != null) parts.push(`${t("replen.min")} ${num(r.min_qty)}`);
   if (r?.lead_time_days != null) parts.push(`${t("replen.lead")} ${num(r.lead_time_days)} ${t("replen.d")}`);
   return parts.join(" · ");
 }
 
-const STATUS_CLS = { critical: "bg-danger-bg text-danger", warning: "bg-warning-bg text-warning" };
-
 function skuRow(s) {
   const p = planOf(s);
-  const avgText = p.avg != null ? num(p.avg) : t("replen.src.auto");
-  const planText = `${t("replen.avg")} ${avgText} · ${t("replen.lead")} ${num(p.lead)} ${t("replen.d")}`;
+  const planText = fmtPlanLine(p.min, p.lead);
   const subtitle = [skuSizeLabel(s), planText].filter(Boolean).join(" · ");
   const st = statusBySku.get(s.sku_id);
-  const badge = st && STATUS_CLS[st.status] ? `<span class="status-pill mt-0.5 inline-flex px-1.5 py-0 text-[10px] ${STATUS_CLS[st.status]}">${t(`replen.status.${st.status}`)}</span>` : "";
+  const chip = st ? reorderChip({ status: st.status, short_by: st.shortBy, eta: st.order?.eta }) : null;
+  const badge = chip ? `<span class="status-pill mt-0.5 inline-flex px-1.5 py-0 text-[10px] font-bold ${chip.cls}">${escapeHtml(chip.text)}</span>` : "";
   return `
     <div class="flex items-center gap-2.5 px-4 py-3">
       <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">${icon(s.icon, "h-4 w-4")}</span>
       <button data-edit-sku="${s.sku_id}" class="min-w-0 flex-1 text-left">
         <span lang="lo" class="lao block truncate text-xs font-bold text-gray-900">${escapeHtml(productName(s.name_en, s.name_lo))}</span>
+        ${s.detail ? `<span lang="lo" class="lao block truncate text-[10px] text-gray-500">${escapeHtml(s.detail)}</span>` : ""}
         <span class="block text-[10px] text-gray-500">${escapeHtml(subtitle)}${s.active ? "" : ` · ${t("settings.inactiveLabel")}`}${s.carried === false ? ` · ${t("settings.notCarried")}` : ""}</span>
         ${badge}
       </button>
@@ -554,7 +553,7 @@ function skuRow(s) {
 }
 
 // A SKU's own numbers in the branch: from GET /skus (plan) or a rule row.
-const ownAvg = (o) => (o ? o.avg ?? o.avg_daily_sell ?? null : null);
+const ownMin = (o) => (o ? o.min ?? o.min_qty ?? null : null);
 const ownLead = (o) => (o ? o.lead ?? o.lead_time_days ?? null : null);
 
 // Blank = null (inherit). undefined when the text is not a number >= 0.
@@ -565,18 +564,24 @@ function readNumber(input) {
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
-const planInputs = (prefix, avg, lead, placeholders) => `
+// Whole pieces only for the minimum.
+function readWhole(input) {
+  const n = readNumber(input);
+  return n == null ? n : Number.isInteger(n) ? n : undefined;
+}
+
+const planInputs = (prefix, min, lead, placeholders) => `
     <div class="mt-3 grid grid-cols-2 gap-2">
       <div class="min-w-0">
-        <label for="${prefix}-avg" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.avgSellLabel")}</label>
-        <input id="${prefix}-avg" type="number" min="0" step="any" inputmode="decimal" value="${avg ?? ""}" placeholder="${escapeHtml(placeholders.avg)}" class="input-filled" />
+        <label for="${prefix}-min" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.minStockLabel")}</label>
+        <input id="${prefix}-min" type="number" min="0" step="1" inputmode="numeric" value="${min ?? ""}" placeholder="${escapeHtml(placeholders.min)}" class="input-filled" />
       </div>
       <div class="min-w-0">
         <label for="${prefix}-lead" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.leadTimeLabel")}</label>
         <input id="${prefix}-lead" type="number" min="0" step="any" inputmode="decimal" value="${lead ?? ""}" placeholder="${escapeHtml(placeholders.lead)}" class="input-filled" />
       </div>
     </div>
-    <p class="mt-1 text-[11px] leading-snug text-gray-500">${t("settings.avgAutoHint")}</p>`;
+    <p class="mt-1 text-[11px] leading-snug text-gray-500">${t("settings.minStockHint")}</p>`;
 
 // One Type: the values typed apply to every SKU in it (each SKU's own value of
 // that field is replaced). A field left blank is not changed.
@@ -586,20 +591,20 @@ function openTypePlanSheet(group, skus, body) {
   openSheet(
     `
     <p class="text-xs text-gray-600">${escapeHtml(tf("settings.typeSetAllHint", { n: count }))}</p>
-    ${planInputs("tp", r?.avg_daily_sell != null ? num(r.avg_daily_sell) : "", r?.lead_time_days != null ? num(r.lead_time_days) : "", { avg: t("replen.src.auto"), lead: num(plan.config.defaultLeadTimeDays) })}
+    ${planInputs("tp", r?.min_qty != null ? num(r.min_qty) : "", r?.lead_time_days != null ? num(r.lead_time_days) : "", { min: t("replen.noMin"), lead: num(plan.config.defaultLeadTimeDays) })}
     ${allBranchesBox("tp")}
     <button id="tp-save" class="btn-primary mt-4 w-full">${escapeHtml(tf("settings.typeApply", { n: count }))}</button>`,
     {
       title: `${t("settings.typeSetAll")} · ${escapeHtml(typeLabel(group.type))}`,
       onMount: (sheet) => {
         sheet.querySelector("#tp-save").addEventListener("click", async (e) => {
-          const avg = readNumber(sheet.querySelector("#tp-avg"));
+          const min = readWhole(sheet.querySelector("#tp-min"));
           const lead = readNumber(sheet.querySelector("#tp-lead"));
-          if (avg === undefined || lead === undefined) return toast(t("err.BAD_RULE"), "error");
-          if (avg === null && lead === null) return toast(t("replen.needValue"), "error");
+          if (min === undefined || lead === undefined) return toast(t("err.BAD_RULE"), "error");
+          if (min === null && lead === null) return toast(t("replen.needValue"), "error");
           e.target.disabled = true;
           try {
-            await api.bulkRule({ scope: "type", key: group.typeId, avgDailySell: avg, leadTimeDays: lead, ...branchTarget(sheet, "tp") });
+            await api.bulkRule({ scope: "type", key: group.typeId, minQty: min, leadTimeDays: lead, ...branchTarget(sheet, "tp") });
           } catch (err) {
             e.target.disabled = false;
             throw err;
@@ -613,7 +618,7 @@ function openTypePlanSheet(group, skus, body) {
   );
 }
 
-// Admin only: "apply to every branch" under the avg/day + lead time fields.
+// Admin only: "apply to every branch" under the min stock + lead time fields.
 const allBranchesBox = (prefix) =>
   isAdmin(state.user)
     ? `<label class="mt-2 flex items-center gap-2 text-xs font-semibold text-gray-700"><input id="${prefix}-all-branches" type="checkbox" class="h-4 w-4" /> ${t("settings.applyAllBranches")}</label>`
@@ -643,7 +648,7 @@ function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights,
   const placeholdersFor = (typeId) => {
     const tr = typeId ? ruleOf("type", typeId) : null;
     return {
-      avg: tr?.avg_daily_sell != null ? num(tr.avg_daily_sell) : t("replen.src.auto"),
+      min: tr?.min_qty != null ? num(tr.min_qty) : t("replen.noMin"),
       lead: num(tr?.lead_time_days ?? plan.config.defaultLeadTimeDays),
     };
   };
@@ -653,12 +658,14 @@ function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights,
     <label for="new-sku-name" class="mb-1.5 block text-xs font-bold text-gray-600">${t("settings.skuNameLabel")}</label>
     <input id="new-sku-name" type="text" maxlength="120" lang="lo" ${lock} value="${existing ? escapeHtml(productName(existing.name_en, existing.name_lo)) : ""}" class="input-filled lao" />
     <p class="mt-1 text-[11px] text-gray-500">${t("settings.skuNameHint")}</p>
+    <label for="new-sku-detail" class="mb-1.5 mt-3 block text-xs font-bold text-gray-600">${t("settings.skuDetailLabel")}</label>
+    <input id="new-sku-detail" type="text" maxlength="200" lang="lo" ${lock} value="${existing?.detail ? escapeHtml(existing.detail) : ""}" placeholder="${escapeHtml(t("settings.skuDetailPlaceholder"))}" class="input-filled lao" />
     <div class="mt-3">${sizeBuilderHtml("new-sku")}</div>
     <label for="new-sku-type" class="mb-1.5 mt-3 block text-xs font-bold text-gray-600">${t("settings.skuTypeLabel")}</label>
     <select id="new-sku-type" lang="lo" ${lock} class="input-filled">
       ${typeOptions.map((ty) => `<option value="${ty.type_id}" ${existing?.type_id === ty.type_id ? "selected" : ""}>${escapeHtml(typeLabel(ty))}</option>`).join("")}
     </select>
-    ${planInputs("new-sku", ownAvg(own) != null ? num(ownAvg(own)) : "", ownLead(own) != null ? num(ownLead(own)) : "", placeholdersFor(existing?.type_id ?? typeOptions[0]?.type_id))}
+    ${planInputs("new-sku", ownMin(own) != null ? num(ownMin(own)) : "", ownLead(own) != null ? num(ownLead(own)) : "", placeholdersFor(existing?.type_id ?? typeOptions[0]?.type_id))}
     <p class="mt-1.5 text-[11px] text-gray-500">${t("settings.planHint")}</p>
     ${allBranchesBox("new-sku")}
     ${
@@ -677,22 +684,23 @@ function openSkuForm(existing, activeTypes, activeWeights, allTypes, allWeights,
         nameEl.addEventListener("input", size.refresh);
         typeSel.addEventListener("change", () => {
           const ph = placeholdersFor(typeSel.value);
-          sheetBody.querySelector("#new-sku-avg").placeholder = ph.avg;
+          sheetBody.querySelector("#new-sku-min").placeholder = ph.min;
           sheetBody.querySelector("#new-sku-lead").placeholder = ph.lead;
         });
         sheetBody.querySelector("#save-sku").addEventListener("click", async (e) => {
           const name = sheetBody.querySelector("#new-sku-name").value.trim();
           if (!name) return toast(t("stock.needSkuName"), "error");
-          const avg = readNumber(sheetBody.querySelector("#new-sku-avg"));
+          const min = readWhole(sheetBody.querySelector("#new-sku-min"));
           const lead = readNumber(sheetBody.querySelector("#new-sku-lead"));
-          if (avg === undefined || lead === undefined) return toast(t("err.BAD_RULE"), "error");
-          const planPart = { avg_daily_sell: avg, lead_time_days: lead, ...branchTarget(sheetBody, "new-sku") };
+          if (min === undefined || lead === undefined) return toast(t("err.BAD_RULE"), "error");
+          const planPart = { min_qty: min, lead_time_days: lead, ...branchTarget(sheetBody, "new-sku") };
           const parts = catalogueLocked ? null : size.read();
           if (!catalogueLocked && !parts) return;
           const payload = catalogueLocked
             ? planPart
             : {
                 name,
+                detail: sheetBody.querySelector("#new-sku-detail").value.trim(),
                 type_id: typeSel.value,
                 size: parts,
                 ...planPart,

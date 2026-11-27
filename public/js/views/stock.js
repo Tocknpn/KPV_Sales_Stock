@@ -1,7 +1,7 @@
 import { api } from "../api.js";
 import { state, branchName } from "../state.js";
 import { toast, openSheet, closeSheet, openActionSheet } from "../ui.js";
-import { fmtBaht, fmtInt, fmtDate, escapeHtml, fmtClock, fmtLaosStamp, laosDateOf, flameIcon } from "../util.js";
+import { fmtBaht, fmtInt, fmtDate, escapeHtml, fmtClock, fmtLaosStamp, laosDateOf, flameIcon, SHOW_VALUE } from "../util.js";
 import { t, tf } from "../i18n.js";
 import { renderCalendar } from "../calendar.js";
 import { isAdmin } from "../session.js";
@@ -313,7 +313,7 @@ function lastStamp(d) {
 const fmtGram = (n) => Number(n ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // Two cards a row (one on very narrow phones). Weight in grams leads; Baht,
-// pieces and the value in LAK follow; the two step buttons share the bottom.
+// pieces (and the value in LAK while SHOW_VALUE) follow; the two step buttons share the bottom.
 function renderCard(d) {
   const overdue = d.tier === "overdue";
   const streak = d.streak > 365 ? "365+" : d.streak;
@@ -329,9 +329,9 @@ function renderCard(d) {
       <div class="flex min-w-0 items-center gap-1.5 overflow-hidden text-[11px] font-bold text-gray-700">
         <span class="min-w-0 truncate tabular-nums">${fmtBaht(d.totalBaht)} Baht · ${fmtInt(d.totalPcs)} pcs</span>
         ${d.streak > 0 ? `<span class="inline-flex shrink-0 items-center gap-0.5 font-extrabold text-brand-700">${flameIcon()}${streak}<span class="sr-only"> ${t("stock.streakDays")}</span></span>` : ""}
-        ${d.criticalCount > 0 ? `<span class="shrink-0 font-bold text-danger">⚠ ${d.criticalCount}<span class="sr-only"> ${t("stock.criticalShort")}</span></span>` : ""}
+        ${d.criticalCount > 0 ? `<span class="shrink-0 rounded-full bg-danger-bg px-1.5 font-extrabold text-danger" title="${escapeHtml(tf("replen.caseOrderCount", { n: d.criticalCount }))}">${t("replen.orderShort")} ${d.criticalCount}<span class="sr-only"> ${t("stock.criticalShort")}</span></span>` : ""}
       </div>
-      <div class="truncate text-[11px] tabular-nums text-gray-500">≈ ${fmtInt(d.valueLak ?? 0)} LAK</div>
+      ${SHOW_VALUE ? `<div class="truncate text-[11px] tabular-nums text-gray-500">≈ ${fmtInt(d.valueLak ?? 0)} LAK</div>` : ""}
       ${d.lastActorName ? `<div class="truncate text-[11px] text-gray-500">${escapeHtml(lastStamp(d))}</div>` : ""}
       ${overdue ? `<p class="mt-0.5 text-[11px] font-bold leading-snug text-danger">⚠ ${escapeHtml(tierText(d))}</p>` : ""}
       ${blocked ? `<p class="mt-0.5 text-[11px] font-bold leading-snug text-warning">${tf("stock.finishFirst", { date: fmtDate(d.openEarlierDate) })}</p>` : ""}

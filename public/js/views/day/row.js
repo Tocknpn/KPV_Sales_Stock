@@ -10,7 +10,7 @@
 // for that field and it saves on change. Old days may still carry a linked
 // move (shown as "⇄ −3" under Closing) and a count (shown as a note).
 import { t, productName } from "../../i18n.js";
-import { escapeHtml, fmtRunway, fmtRunwayLine } from "../../util.js";
+import { escapeHtml, reorderChip } from "../../util.js";
 import { skuSizeLabel, skuLabel } from "../../sku-groups.js";
 
 // Same formula as the database's generated closing_qty.
@@ -121,17 +121,17 @@ function closingCell(r) {
   return `<div class="${BOX} border-brand-200 bg-brand-50"><span data-closing class="${NUM} text-brand-700">${closingOf(r)}</span><span data-closing-notes>${closingNotes(r)}</span></div>`;
 }
 
-// Critical / Warning rows: status in words plus the branch-wide runway ("Critical ≈ 3.5 d").
-function runwayChip(r) {
-  const critical = r.branch_status === "critical";
-  const text = [t(`replen.status.${r.branch_status}`), fmtRunway(r.runway_days)].filter(Boolean).join(" ");
-  return `<span class="status-pill mt-0.5 max-w-full truncate px-1.5 py-0 text-[10px] ${critical ? "bg-danger-bg text-danger" : "bg-warning-bg text-warning"}">${escapeHtml(text)}</span>`;
+// At / below the branch minimum: "Order now · short 3", "Ordered · arrives ~2 Dec", "Late …".
+function orderChipHtml(r) {
+  const chip = reorderChip(r, { compact: true });
+  if (!chip) return "";
+  const full = reorderChip(r)?.text ?? chip.text;
+  return `<span data-order-chip title="${escapeHtml(full)}" class="status-pill mt-0.5 inline-flex max-w-full items-center whitespace-nowrap px-1.5 py-0 text-[10px] font-bold ${chip.cls}"><span class="truncate">${escapeHtml(chip.text)}</span><span class="sr-only"> ${escapeHtml(full)}</span></span>`;
 }
 
-// One small line under the SKU name: avg/day, lead time, how long the stock lasts.
-function runwayLine(r) {
-  const text = fmtRunwayLine(r.avg_daily_sales, r.order_lead_time_days, r.runway_days);
-  return text ? `<span data-runway class="block truncate text-[10px] leading-tight text-gray-500">${escapeHtml(text)}</span>` : "";
+// The SKU's note (length, ring sizes …) under the size.
+function detailLine(r) {
+  return r.detail ? `<span class="block truncate text-[10px] leading-tight text-gray-500">${escapeHtml(r.detail)}</span>` : "";
 }
 
 const RULE_TEXT = (rule) => t(`stock.rule.${rule}`);
@@ -158,7 +158,6 @@ export function renderRow(r, view) {
   const { status, mode, problems } = view;
   const editable = editableFor(status, mode, r);
   const bad = Boolean(problems && problems.size > 0);
-  const low = r.branch_status === "critical" || r.branch_status === "warning";
   const sub = skuSizeLabel(r);
   const extras = extrasHtml(r, view);
   return `
@@ -169,8 +168,8 @@ export function renderRow(r, view) {
         <span class="flex min-w-0 items-center gap-1 text-[10px] leading-tight text-gray-600">${
           r.added_today ? `<span class="shrink-0 rounded-full bg-brand-600 px-1.5 font-extrabold leading-4 text-white">${t("day.newBadge")}</span>` : ""
         }<span class="min-w-0 truncate">${escapeHtml(sub || r.sku_id)}</span></span>
-        ${runwayLine(r)}
-        ${low ? runwayChip(r) : ""}
+        ${detailLine(r)}
+        ${orderChipHtml(r)}
       </div>
       ${qtyCell(r, "opening_qty", editable.has("opening_qty"), `${BOX} bg-gray-50`)}
       ${columnsFor(mode)

@@ -81,17 +81,16 @@ export function currentQty(row: Pick<LedgerRow, "closing_qty" | "counted_qty">, 
   return dayStatus === "done" ? carryQty(row) : row.closing_qty;
 }
 
-// Reorder point from a branch status: enough to cover sales during the lead
-// time plus the warning margin (the level that clears the warning). 0 = not
-// known yet (no avg/day), so nothing can be "over" it either.
-export function reorderPoint(
-  st: { avg: { value: number | null }; lead: { value: number } } | undefined,
-  config: Pick<SystemConfig, "warning_margin_days">
-) {
-  const avg = st?.avg.value ?? null;
-  if (avg == null || avg <= 0) return 0;
-  return Math.ceil(avg * (st!.lead.value + (config.warning_margin_days ?? 0)));
+// Reorder point from a branch status: the branch's minimum stock (decided
+// 2026-11-27). 0 = no minimum set, so nothing can be "over" it either.
+export function reorderPoint(st: { min: { value: number | null } } | undefined, _config?: unknown) {
+  const min = st?.min.value ?? null;
+  return min == null || min <= 0 ? 0 : min;
 }
+
+// Needs someone to order today / at or below the minimum whatever was done.
+const needsOrder = (status: string | undefined) => status === "order_now" || status === "late";
+const isBelowMin = (status: string | undefined) => status === "order_now" || status === "late" || status === "ordered";
 
 export function isLowStock(qty: number, point: number) {
   return qty < point;
@@ -179,7 +178,18 @@ function lastActor(rows: LedgerRow[], day: DeskDay | undefined, staffById: Map<s
 
 // Branch-wide replenishment status of a SKU, keyed "branchId|skuId". Structural
 // so logic.ts does not depend on replenishment.ts (which depends on it).
-export type BranchStatuses = Map<string, { status: "critical" | "warning" | "ok" | "no_data"; position: number; onHand: number; avg: { value: number | null }; lead: { value: number }; runwayDays: number | null; suggestedQty?: number }>;
+export type BranchStatuses = Map<
+  string,
+  {
+    status: "order_now" | "late" | "ordered" | "ok" | "no_min";
+    position: number;
+    onHand: number;
+    min: { value: number | null };
+    lead: { value: number };
+    shortBy?: number;
+    order?: { doc_no: string; doc_date: string; eta: string } | null;
+  }
+>;
 
 export function buildDeskCards(
   desks: Desk[],
@@ -214,7 +224,7 @@ export function buildDeskCards(
       let totalBaht = 0;
       let totalGram = 0;
       let totalLak = 0;
-      // SKUs on this case whose BRANCH-wide runway is Critical (a case alone says nothing).
+      // SKUs on this case the BRANCH must order now (at / below its minimum, no order or late).
       let criticalCount = 0;
       for (const r of rows) {
         const sku = skuById.get(r.sku_id);
@@ -223,7 +233,7 @@ export function buildDeskCards(
         totalBaht += bahtOf(sku, qty);
         totalGram += gramOf(sku, qty);
         totalLak += valueLak(sku, qty, lakPerBaht);
-        if (statuses.get(`${desk.branch_id}|${r.sku_id}`)?.status === "critical") criticalCount++;
+        if (needsOrder(statuses.get(`${desk.branch_id}|${r.sku_id}`)?.status)) criticalCount++;
       }
       const branch = branchById.get(desk.branch_id);
       const actor = lastActor(own, day, staffById);
@@ -270,10 +280,7 @@ export function buildDeskDetail(
     const sku = skuById.get(r.sku_id);
     const closing = computeClosing(r);
     const branchRow = statuses.get(`${desk.branch_id}|${r.sku_id}`);
-    const avg = branchRow?.avg.value ?? null;
     const variance = r.counted_qty != null ? r.counted_qty - closing : null;
-    const lifetime = avg != null && avg > 0 ? round1(closing / avg) : null;
-    const leadTime = avg != null ? branchRow?.lead.value ?? null : null;
     return {
       sku_id: r.sku_id,
       name_en: sku?.name_en ?? r.sku_id,
@@ -311,12 +318,13 @@ export function buildDeskDetail(
       baht_weight_each: sku?.baht_weight ?? 0,
       gram_weight_each: sku?.std_gram_weight ?? 0,
       value_lak: round2(valueLak(sku, closing, lakPerBaht)),
-      branch_status: branchRow?.status ?? "no_data",
-      runway_days: branchRow?.runwayDays ?? null,
-      avg_daily_sales: avg,
-      order_lead_time_days: leadTime,
-      est_lifetime_days: lifetime,
-      lifetime_alert: lifetime !== null && leadTime !== null && lifetime < leadTime,
+      detail: sku?.detail ?? null,
+      branch_status: branchRow?.status ?? "no_min",
+      min_qty: branchRow?.min.value ?? null,
+      short_by: branchRow?.shortBy ?? 0,
+      lead_days: branchRow?.lead.value ?? null,
+      order_doc: branchRow?.order?.doc_no ?? null,
+      order_eta: branchRow?.order?.eta ?? null,
     };
   });
   const totals = rows.reduce(
@@ -329,7 +337,6 @@ export function buildDeskDetail(
     },
     { pcs: 0, baht: 0, gram: 0, valueLak: 0 }
   );
-  const withLifetime = rows.filter((r) => r.est_lifetime_days !== null);
   return {
     desk_id: desk.desk_id,
     branch_id: desk.branch_id,
@@ -356,14 +363,7 @@ export function buildDeskDetail(
       gram: round2(totals.gram),
       valueLak: round2(totals.valueLak),
     },
-    criticalItems: rows.filter((r) => r.branch_status === "critical").length,
-    stockHealth: {
-      avgLifetimeDays: withLifetime.length ? round1(withLifetime.reduce((s, r) => s + (r.est_lifetime_days ?? 0), 0) / withLifetime.length) : null,
-      alertSkus: rows
-        .filter((r) => r.lifetime_alert)
-        .sort((a, b) => (a.est_lifetime_days ?? 0) - (b.est_lifetime_days ?? 0))
-        .map((r) => ({ sku_id: r.sku_id, name_en: r.name_en, icon: r.icon, est_lifetime_days: r.est_lifetime_days, order_lead_time_days: r.order_lead_time_days })),
-    },
+    criticalItems: rows.filter((r) => needsOrder(r.branch_status)).length,
   };
 }
 
@@ -464,11 +464,10 @@ interface Position {
 export function buildDashboard(input: DashboardInput) {
   const { today, skus, branches, desks, latestDays, latestRows, movementRows, agingRows, inTransit, config, filter, lakPerBaht } = input;
   const statuses = input.statuses ?? new Map();
-  // Low = the SKU's runway at this BRANCH is Critical or Warning.
+  // Low = the SKU is at or below its minimum at this BRANCH.
   const branchStatus = (p: { branch_id: string; sku: MasterSku }) => statuses.get(`${p.branch_id}|${p.sku.sku_id}`);
   const isLow = (p: { branch_id: string; sku: MasterSku }) => {
-    const st = branchStatus(p)?.status;
-    return st === "critical" || st === "warning";
+    return isBelowMin(branchStatus(p)?.status);
   };
   const skuById = new Map(skus.map((s) => [s.sku_id, s]));
   const statusByDesk = new Map(latestDays.map((d) => [d.desk_id, d.status]));
@@ -494,7 +493,7 @@ export function buildDashboard(input: DashboardInput) {
   const deskBranch = filter.deskId ? desks.find((d) => d.desk_id === filter.deskId)?.branch_id : undefined;
   const lowItems: LowItem[] = [];
   for (const [key, st] of statuses) {
-    if (st.status !== "critical" && st.status !== "warning") continue;
+    if (!isBelowMin(st.status)) continue;
     const [branchId, skuId] = key.split("|");
     const sku = skuById.get(skuId);
     if (!sku || !categoryOk(sku)) continue;
@@ -504,7 +503,7 @@ export function buildDashboard(input: DashboardInput) {
     const deskId = filter.deskId ?? held[0]?.desk_id ?? inTransit.find((t) => t.sku_id === skuId && t.to_branch_id === branchId)?.to_desk_id ?? "";
     lowItems.push({ sku, branchId, deskId, st });
   }
-  lowItems.sort((a, b) => (a.st.status === "critical" ? 0 : 1) - (b.st.status === "critical" ? 0 : 1) || (a.st.runwayDays ?? 0) - (b.st.runwayDays ?? 0));
+  lowItems.sort((a, b) => (needsOrder(a.st.status) ? 0 : 1) - (needsOrder(b.st.status) ? 0 : 1) || (b.st.shortBy ?? 0) - (a.st.shortBy ?? 0));
   const over = positions
     .filter((p) => p.point > 0 && p.qty > p.point * OVERSTOCK_MULTIPLIER)
     .sort((a, b) => b.qty - b.point * OVERSTOCK_MULTIPLIER - (a.qty - a.point * OVERSTOCK_MULTIPLIER));
@@ -522,7 +521,7 @@ export function buildDashboard(input: DashboardInput) {
       closing: st.position,
       reorder_level: reorderPoint(st, config),
       status: st.status,
-      runway_days: st.runwayDays,
+      short_by: st.shortBy ?? 0,
     };
   };
   const watchItem = (p: Position) => ({
@@ -616,7 +615,7 @@ export function buildDashboard(input: DashboardInput) {
         pcs: mine.reduce((s, p) => s + p.qty, 0),
         lakValue: round2(mine.reduce((s, p) => s + valueLak(p.sku, p.qty, lakPerBaht), 0)),
         lowCount: new Set(mine.filter(isLow).map((p) => p.sku.sku_id)).size,
-        criticalCount: new Set(mine.filter((p) => branchStatus(p)?.status === "critical").map((p) => p.sku.sku_id)).size,
+        criticalCount: new Set(mine.filter((p) => needsOrder(branchStatus(p)?.status)).map((p) => p.sku.sku_id)).size,
         desksTotal: myDesks.length,
         desksDoneToday: myDesks.filter((d) => doneToday(d.desk_id)).length,
       };
@@ -754,18 +753,19 @@ export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus
   }
 
   const kpi = {
-    opening: { lak: 0, pcs: 0 },
-    in: { lak: 0, pcs: 0 },
-    out: { lak: 0, pcs: 0 },
-    retail: { lak: 0, pcs: 0 },
-    wholesale: { lak: 0, pcs: 0 },
-    returned: { lak: 0, pcs: 0 },
-    withdrawn: { lak: 0, pcs: 0 },
-    adjust: { lak: 0, pcs: 0 },
-    closing: { lak: 0, pcs: 0 },
+    opening: { lak: 0, pcs: 0, baht: 0 },
+    in: { lak: 0, pcs: 0, baht: 0 },
+    out: { lak: 0, pcs: 0, baht: 0 },
+    retail: { lak: 0, pcs: 0, baht: 0 },
+    wholesale: { lak: 0, pcs: 0, baht: 0 },
+    returned: { lak: 0, pcs: 0, baht: 0 },
+    withdrawn: { lak: 0, pcs: 0, baht: 0 },
+    adjust: { lak: 0, pcs: 0, baht: 0 },
+    closing: { lak: 0, pcs: 0, baht: 0 },
   };
-  const add = (bucket: { lak: number; pcs: number }, sku: MasterSku | undefined, qty: number) => {
+  const add = (bucket: { lak: number; pcs: number; baht: number }, sku: MasterSku | undefined, qty: number) => {
     bucket.pcs += qty;
+    bucket.baht += bahtOf(sku, qty);
     bucket.lak += valueLak(sku, qty, lakPerBaht);
   };
 
@@ -821,18 +821,20 @@ export function buildReport(periodRows: LedgerRow[], periodDays: DeskDay[], skus
       wholesale: wholesaleSum,
       returned: returnedSum,
       withdrawn: withdrawnSum,
-      avg_daily_sell: st?.avg.value ?? null,
-      lead_time_days: st && st.avg.value != null ? st.lead.value : null,
-      runway_days: st?.runwayDays ?? null,
-      branch_status: st?.status ?? ("no_data" as const),
-      suggested_qty: st?.suggestedQty ?? 0,
+      min_qty: st?.min.value ?? null,
+      lead_time_days: st ? st.lead.value : null,
+      branch_status: st?.status ?? ("no_min" as const),
+      short_by: st?.shortBy ?? 0,
     };
   });
 
   // Fill bar: each line's closing against the biggest closing in the report.
   const biggest = Math.max(1, ...items.map((it) => it.closing_qty));
   for (const it of items) it.fillPct = Math.max(0, Math.min(100, round1((it.closing_qty / biggest) * 100)));
-  for (const bucket of Object.values(kpi)) bucket.lak = round2(bucket.lak);
+  for (const bucket of Object.values(kpi)) {
+    bucket.lak = round2(bucket.lak);
+    bucket.baht = round2(bucket.baht);
+  }
   const doneDays = periodDays.filter((d) => d.status === "done").length;
 
   return {

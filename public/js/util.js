@@ -50,30 +50,40 @@ export function debounce(fn, ms = 250) {
   };
 }
 
-// "≈ 3.5 d" for a runway in days; "Out of stock" at zero; null when unknown.
-export function fmtRunway(days) {
-  if (days == null) return null;
-  if (days <= 0) return t("replen.outOfStock");
-  return tf("replen.runway", { n: (Math.round(days * 10) / 10).toFixed(1) });
+// LAK values and the gold price are hidden for now (decided 2026-11-27); set
+// true to bring every value line, column and card back.
+export const SHOW_VALUE = false;
+
+// The min-stock status chip of a row (decided 2026-11-27):
+//   order_now  "Order now · short 3"        late  "Late · due 2 Dec"
+//   ordered    "Ordered · arrives ~2 Dec"   anything else  null
+// r: { branch_status | status, short_by, order_eta | eta }.
+// compact: the narrow day-grid cell ("ສັ່ງ! ຂາດ 3", "ສັ່ງແລ້ວ ~2/12", "ຊ້າ ~2/12").
+export function reorderChip(r, { compact = false } = {}) {
+  const status = r?.branch_status ?? r?.status;
+  const eta = r?.order_eta ?? r?.eta ?? null;
+  const short = r?.short_by ?? 0;
+  if (compact) {
+    const dm = eta ? `~${Number(eta.slice(8))}/${Number(eta.slice(5, 7))}` : "";
+    if (status === "order_now") return { status, text: `${t("replen.orderShort")}! ${tf("replen.shortBy", { n: short })}`, cls: "bg-danger-bg text-danger" };
+    if (status === "late") return { status, text: `${t("replen.late")} ${dm}`.trim(), cls: "bg-danger-bg text-danger" };
+    if (status === "ordered") return { status, text: `${t("replen.ordered")} ${dm}`.trim(), cls: "bg-warning-bg text-warning" };
+    return null;
+  }
+  if (status === "order_now") return { status, text: `${t("replen.orderNow")} · ${tf("replen.shortBy", { n: short })}`, cls: "bg-danger-bg text-danger" };
+  if (status === "late") return { status, text: eta ? tf("replen.lateDue", { date: fmtDate(eta) }) : t("replen.late"), cls: "bg-danger-bg text-danger" };
+  if (status === "ordered") return { status, text: eta ? tf("replen.orderedEta", { date: fmtDate(eta) }) : t("replen.ordered"), cls: "bg-warning-bg text-warning" };
+  return null;
 }
 
-const oneDecimal = (n) => String(Math.round(n * 10) / 10);
+// Needs someone to order today.
+export const needsOrder = (status) => status === "order_now" || status === "late";
 
-// The report table's avg sell/day, lead time and runway cells for one row's
-// velocity (or "—" when unknown); avg and runway to 1 decimal like the runway line.
-export function velocityCells(v) {
-  const dash = "—";
-  return {
-    avg: v?.avg_daily_sell != null ? oneDecimal(v.avg_daily_sell) : dash,
-    lead: v?.lead_time_days != null ? String(v.lead_time_days) : dash,
-    runway: v?.runway_days != null ? oneDecimal(v.runway_days) : dash,
-  };
-}
-
-// "2.5/day · order 7 d · lasts ≈12 d"; null unless the avg and the runway are both known.
-export function fmtRunwayLine(avg, lead, days) {
-  if (avg == null || days == null) return null;
-  return tf("replen.runwayLine", { avg: oneDecimal(avg), lead: oneDecimal(lead ?? 0), days: oneDecimal(Math.max(0, days)) });
+// "Min 10 · Lead 7 d" for a SKU's plan; blank min shows "No min".
+export function fmtPlanLine(min, lead) {
+  const parts = [min != null ? tf("replen.minLine", { n: min }) : t("replen.noMin")];
+  if (lead != null) parts.push(tf("replen.leadLine", { n: String(Math.round(lead * 10) / 10) }));
+  return parts.join(" · ");
 }
 
 export function clamp(n, min, max) {

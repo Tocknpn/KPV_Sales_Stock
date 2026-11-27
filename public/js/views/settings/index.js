@@ -1,7 +1,7 @@
 import { t, tf, getLang, setLang } from "../../i18n.js";
 import { api } from "../../api.js";
 import { state } from "../../state.js";
-import { fmtInt, fmtLaosStamp, escapeHtml } from "../../util.js";
+import { fmtInt, fmtLaosStamp, escapeHtml, SHOW_VALUE } from "../../util.js";
 import { isAdmin, isManager, clearSession } from "../../session.js";
 import { renderSku } from "./sku.js";
 import { go, pathFor, backTo } from "../../router.js";
@@ -38,7 +38,8 @@ const profileCard = () => profileCardHtml(state.user);
 
 function goldStrip() {
   const g = state.meta?.gold;
-  if (!g || !(g.lakPerBaht > 0)) return "";
+  // Gold price hidden with the values for now (decided 2026-11-27).
+  if (!SHOW_VALUE || !g || !(g.lakPerBaht > 0)) return "";
   const price = fmtInt(g.lakPerBaht);
   const line = g.asOf ? tf("settings.goldStrip", { price, time: fmtLaosStamp(g.asOf) }) : tf("settings.goldStripNoTime", { price });
   const notes = [];

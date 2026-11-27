@@ -1,6 +1,6 @@
 // SKU import/export per branch (decided 2026-11-17). The browser reads and
 // writes the .xlsx; the Worker gets and returns plain rows.
-// Demo: GB-001 = ທອງຄຳແທ່ງ, 1 ບາດ (Gold Bars, 15.244 g), rule 2.5/day, 3 days in every branch.
+// Demo: GB-001 = ທອງຄຳແທ່ງ, 1 ບາດ (Gold Bars, 15.244 g), rule min 13, 3 days in every branch.
 import { beforeEach, describe, expect, it } from "vitest";
 import { getStore } from "../src/store";
 import { freshApp, call, asAdmin, asStaff, asManager } from "./helpers";
@@ -14,13 +14,13 @@ const ruleOf = async (sku: string, branch: string) =>
   (await store().rules()).find((r) => r.scope === "sku" && r.scope_key === sku && r.branch_id === branch);
 const skuOf = async (id: string) => (await store().skus()).find((s) => s.sku_id === id);
 
-const NEW_ROW = { sku_id: "", name: "ແຫວນໃໝ່", type: "ແຫວນ", grams: 3.811, avg_daily_sell: 1, lead_time_days: 4 };
+const NEW_ROW = { sku_id: "", name: "ແຫວນໃໝ່", type: "ແຫວນ", grams: 3.811, min_qty: 1, lead_time_days: 4 };
 
 describe("SKU import", () => {
   it("dry run previews and writes nothing", async () => {
     const admin = await asAdmin();
     const before = (await store().skus()).length;
-    const res = await imp(admin, [NEW_ROW, { sku_id: "GB-001", name: "ທອງຄຳແທ່ງ 1 ບາດ", type: "ທອງຄຳແທ່ງ", grams: 15.244, avg_daily_sell: 2.5, lead_time_days: 3 }], { dryRun: true });
+    const res = await imp(admin, [NEW_ROW, { sku_id: "GB-001", name: "ທອງຄຳແທ່ງ 1 ບາດ", type: "ທອງຄຳແທ່ງ", grams: 15.244, min_qty: 13, lead_time_days: 3 }], { dryRun: true });
     expect(res.status).toBe(200);
     expect(res.json).toEqual({ created: 1, updated: 0, unchanged: 1, ignored: [], cleared: [], errors: [] });
     expect((await store().skus()).length).toBe(before);
@@ -28,38 +28,38 @@ describe("SKU import", () => {
 
   it("commit creates and updates", async () => {
     const admin = await asAdmin();
-    const res = await imp(admin, [NEW_ROW, { sku_id: "GB-001", name: "ຄຳແທ່ງ 1 ບາດ", type: "Gold Bars", grams: 15.244, avg_daily_sell: 6, lead_time_days: "" }]);
+    const res = await imp(admin, [NEW_ROW, { sku_id: "GB-001", name: "ຄຳແທ່ງ 1 ບາດ", type: "Gold Bars", grams: 15.244, min_qty: 6, lead_time_days: "" }]);
     expect(res.status).toBe(200);
     expect(res.json).toMatchObject({ created: 1, updated: 1, unchanged: 0 });
     const made = (await store().skus()).find((s) => s.name_lo === "ແຫວນໃໝ່")!;
     expect(made).toMatchObject({ type_id: "RINGS_ACCESSORIES", weight_id: "BAHT_025", baht_weight: 0.25 });
-    expect(await ruleOf(made.sku_id, "B-MM")).toMatchObject({ avg_daily_sell: 1, lead_time_days: 4 });
+    expect(await ruleOf(made.sku_id, "B-MM")).toMatchObject({ min_qty: 1, lead_time_days: 4 });
     expect((await store().branchSkus()).filter((b) => b.sku_id === made.sku_id && b.carried).map((b) => b.branch_id)).toEqual(["B-MM"]);
     expect(await skuOf("GB-001")).toMatchObject({ name_lo: "ຄຳແທ່ງ" });
     // An empty cell leaves the value as it is (decided 2026-11-17).
-    expect(await ruleOf("GB-001", "B-MM")).toMatchObject({ avg_daily_sell: 6, lead_time_days: 3 });
-    expect(await ruleOf("GB-001", "B-VT")).toMatchObject({ avg_daily_sell: 2.5, lead_time_days: 3 });
+    expect(await ruleOf("GB-001", "B-MM")).toMatchObject({ min_qty: 6, lead_time_days: 3 });
+    expect(await ruleOf("GB-001", "B-VT")).toMatchObject({ min_qty: 13, lead_time_days: 3 });
   });
 
   it("an empty cell keeps the value", async () => {
-    const res = await imp(await asAdmin(), [{ sku_id: "GB-001", avg_daily_sell: "", lead_time_days: null }]);
+    const res = await imp(await asAdmin(), [{ sku_id: "GB-001", min_qty: "", lead_time_days: null }]);
     expect(res.json).toMatchObject({ updated: 0, unchanged: 1, cleared: [] });
-    expect(await ruleOf("GB-001", "B-MM")).toMatchObject({ avg_daily_sell: 2.5, lead_time_days: 3 });
+    expect(await ruleOf("GB-001", "B-MM")).toMatchObject({ min_qty: 13, lead_time_days: 3 });
   });
 
   it("a dash clears the value and is listed in cleared", async () => {
     const admin = await asAdmin();
-    const dry = await imp(admin, [{ sku_id: "GB-001", avg_daily_sell: "-", lead_time_days: " – " }], { dryRun: true });
-    expect(dry.json).toMatchObject({ updated: 1, cleared: [{ line: 2, field: "avg_daily_sell" }, { line: 2, field: "lead_time_days" }] });
-    await imp(admin, [{ sku_id: "GB-001", avg_daily_sell: "-", lead_time_days: 5 }]);
-    expect(await ruleOf("GB-001", "B-MM")).toMatchObject({ avg_daily_sell: null, lead_time_days: 5 });
+    const dry = await imp(admin, [{ sku_id: "GB-001", min_qty: "-", lead_time_days: " – " }], { dryRun: true });
+    expect(dry.json).toMatchObject({ updated: 1, cleared: [{ line: 2, field: "min_qty" }, { line: 2, field: "lead_time_days" }] });
+    await imp(admin, [{ sku_id: "GB-001", min_qty: "-", lead_time_days: 5 }]);
+    expect(await ruleOf("GB-001", "B-MM")).toMatchObject({ min_qty: null, lead_time_days: 5 });
     // clearing what is already empty is no change
-    const again = await imp(admin, [{ sku_id: "GB-002", avg_daily_sell: "-" }], { dryRun: true });
+    const again = await imp(admin, [{ sku_id: "GB-002", min_qty: "-" }], { dryRun: true });
     expect(again.json).toMatchObject({ unchanged: 1, cleared: [] });
   });
 
   it("a dash on a new row means no value", async () => {
-    const res = await imp(await asAdmin(), [{ ...NEW_ROW, avg_daily_sell: "-", lead_time_days: "" }]);
+    const res = await imp(await asAdmin(), [{ ...NEW_ROW, min_qty: "-", lead_time_days: "" }]);
     expect(res.json).toMatchObject({ created: 1, cleared: [] });
     const made = (await store().skus()).find((s) => s.name_lo === "ແຫວນໃໝ່")!;
     expect(await ruleOf(made.sku_id, "B-MM")).toBeUndefined();
@@ -68,7 +68,7 @@ describe("SKU import", () => {
   it("one bad row imports nothing", async () => {
     const admin = await asAdmin();
     const before = (await store().skus()).length;
-    const res = await imp(admin, [NEW_ROW, { ...NEW_ROW, name: "" }, { ...NEW_ROW, avg_daily_sell: -1 }]);
+    const res = await imp(admin, [NEW_ROW, { ...NEW_ROW, name: "" }, { ...NEW_ROW, min_qty: -1 }]);
     expect(res.status).toBe(422);
     expect(res.json.code).toBe("IMPORT_INVALID");
     expect(res.json.errors.map((e: any) => e.line)).toEqual([3, 4]);
@@ -120,13 +120,13 @@ describe("SKU import", () => {
     const admin = await asAdmin();
     const res = await imp(admin, [
       { ...NEW_ROW, branch_id: "B-VT" },
-      { sku_id: "GB-001", name: "", type: "", grams: "", avg_daily_sell: 8, branch_id: "B-VTC" },
+      { sku_id: "GB-001", name: "", type: "", grams: "", min_qty: 8, branch_id: "B-VTC" },
       { ...NEW_ROW, name: "x" },
     ], { branchId: "all" });
     expect(res.json.errors).toEqual([{ line: 4, error: "branch_id is required" }]);
-    const ok = await imp(admin, [{ sku_id: "GB-001", name: "", type: "", grams: "", avg_daily_sell: 8, branch_id: "B-VTC" }], { branchId: "all" });
+    const ok = await imp(admin, [{ sku_id: "GB-001", name: "", type: "", grams: "", min_qty: 8, branch_id: "B-VTC" }], { branchId: "all" });
     expect(ok.json).toMatchObject({ updated: 1 });
-    expect(await ruleOf("GB-001", "B-VTC")).toMatchObject({ avg_daily_sell: 8 });
+    expect(await ruleOf("GB-001", "B-VTC")).toMatchObject({ min_qty: 8 });
     expect(await skuOf("GB-001")).toMatchObject({ name_lo: "ທອງຄຳແທ່ງ" });
   });
 
@@ -134,20 +134,20 @@ describe("SKU import", () => {
     const admin = await asAdmin();
     const before = (await store().skus()).length;
     const res = await imp(admin, [
-      { ...NEW_ROW, branch_id: "B-MM", avg_daily_sell: 1 },
-      { ...NEW_ROW, name: " ແຫວນໃໝ່ ", branch_id: "B-VT", avg_daily_sell: 4 },
+      { ...NEW_ROW, branch_id: "B-MM", min_qty: 1 },
+      { ...NEW_ROW, name: " ແຫວນໃໝ່ ", branch_id: "B-VT", min_qty: 4 },
     ], { branchId: "all" });
     expect(res.status).toBe(200);
     expect(res.json.created).toBe(1);
     expect((await store().skus()).length).toBe(before + 1);
     const made = (await store().skus()).find((s) => s.name_lo === "ແຫວນໃໝ່")!;
     expect((await store().branchSkus()).filter((b) => b.sku_id === made.sku_id && b.carried).map((b) => b.branch_id).sort()).toEqual(["B-MM", "B-VT"]);
-    expect(await ruleOf(made.sku_id, "B-MM")).toMatchObject({ avg_daily_sell: 1 });
-    expect(await ruleOf(made.sku_id, "B-VT")).toMatchObject({ avg_daily_sell: 4 });
+    expect(await ruleOf(made.sku_id, "B-MM")).toMatchObject({ min_qty: 1 });
+    expect(await ruleOf(made.sku_id, "B-VT")).toMatchObject({ min_qty: 4 });
   });
 
   it("the same new SKU twice in one branch is an error", async () => {
-    const res = await imp(await asAdmin(), [NEW_ROW, { ...NEW_ROW, avg_daily_sell: 9 }]);
+    const res = await imp(await asAdmin(), [NEW_ROW, { ...NEW_ROW, min_qty: 9 }]);
     expect(res.json.errors).toEqual([{ line: 3, error: "the same new SKU is also on line 2" }]);
   });
 
@@ -202,11 +202,11 @@ describe("SKU import", () => {
 
   it("staff name change is ignored and listed", async () => {
     const staff = await asManager("B-MM");
-    const res = await imp(staff, [{ sku_id: "GB-001", name: "ຊື່ໃໝ່", type: "ສາຍຄໍ", grams: 7.622, avg_daily_sell: 3, lead_time_days: 3 }]);
+    const res = await imp(staff, [{ sku_id: "GB-001", name: "ຊື່ໃໝ່", type: "ສາຍຄໍ", grams: 7.622, min_qty: 3, lead_time_days: 3 }]);
     expect(res.status).toBe(200);
     expect(res.json).toMatchObject({ updated: 1, ignored: [{ line: 2, field: "name" }, { line: 2, field: "type" }, { line: 2, field: "grams" }] });
     expect(await skuOf("GB-001")).toMatchObject({ name_lo: "ທອງຄຳແທ່ງ", type_id: "GOLD_BARS", weight_id: "BAHT_1" });
-    expect(await ruleOf("GB-001", "B-MM")).toMatchObject({ avg_daily_sell: 3 });
+    expect(await ruleOf("GB-001", "B-MM")).toMatchObject({ min_qty: 3 });
   });
 
   it("staff cannot import all", async () => {
@@ -221,12 +221,12 @@ describe("SKU import", () => {
 
   it("audit has one row per SKU plus a summary", async () => {
     const admin = await asAdmin();
-    await imp(admin, [NEW_ROW, { sku_id: "GB-001", name: "ທອງຄຳແທ່ງ 1 ບາດ", type: "ທອງຄຳແທ່ງ", grams: 15.244, avg_daily_sell: 7, lead_time_days: 3 }, { sku_id: "GB-002" }]);
+    await imp(admin, [NEW_ROW, { sku_id: "GB-001", name: "ທອງຄຳແທ່ງ 1 ບາດ", type: "ທອງຄຳແທ່ງ", grams: 15.244, min_qty: 7, lead_time_days: 3 }, { sku_id: "GB-002" }]);
     const log = await store().auditLog({ limit: 50 });
     const rows = log.filter((e) => e.action === "sku.import_row");
     expect(rows).toHaveLength(2);
     const gb = rows.find((e) => e.target === "GB-001")!;
-    expect(gb.detail).toMatchObject({ branch_id: "B-MM", before: { avg_daily_sell: 2.5 }, after: { avg_daily_sell: 7 } });
+    expect(gb.detail).toMatchObject({ branch_id: "B-MM", before: { min_qty: 13 }, after: { min_qty: 7 } });
     const summary = log.find((e) => e.action === "sku.import")!;
     expect(summary.detail).toMatchObject({ fileName: "skus.xlsx", branchId: "B-MM", created: 1, updated: 1, unchanged: 1 });
   });
@@ -241,7 +241,7 @@ describe("SKU export", () => {
     const ids = res.json.rows.map((r: any) => r.sku_id);
     expect(ids).not.toContain("SP-904");
     expect(res.json.rows.find((r: any) => r.sku_id === "GB-001")).toEqual({
-      sku_id: "GB-001", name: "ທອງຄຳແທ່ງ", type: "ທອງຄຳແທ່ງ", grams: 15.244, avg_daily_sell: 2.5, lead_time_days: 3, branch_id: null,
+      sku_id: "GB-001", name: "ທອງຄຳແທ່ງ", type: "ທອງຄຳແທ່ງ", grams: 15.244, min_qty: 13, lead_time_days: 3, branch_id: null,
     });
   });
 

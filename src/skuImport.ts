@@ -5,7 +5,7 @@
 // One row = one SKU in one branch. Blank sku_id = a new SKU; a known sku_id =
 // an update; nothing is ever deleted. Name, type and size are the shared
 // catalogue: a blank cell leaves them as they are, and for a staff / manager a
-// change is ignored (and listed). Avg/day and lead time are the branch's own
+// change is ignored (and listed). Min stock and lead time are the branch's own
 // values: a blank cell leaves the value as it is, "-" clears it (decided
 // 2026-11-17); on a new row both mean "none".
 import type { BranchSku, MasterSku, ReplenishmentRule, SkuType, SkuWeight } from "./types";
@@ -13,7 +13,7 @@ import { stripWeight } from "./skuName";
 
 export const MAX_IMPORT_ROWS = 500;
 export const GRAMS_TOLERANCE = 0.001;
-const MAX_AVG = 9_999_999;
+const MAX_MIN = 999_999;
 const MAX_LEAD = 9999.9;
 
 export interface ExportRow {
@@ -21,7 +21,7 @@ export interface ExportRow {
   name: string;
   type: string;
   grams: number | null;
-  avg_daily_sell: number | null;
+  min_qty: number | null;
   lead_time_days: number | null;
   branch_id: string | null;
 }
@@ -34,7 +34,7 @@ export interface ImportPlan {
   unchanged: number;
   ignored: { line: number; field: CatalogueField }[];
   // Branch values a "-" cell removes (listed apart from other changes).
-  cleared: { line: number; field: "avg_daily_sell" | "lead_time_days" }[];
+  cleared: { line: number; field: "min_qty" | "lead_time_days" }[];
   errors: { line: number; error: string }[];
   // What to write when the plan has no errors.
   // One entry per new SKU (name + type + size); an all-branches file may list
@@ -113,7 +113,7 @@ export function exportRows(input: {
         name: s.name_lo || s.name_en,
         type: type ? typeLabel(type) : s.category,
         grams: s.std_gram_weight ?? null,
-        avg_daily_sell: rule?.avg_daily_sell ?? null,
+        min_qty: rule?.min_qty ?? null,
         lead_time_days: rule?.lead_time_days ?? null,
         branch_id: input.withBranch ? branch : null,
       });
@@ -169,7 +169,7 @@ export function planImport(input: {
     }
 
     // Branch values
-    const avgCell = planCell(row.avg_daily_sell, "avg_daily_sell", MAX_AVG, 3);
+    const avgCell = planCell(row.min_qty, "min_qty", MAX_MIN, 0);
     if (typeof avgCell === "string") return fail(avgCell);
     const leadCell = planCell(row.lead_time_days, "lead_time_days", MAX_LEAD, 1);
     if (typeof leadCell === "string") return fail(leadCell);
@@ -239,10 +239,10 @@ export function planImport(input: {
     }
 
     const rule = ruleOf.get(key);
-    const before = { avg: rule?.avg_daily_sell ?? null, lead: rule?.lead_time_days ?? null };
+    const before = { avg: rule?.min_qty ?? null, lead: rule?.lead_time_days ?? null };
     const nextAvg = valueOf(avgCell, before.avg);
     const nextLead = valueOf(leadCell, before.lead);
-    if (avgCell.kind === "clear" && before.avg !== null) plan.cleared.push({ line, field: "avg_daily_sell" });
+    if (avgCell.kind === "clear" && before.avg !== null) plan.cleared.push({ line, field: "min_qty" });
     if (leadCell.kind === "clear" && before.lead !== null) plan.cleared.push({ line, field: "lead_time_days" });
     const ruleChanged = before.avg !== nextAvg || before.lead !== nextLead;
     if (ruleChanged) plan.rules.push({ sku_id: sku.sku_id, branch_id: branch, avg: nextAvg, lead: nextLead, before });

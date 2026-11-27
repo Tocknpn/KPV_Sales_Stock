@@ -110,7 +110,7 @@ r.get("/documents/proposal-source", async (c) => {
   const [existing, skus, rules, config, desks] = await Promise.all([liveProposal(store, deskId, date), store.skus(), store.rules(), store.config(), store.desks()]);
   const branchId = desks.find((d) => d.desk_id === deskId)?.branch_id ?? "";
   const leadDays: Record<string, number> = {};
-  for (const sku of skus) leadDays[sku.sku_id] = resolveParams(sku, rules, config, null, branchId).lead.value;
+  for (const sku of skus) leadDays[sku.sku_id] = resolveParams(sku, rules, config, branchId).lead.value;
   return c.json({
     desk_id: deskId,
     date,
@@ -133,9 +133,10 @@ r.get("/documents/proposal-source", async (c) => {
       balance: source === "opening" ? row.opening_qty : row.closing_qty,
       lead_days: leadDays[row.sku_id] ?? config.default_lead_time_days,
       branch_status: row.branch_status,
-      runway_days: row.runway_days,
-      lifetime_alert: row.lifetime_alert,
-      est_lifetime_days: row.est_lifetime_days,
+      min_qty: row.min_qty,
+      short_by: row.short_by,
+      order_eta: row.order_eta,
+      detail: row.detail,
     })),
   });
 });

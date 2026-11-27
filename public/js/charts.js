@@ -173,19 +173,18 @@ export function renderFillBar(pct, color) {
 // hatch, so it never reads as a status colour. Every band also carries a text
 // label in the legend; colour is never the only cue.
 export const BAND_COLORS = {
-  critical: "#c8301e",
-  warning: "#e0a100",
+  order_now: "#c8301e",
+  late: "#7a1a10",
+  ordered: "#e0a100",
   ok: "#17915f",
-  long: "#5a93dc",
-  no_sales: "#3a5aa8",
-  unknown: "#d1d5db",
+  no_min: "#d1d5db",
 };
 // The single-series bar colour (brand maroon).
 export const BAR_COLOR = "#990000";
 
 const HATCH = "repeating-linear-gradient(135deg, #d1d5db 0 4px, #eceef1 4px 7px)";
 export function bandFill(band) {
-  return band === "unknown" ? HATCH : BAND_COLORS[band];
+  return band === "no_min" ? HATCH : BAND_COLORS[band];
 }
 
 // One tooltip per chart container: any element with data-tip shows it on

@@ -6,7 +6,7 @@ import { api, openDocumentPrint, openPrintTab, fillPrintTabMany, openGroupPrint 
 import { isAdmin, isManager } from "../session.js";
 import { state, branchName, setStoredDocView } from "../state.js";
 import { toast, openSheet, closeSheet, openActionSheet } from "../ui.js";
-import { fmtDate, fmtDateTime, escapeHtml, icon, fmtInt } from "../util.js";
+import { fmtDate, fmtDateTime, escapeHtml, icon, fmtInt, reorderChip, needsOrder } from "../util.js";
 import { t, tf } from "../i18n.js";
 import { skuLabel } from "../sku-groups.js";
 import { skeletonCards, skeletonTable } from "../skeleton.js";
@@ -517,12 +517,10 @@ function setEditorTopbar(title, onBack) {
 
 const ROW_COLS = "grid-cols-[140px_52px_52px_60px_minmax(90px,1fr)_24px]";
 
-const reasonFor = (r) =>
-  r.branch_status === "critical" || r.branch_status === "warning"
-    ? `${t("documents.proposalReasonLow")} (${r.runway_days ?? "–"}${t("stock.daysShort")})`
-    : r.lifetime_alert
-    ? `${t("documents.proposalReasonLifetime")} (${r.est_lifetime_days}${t("stock.daysShort")})`
-    : null;
+// At / below the branch minimum: "Order now · short 3" (or Ordered / Late).
+const reasonFor = (r) => reorderChip(r)?.text ?? null;
+// A new proposal starts each "order now" / late line at what brings it back to its minimum.
+const suggestedQty = (r) => (needsOrder(r.branch_status) && r.short_by > 0 ? String(r.short_by) : "");
 
 function sourceLabel(src) {
   if (!src) return "";
@@ -564,6 +562,7 @@ async function openProposalEditor({ edit } = {}) {
       const s = savedBySku.get(r.sku_id);
       savedBySku.delete(r.sku_id);
       const gramEach = r.gram_each ?? r.std_gram_weight ?? 0;
+      const prefill = s || keepBalance ? "" : suggestedQty(r);
       return {
         sku_id: r.sku_id,
         item: skuLabel(r),
@@ -571,10 +570,10 @@ async function openProposalEditor({ edit } = {}) {
         gramEach,
         leadDays: r.lead_days,
         balance: s && keepBalance ? s.balance ?? null : r.balance,
-        attention: r.branch_status === "critical" || r.branch_status === "warning" || r.lifetime_alert,
+        attention: needsOrder(r.branch_status) || r.branch_status === "ordered",
         reason: reasonFor(r),
-        qty: s?.qty ?? "",
-        weight_g: s?.weight_g ?? "",
+        qty: s ? s.qty ?? "" : prefill,
+        weight_g: s ? s.weight_g ?? "" : prefill && gramEach ? round2(Number(prefill) * gramEach) : "",
         weightTouched: s ? s.weightTouched ?? (s.weight_g != null && Number(s.weight_g) !== round2(Number(s.qty ?? 0) * gramEach)) : false,
         note: s?.note ?? "",
         manual: false,

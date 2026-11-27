@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildExecutive, coverBand, actionFor } from "../src/executive";
+import { buildExecutive, coverBand } from "../src/executive";
 import { computeClosing, stockOutOf } from "../src/logic";
 import type { DocumentRecord, LedgerRow, MasterSku } from "../src/types";
 import type { ReplenishmentRow } from "../src/replenishment";
@@ -12,8 +12,8 @@ function sku(id: string, baht = 1): MasterSku {
 function status(patch: Partial<ReplenishmentRow>): ReplenishmentRow {
   return {
     sku_id: "A", name: "A", name_lo: null, type: "Rings", onHand: 10, inbound: 0, position: 10,
-    avg: { value: 1, source: "auto" }, autoAvg: { value: 1, inStockDays: 30 }, lead: { value: 7, source: "default" },
-    runwayDays: 10, status: "ok", suggestedQty: 0, review: false, ...patch,
+    min: { value: 3, source: "sku" }, lead: { value: 7, source: "default" },
+    status: "ok", shortBy: 0, order: null, ...patch,
   };
 }
 function row(patch: Partial<LedgerRow>): LedgerRow {
@@ -36,30 +36,8 @@ function proposal(patch: Partial<DocumentRecord>, skuId = "A", qty = 5): Documen
 }
 
 describe("cover band", () => {
-  it("follows the runway status, then splits ok stock by how long it lasts", () => {
-    expect(coverBand(status({ status: "critical" }))).toBe("critical");
-    expect(coverBand(status({ status: "warning" }))).toBe("warning");
-    expect(coverBand(status({ status: "no_data", avg: { value: null, source: "none" } }))).toBe("unknown");
-    expect(coverBand(status({ runwayDays: 30 }))).toBe("ok");
-    expect(coverBand(status({ runwayDays: 120 }))).toBe("long");
-    expect(coverBand(status({ avg: { value: 0, source: "sku" }, runwayDays: null }))).toBe("no_sales");
-  });
-});
-
-describe("action on a low SKU", () => {
-  it("is none without a live proposal for that SKU", () => {
-    expect(actionFor([], "B1", "A", TODAY, 10).state).toBe("none");
-    expect(actionFor([proposal({}, "B")], "B1", "A", TODAY, 10).state).toBe("none");
-    expect(actionFor([proposal({}, "A", 0)], "B1", "A", TODAY, 10).state).toBe("none");
-    expect(actionFor([proposal({ branch_id: "B2" })], "B1", "A", TODAY, 10).state).toBe("none");
-  });
-  it("ignores a proposal older than lead time + margin", () => {
-    expect(actionFor([proposal({ doc_date: "2026-11-01" })], "B1", "A", TODAY, 10).state).toBe("none");
-    expect(actionFor([proposal({ doc_date: "2026-11-20" })], "B1", "A", TODAY, 10).state).toBe("pending");
-  });
-  it("prefers an approved proposal over a pending one", () => {
-    const a = actionFor([proposal({ doc_no: "P-1" }), proposal({ doc_no: "P-2", status: "approved", doc_date: "2026-11-22" })], "B1", "A", TODAY, 10);
-    expect(a).toMatchObject({ state: "approved", doc_no: "P-2", qty: 5 });
+  it("is the min-stock status", () => {
+    for (const st of ["order_now", "late", "ordered", "ok", "no_min"] as const) expect(coverBand(status({ status: st }))).toBe(st);
   });
 });
 
@@ -78,20 +56,20 @@ describe("executive overview", () => {
     branchIds: ["B1"],
   };
 
-  it("values stock, works out value-weighted days of cover and flags unanswered low SKUs", () => {
+  it("values stock, counts SKUs to order and lists what is held over 3x its minimum", () => {
     const statuses = new Map([
-      ["B1|A", status({ sku_id: "A", position: 2, onHand: 2, runwayDays: 1, status: "critical", avg: { value: 2, source: "auto" } })],
-      ["B1|B", status({ sku_id: "B", position: 40, onHand: 40, runwayDays: 200, avg: { value: 0.2, source: "auto" } })],
+      ["B1|A", status({ sku_id: "A", position: 2, onHand: 2, status: "order_now", shortBy: 1 })],
+      ["B1|B", status({ sku_id: "B", position: 40, onHand: 40, min: { value: 5, source: "sku" } })],
+      ["B1|C", status({ sku_id: "C", position: 1, onHand: 1, status: "ordered", shortBy: 2, order: { doc_no: "P-1", doc_date: TODAY, state: "pending", qty: 5, eta: "2026-12-02" } })],
     ]);
-    const ex = buildExecutive({ ...base, statuses, ledger: [], proposals: [] });
-    // A: 2 x 1 Baht, B: 40 x 0.5 Baht, at 1000 LAK/Baht.
-    expect(ex.headline.value_lak).toBe(22000);
-    // (2000 + 20000) / (2*1000 + 0.2*500) = 22000 / 2100
-    expect(ex.headline.cover_days).toBe(10.5);
-    expect(ex.decisions.counts.critical.none).toBe(1);
-    expect(ex.slow.items.map((s) => s.sku_id)).toEqual(["B"]);
-    // B holds 40, 90 days needs 18: 22 pieces x 0.5 Baht x 1000 over.
-    expect(ex.slow.excess_lak).toBe(11000);
+    const ex = buildExecutive({ ...base, skus: [...base.skus, sku("C")], statuses, ledger: [], proposals: [proposal({})] });
+    // A: 2 x 1 Baht, B: 40 x 0.5 Baht, C: 1 x 1 Baht, at 1000 LAK/Baht.
+    expect(ex.headline.value_lak).toBe(23000);
+    expect(ex.headline.baht).toBe(23);
+    expect(ex.decisions.counts).toEqual({ order_now: 1, late: 0, ordered: 1 });
+    expect(ex.decisions.items.map((d) => [d.sku_id, d.action, d.eta])).toEqual([["A", "none", null], ["C", "pending", "2026-12-02"]]);
+    // B holds 40, 3 x min = 15: 25 over.
+    expect(ex.slow.items.map((s) => [s.sku_id, s.excess_qty])).toEqual([["B", 25]]);
   });
 
   it("ranks stock out in the period and compares with the period before", () => {
